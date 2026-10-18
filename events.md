@@ -1,0 +1,11 @@
+session.created|会话开始
+message.user|来自用户的信息
+message.system|系统推送信息
+message.assistant|LLM输出的语句
+thoughts.segment|LLM的流式思维链
+tool.call|工具调用
+tool.result|工具返回的结果
+task.created|任务创建
+task.updated|任务状态更新
+token.recorded|一轮对话的token数记录，包括输入、输出和缓存命中，并自动按预设价格计算金额
+context.injected|上下文扩充
