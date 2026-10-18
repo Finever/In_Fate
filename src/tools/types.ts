@@ -18,6 +18,8 @@ export interface ToolResult {
   readonly structured?: unknown
   readonly bytes?: number
   readonly encoding?: string
+  /** 调用方指定、但实际回退过的编码 */
+  readonly requestedEncoding?: string
   readonly mime?: string
   /** 大输出溢出到 spill 后留下的引用 */
   readonly ref?: string

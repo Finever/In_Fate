@@ -58,6 +58,16 @@ const bash = await executeTool('bash', { command: 'echo hello' }, { ...base, cal
 const bashStructured = bash.structured as { code: number; stdout: string }
 console.log('bash:', JSON.stringify(bashStructured), 'isError=', bash.isError)
 
+// GBK 字节：中、文（D6D0 CEC4），交给 cat 原样输出，验证自动回退
+const gbkFile = join(dir, 'gbk.txt')
+writeFileSync(gbkFile, Buffer.from([0xd6, 0xd0, 0xce, 0xc4]))
+const gbk = await executeTool(
+  'bash',
+  { command: `cat "${gbkFile.replace(/\\/g, '/')}"` },
+  { ...base, callId: 'c11' },
+)
+console.log('gbk auto:', JSON.stringify(gbk.text), 'encoding=', gbk.encoding)
+
 const server = createServer((request, response) => {
   if (request.method === 'POST' && request.url === '/v1/tools/search') {
     response.writeHead(200, { 'content-type': 'application/json' })

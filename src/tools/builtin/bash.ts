@@ -26,11 +26,38 @@ function shellFor(): Shell {
   return { path: '/bin/sh', args: command => ['-lc', command] }
 }
 
+interface Decoded {
+  readonly text: string
+  readonly encoding: string
+}
+
+/**
+ * 自动识别编码：不猜场景，猜字节。
+ * 默认先 UTF-8（fatal，遇到非法字节直接抛），失败再 GBK；
+ * 显式指定的编码先试，失败回退到另一种。
+ */
+export function decodeAuto(buffer: Buffer, requested?: string): Decoded {
+  const order = requested
+    ? [requested, requested.toLowerCase().startsWith('utf') ? 'gbk' : 'utf-8']
+    : ['utf-8', 'gbk']
+
+  for (const encoding of order) {
+    try {
+      return { text: new TextDecoder(encoding, { fatal: true }).decode(buffer), encoding }
+    } catch {
+      // 换下一种
+    }
+  }
+
+  const fallback = order[order.length - 1]
+  return { text: new TextDecoder(fallback).decode(buffer), encoding: fallback }
+}
+
 function execute(
   shell: Shell,
   command: string,
   cwd: string,
-  encoding: string,
+  requested: string | undefined,
   context: ToolContext,
 ): Promise<ToolResult> {
   return new Promise((resolve, reject) => {
@@ -47,14 +74,23 @@ function execute(
     child.on('error', reject)
 
     child.on('close', (code: number | null) => {
-      const out = new TextDecoder(encoding).decode(Buffer.concat(stdout))
-      const err = new TextDecoder(encoding).decode(Buffer.concat(stderr))
-      const text = [out, err].filter(part => part.length > 0).join('\n')
+      const out = decodeAuto(Buffer.concat(stdout), requested)
+      const err = decodeAuto(Buffer.concat(stderr), requested)
+      const text = [out.text, err.text].filter(part => part.length > 0).join('\n')
+      const encoding = out.encoding
+      const requestedEncoding = requested && requested !== encoding ? requested : undefined
+
       resolve({
         text,
-        structured: { code, stdout: out, stderr: err },
+        structured: {
+          code,
+          stdout: out.text,
+          stderr: err.text,
+          encodings: { stdout: out.encoding, stderr: err.encoding },
+        },
         bytes: Buffer.byteLength(text, 'utf8'),
         encoding,
+        ...(requestedEncoding ? { requestedEncoding } : {}),
         isError: code !== 0,
       })
     })
@@ -83,7 +119,7 @@ export const bashTool: ToolDefinition = {
       shellFor(),
       input.command,
       input.cwd ?? context.cwd,
-      input.encoding ?? 'utf-8',
+      input.encoding,
       context,
     )
   },
