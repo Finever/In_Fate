@@ -22,6 +22,7 @@ export type CoreEventType =
   | 'task.created'
   | 'task.updated'
   | 'token.recorded'
+  | 'turn.completed'
   | 'context.injected'
 
 /** 允许任意字符串，同时保留内置类型的补全。扩展类型用 `x.` 前缀。 */

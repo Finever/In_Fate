@@ -43,6 +43,7 @@ export function registerCoreEvents(): void {
     'task.created',
     'task.updated',
     'token.recorded',
+    'turn.completed',
     'context.injected',
   ]
   for (const type of core) {
