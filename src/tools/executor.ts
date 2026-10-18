@@ -1,0 +1,141 @@
+/**
+ * 工具执行管线：pre → guard → 审批 → around → run → post → result。
+ *
+ * 任何一段都可以注册监听器，工具本体不感知审计、限流、脱敏。
+ * 错误一律归一成 isError 的结果，不把异常漏给上层。
+ *
+ * @module if/tools/executor
+ */
+
+import { validateValue } from './schema.ts'
+import type { ToolRegistry } from './registry.ts'
+import type {
+  ApprovalRegistry,
+  DispatchDecision,
+  ToolContext,
+  ToolResult,
+} from './types.ts'
+
+export interface PipelineHooks {
+  pre?: (name: string, args: unknown, context: ToolContext) => unknown | { readonly cancel: true } | void
+  guard?: (name: string, args: unknown, context: ToolContext) => 'allow' | 'ask' | 'deny' | void
+  around?: (name: string, run: () => Promise<ToolResult>, context: ToolContext) => Promise<ToolResult>
+  post?: (name: string, result: ToolResult, context: ToolContext) => ToolResult | void
+  result?: (name: string, result: ToolResult, context: ToolContext) => void
+}
+
+export interface ExecuteOptions {
+  readonly registry: ToolRegistry
+  readonly approvals: ApprovalRegistry
+  readonly callId: string
+  readonly sessionId: string
+  readonly cwd: string
+  readonly signal?: AbortSignal
+  readonly timeoutMs?: number
+  readonly hooks?: PipelineHooks
+}
+
+function errorResult(text: string): ToolResult {
+  return { text, isError: true }
+}
+
+function isCancel(value: unknown): value is { readonly cancel: true } {
+  return typeof value === 'object' && value !== null && 'cancel' in value
+}
+
+function requestApproval(
+  name: string,
+  args: unknown,
+  options: ExecuteOptions,
+  context: ToolContext,
+): Promise<DispatchDecision> {
+  const approvalId = `${options.sessionId}:${options.callId}:${name}`
+  return new Promise(resolve => {
+    options.approvals.request({
+      approvalId,
+      sessionId: options.sessionId,
+      toolCallId: options.callId,
+      toolName: name,
+      originalInput: (typeof args === 'object' && args !== null ? args : {}) as Record<string, unknown>,
+      signal: context.signal,
+      resolve,
+    })
+  })
+}
+
+export async function executeTool(
+  name: string,
+  rawArgs: unknown,
+  options: ExecuteOptions,
+): Promise<ToolResult> {
+  const tool = options.registry.get(name)
+  if (!tool) return errorResult(`unknown tool: ${name}`)
+
+  const descriptor = options.registry.list({ includeDisabled: true }).find(item => item.name === name)
+  if (!descriptor?.enabled) return errorResult(`tool disabled: ${name}`)
+
+  const issues = validateValue(tool.inputSchema, rawArgs)
+  if (issues.length > 0) {
+    return errorResult(`invalid arguments: ${issues.map(issue => `${issue.path} ${issue.message}`).join('; ')}`)
+  }
+
+  const controller = new AbortController()
+  const external = options.signal
+  const onAbort = (): void => controller.abort(external?.reason)
+  external?.addEventListener('abort', onAbort, { once: true })
+
+  const timeoutMs = options.timeoutMs ?? options.registry.timeoutOf(name)
+  const timer = setTimeout(() => controller.abort(new Error('tool timeout')), timeoutMs)
+
+  const context: ToolContext = {
+    sessionId: options.sessionId,
+    callId: options.callId,
+    cwd: options.cwd,
+    signal: controller.signal,
+    approvals: options.approvals,
+  }
+
+  try {
+    let args = rawArgs
+
+    // pre：补默认、归一、拒绝
+    if (options.hooks?.pre) {
+      const output = options.hooks.pre(name, args, context)
+      if (isCancel(output)) return errorResult('cancelled by pre hook')
+      if (output !== undefined) args = output
+    }
+
+    // guard：策略优先，默认按注册表的 approval
+    const guard = options.hooks?.guard?.(name, args, context)
+    const mode = guard ?? (descriptor.approval === 'required' ? 'ask' : 'allow')
+    if (mode === 'deny') return errorResult('denied by policy')
+    if (mode === 'ask') {
+      const decision = await requestApproval(name, args, options, context)
+      if (!decision.approved) return errorResult(decision.reason ?? 'denied')
+      if (decision.updatedInput) args = decision.updatedInput
+    }
+
+    const run = async (): Promise<ToolResult> => tool.run(args, context)
+    let result = options.hooks?.around
+      ? await options.hooks.around(name, run, context)
+      : await run()
+
+    // post：改写、脱敏、裁剪
+    if (options.hooks?.post) {
+      result = options.hooks.post(name, result, context) ?? result
+    }
+
+    if (tool.finalizeContent) result = tool.finalizeContent(result)
+    if (tool.presentResult) {
+      result = { ...result, presentation: tool.presentResult(args, result) }
+    }
+
+    options.hooks?.result?.(name, result, context)
+    return result
+  } catch (error) {
+    return errorResult(error instanceof Error ? error.message : String(error))
+  } finally {
+    clearTimeout(timer)
+    external?.removeEventListener('abort', onAbort)
+  }
+}
