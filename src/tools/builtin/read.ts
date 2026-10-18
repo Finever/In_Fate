@@ -25,7 +25,7 @@ const MIME: Record<string, string> = {
 
 export const readTool: ToolDefinition = {
   name: 'read',
-  description: '读取文件内容。中文 Windows 文件可指定 gbk。',
+  description: '读取文件内容。适合查看源码、配置、日志；大文件先定位再读。中文 Windows 文件可指定 gbk。',
   inputSchema: {
     type: 'object',
     properties: {

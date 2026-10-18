@@ -9,7 +9,7 @@ import type { ToolDefinition } from '../types.ts'
 
 export const writeTool: ToolDefinition = {
   name: 'write',
-  description: '写入文件，覆盖原内容。',
+  description: '写文件，覆盖原内容。整文件写入用它；改局部用 edit。',
   inputSchema: {
     type: 'object',
     properties: {

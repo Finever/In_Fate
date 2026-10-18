@@ -9,7 +9,7 @@ import type { ToolDefinition } from '../types.ts'
 
 export const editTool: ToolDefinition = {
   name: 'edit',
-  description: '精确替换文件中的一段文本；默认要求匹配唯一。',
+  description: '精确替换文件中的一段文本。old_string 默认要求唯一；多处替换设 replace_all。',
   inputSchema: {
     type: 'object',
     properties: {

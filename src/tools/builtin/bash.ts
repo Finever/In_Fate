@@ -63,7 +63,7 @@ function execute(
 
 export const bashTool: ToolDefinition = {
   name: 'bash',
-  description: '执行 shell 命令。中文 Windows 输出可指定 gbk。',
+  description: '执行 shell 命令。适合跑测试、git、构建。中文 Windows 输出可指定 gbk；长输出用 head/tail 截断。',
   inputSchema: {
     type: 'object',
     properties: {

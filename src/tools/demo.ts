@@ -14,6 +14,7 @@ import { bashTool } from './builtin/bash.ts'
 import { editTool } from './builtin/edit.ts'
 import { fetchTool } from './builtin/fetch.ts'
 import { readTool } from './builtin/read.ts'
+import { websearchTool } from './builtin/websearch.ts'
 import { writeTool } from './builtin/write.ts'
 import { executeTool } from './executor.ts'
 import { ToolRegistry } from './registry.ts'
@@ -23,7 +24,7 @@ const file = join(dir, 'a.md')
 writeFileSync(file, 'hello world\n', 'utf8')
 
 const registry = new ToolRegistry()
-for (const tool of [readTool, writeTool, editTool, bashTool, fetchTool]) {
+for (const tool of [readTool, writeTool, editTool, bashTool, fetchTool, websearchTool]) {
   registry.register(tool)
 }
 registry.update('write', { approval: 'auto' })
@@ -57,7 +58,19 @@ const bash = await executeTool('bash', { command: 'echo hello' }, { ...base, cal
 const bashStructured = bash.structured as { code: number; stdout: string }
 console.log('bash:', JSON.stringify(bashStructured), 'isError=', bash.isError)
 
-const server = createServer((_request, response) => {
+const server = createServer((request, response) => {
+  if (request.method === 'POST' && request.url === '/v1/tools/search') {
+    response.writeHead(200, { 'content-type': 'application/json' })
+    response.end(JSON.stringify({
+      results: [{ url: 'https://example.com', title: '示例', snippet: '搜索摘要' }],
+    }))
+    return
+  }
+  if (request.method === 'POST' && request.url === '/v1/tools/fetch') {
+    response.writeHead(200, { 'content-type': 'application/json' })
+    response.end(JSON.stringify({ content: '# 抓取结果' }))
+    return
+  }
   response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' })
   response.end('fetched')
 })
@@ -72,6 +85,20 @@ const fetched = await executeTool(
 )
 const fetchStructured = fetched.structured as { status: number }
 console.log('fetch:', JSON.stringify(fetched.text), 'status=', fetchStructured.status)
+
+process.env.DEEPSEEK_API_KEY = 'test-key'
+process.env.DEEPSEEK_WEB_API_BASE = `http://127.0.0.1:${port}/v1/tools`
+
+const search = await executeTool('websearch', { query: 'In_Fate' }, { ...base, callId: 'c9' })
+console.log('websearch:', JSON.stringify(search.text))
+
+const deepseek = await executeTool(
+  'fetch',
+  { url: 'https://example.com', backend: 'deepseek' },
+  { ...base, callId: 'c10' },
+)
+console.log('fetch(deepseek):', JSON.stringify(deepseek.text), deepseek.mime)
+
 server.close()
 
 const denied = await executeTool(
