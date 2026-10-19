@@ -85,6 +85,39 @@ function textOf(event: Event): string {
   return String(event.payload.text ?? '')
 }
 
+/** `YYYY-MM-DD HH:mm`，用于和模型复制的标签比对。 */
+function localStamp(ts: string, timeZone: string): string {
+  return new Intl.DateTimeFormat('sv-SE', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(new Date(ts))
+}
+
+function minutesOf(stamp: string): number {
+  const [date, time] = stamp.split(' ')
+  const [year, month, day] = date.split('-').map(Number)
+  const [hour, minute] = time.split(':').map(Number)
+  return Date.UTC(year, month - 1, day, hour, minute) / 60_000
+}
+
+/**
+ * 模型会模仿消息前的时间标签。只去掉“与本条消息时间相差 ≤2 分钟、
+ * 且恰好在开头”的那一个；事件原文不动，投影时清洗。
+ */
+function stripEchoedTimeTag(text: string, ts: string, timeZone: string): string {
+  const match = /^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\]\s*/.exec(text)
+  if (!match) return text
+  const echoed = minutesOf(match[1])
+  const actual = minutesOf(localStamp(ts, timeZone))
+  if (!Number.isFinite(echoed) || Math.abs(echoed - actual) > 2) return text
+  return text.slice(match[0].length)
+}
+
 /** 投影。输入事件数组，输出消息数组；同样的输入永远同样的输出。 */
 export function projectHistory(
   events: readonly Event[],
@@ -144,7 +177,8 @@ export function projectHistory(
 
       case 'message.assistant': {
         const message = openAssistant(event)
-        message.content.push({ type: 'text', text: tag(event) + textOf(event) })
+        const body = stripEchoedTimeTag(textOf(event), event.ts, timeZone)
+        message.content.push({ type: 'text', text: tag(event) + body })
         break
       }
 
