@@ -210,7 +210,9 @@ export async function runSubagent(
           hooks: {
             guard: name => {
               const policy = runtime.tools.policy(name)
-              return policy?.approval === 'required' ? 'deny' : 'allow'
+              if (policy?.approval !== 'required') return 'allow'
+              // 只读预设拒绝；非只读预设放行它白名单里的工具。
+              return preset.readOnly ? 'deny' : 'allow'
             },
           },
         })
