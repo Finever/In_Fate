@@ -32,6 +32,8 @@ export interface ExecuteOptions {
   readonly cwd: string
   readonly signal?: AbortSignal
   readonly timeoutMs?: number
+  /** 审批无人应答时的超时，默认 60 秒后按拒绝处理 */
+  readonly approvalTimeoutMs?: number
   readonly hooks?: PipelineHooks
 }
 
@@ -43,6 +45,12 @@ function isCancel(value: unknown): value is { readonly cancel: true } {
   return typeof value === 'object' && value !== null && 'cancel' in value
 }
 
+function timeoutFromArgs(args: unknown): number | undefined {
+  if (typeof args !== 'object' || args === null || !('timeoutMs' in args)) return undefined
+  const value = (args as { timeoutMs?: unknown }).timeoutMs
+  return typeof value === 'number' && value > 0 ? value : undefined
+}
+
 function requestApproval(
   name: string,
   args: unknown,
@@ -51,6 +59,10 @@ function requestApproval(
 ): Promise<DispatchDecision> {
   const approvalId = `${options.sessionId}:${options.callId}:${name}`
   return new Promise(resolve => {
+    const timer = setTimeout(() => {
+      options.approvals.respond(approvalId, { approved: false, reason: 'approval timeout' })
+    }, options.approvalTimeoutMs ?? 60_000)
+
     options.approvals.request({
       approvalId,
       sessionId: options.sessionId,
@@ -58,7 +70,10 @@ function requestApproval(
       toolName: name,
       originalInput: (typeof args === 'object' && args !== null ? args : {}) as Record<string, unknown>,
       signal: context.signal,
-      resolve,
+      resolve: decision => {
+        clearTimeout(timer)
+        resolve(decision)
+      },
     })
   })
 }
@@ -84,7 +99,7 @@ export async function executeTool(
   const onAbort = (): void => controller.abort(external?.reason)
   external?.addEventListener('abort', onAbort, { once: true })
 
-  const timeoutMs = options.timeoutMs ?? options.registry.timeoutOf(name)
+  const timeoutMs = options.timeoutMs ?? timeoutFromArgs(rawArgs) ?? options.registry.timeoutOf(name)
   const timer = setTimeout(() => controller.abort(new Error('tool timeout')), timeoutMs)
 
   const context: ToolContext = {

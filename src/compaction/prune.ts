@@ -1,14 +1,15 @@
 /**
- * 工具结果裁剪：超过阈值的文本换成预览 + spill 引用。
+ * 工具结果裁剪：超过阈值的 payload 换成预览 + spill 引用。
  *
  * 原事件不改；裁剪结果写成 compaction.pruned，投影时应用。
+ * 每条结果独立预览，不共享一段合并文本。
  *
  * @module if/compaction/prune
  */
 
 import type { Event } from '../core/events.ts'
 import type { SpillPolicy } from '../tools/spill.ts'
-import type { PrunePayload } from './types.ts'
+import type { PruneItem, PrunePayload } from './types.ts'
 
 export interface Prunable {
   readonly eventId: string
@@ -20,17 +21,31 @@ export function findPrunable(events: readonly Event[], thresholdBytes: number): 
   const already = new Set<string>()
   for (const event of events) {
     if (event.type !== 'compaction.pruned') continue
-    for (const id of event.payload.eventIds as readonly string[] ?? []) already.add(String(id))
+    const payload = event.payload as unknown as PrunePayload
+    if (Array.isArray(payload.items)) {
+      for (const item of payload.items) already.add(item.eventId)
+    } else {
+      for (const id of payload.eventIds ?? []) already.add(String(id))
+    }
   }
 
   const out: Prunable[] = []
   for (const event of events) {
     if (event.type !== 'tool.result') continue
     if (already.has(event.id)) continue
+
     const text = String(event.payload.text ?? '')
-    const bytes = Buffer.byteLength(text, 'utf8')
+    const structured = event.payload.structured
+    const bytes = Buffer.byteLength(JSON.stringify(event.payload), 'utf8')
     if (bytes <= thresholdBytes) continue
-    out.push({ eventId: event.id, text, bytes })
+
+    const content = text.length > 0
+      ? text
+      : structured !== undefined
+        ? JSON.stringify(structured)
+        : ''
+
+    out.push({ eventId: event.id, text: content, bytes })
   }
   return out
 }
@@ -39,13 +54,16 @@ export function buildPrunePayload(
   items: readonly Prunable[],
   spill: SpillPolicy,
 ): PrunePayload {
-  const texts = items.map(item => item.text).join('\n\n---\n\n')
-  const spilled = spill.apply(texts)
-  return {
-    eventIds: items.map(item => item.eventId),
-    ref: spilled.ref,
-    preview: spilled.text.slice(0, spill.previewChars),
-    beforeBytes: items.reduce((sum, item) => sum + item.bytes, 0),
-    afterBytes: Buffer.byteLength(spilled.text, 'utf8'),
-  }
+  const pruned: PruneItem[] = items.map(item => {
+    const spilled = spill.apply(item.text)
+    return {
+      eventId: item.eventId,
+      preview: spilled.text.slice(0, spill.previewChars),
+      ...(spilled.ref ? { ref: spilled.ref } : {}),
+      beforeBytes: item.bytes,
+      afterBytes: Buffer.byteLength(spilled.text, 'utf8'),
+    }
+  })
+
+  return { items: pruned }
 }

@@ -64,25 +64,39 @@ export interface CompactionPayload {
   readonly rolledFrom?: string
   readonly summary: CompactionSummary
   readonly stats: CompactionStats
+  /** 第几轮触发，用于冷却判断 */
+  readonly turn?: number
   readonly trigger: 'auto' | 'manual'
   readonly phase: 'turn-start' | 'in-loop'
   readonly strategy: string
 }
 
-export interface PrunePayload {
-  readonly eventIds: readonly string[]
-  readonly ref?: string
+export interface PruneItem {
+  readonly eventId: string
   readonly preview: string
+  readonly ref?: string
   readonly beforeBytes: number
   readonly afterBytes: number
 }
 
+export interface PrunePayload {
+  readonly items: readonly PruneItem[]
+  /** 兼容旧事件：items 缺失时才看这些字段 */
+  readonly eventIds?: readonly string[]
+  readonly preview?: string
+  readonly ref?: string
+  readonly beforeBytes?: number
+  readonly afterBytes?: number
+}
+
 export interface ExtractedFacts {
   readonly users: readonly string[]
+  /** 定时任务/系统推送：压缩后不能丢 */
+  readonly system: readonly string[]
   readonly assistant: readonly string[]
   readonly tools: readonly { readonly name: string; readonly args: string; readonly result: string }[]
   readonly errors: readonly { readonly what: string; readonly error: string }[]
-  readonly tasks: readonly { readonly id: string; readonly state: string }[]
+  readonly tasks: readonly { readonly id: string; readonly state: string; readonly title: string }[]
 }
 
 /** 摘要生成器：给模型或兜底实现用 */

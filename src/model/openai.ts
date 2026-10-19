@@ -148,6 +148,7 @@ export async function* chatOpenAI(request: ChatRequest): AsyncGenerator<ModelEve
             delta?: {
               content?: string
               reasoning_content?: string
+              reasoning?: string
               tool_calls?: {
                 index: number
                 id?: string
@@ -160,6 +161,8 @@ export async function* chatOpenAI(request: ChatRequest): AsyncGenerator<ModelEve
             prompt_tokens?: number
             completion_tokens?: number
             prompt_tokens_details?: { cached_tokens?: number }
+            prompt_cache_hit_tokens?: number
+            cache_read_input_tokens?: number
           }
         }
 
@@ -167,7 +170,8 @@ export async function* chatOpenAI(request: ChatRequest): AsyncGenerator<ModelEve
         const delta = choice?.delta
 
         if (delta?.content) yield { type: 'text', text: String(delta.content) }
-        if (delta?.reasoning_content) yield { type: 'reasoning', text: String(delta.reasoning_content) }
+        const reasoning = delta?.reasoning_content ?? delta?.reasoning
+        if (reasoning) yield { type: 'reasoning', text: String(reasoning) }
 
         for (const call of delta?.tool_calls ?? []) {
           const entry = toolCalls.get(call.index) ?? { id: '', name: '', arguments: '' }
@@ -194,7 +198,9 @@ export async function* chatOpenAI(request: ChatRequest): AsyncGenerator<ModelEve
             type: 'usage',
             input: json.usage.prompt_tokens,
             output: json.usage.completion_tokens,
-            cacheRead: json.usage.prompt_tokens_details?.cached_tokens,
+            cacheRead: json.usage.prompt_tokens_details?.cached_tokens
+              ?? json.usage.prompt_cache_hit_tokens
+              ?? json.usage.cache_read_input_tokens,
           }
         }
       }

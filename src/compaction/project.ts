@@ -7,7 +7,7 @@
  */
 
 import type { Event } from '../core/events.ts'
-import type { CompactionPayload, PrunePayload } from './types.ts'
+import type { CompactionPayload, PruneItem, PrunePayload } from './types.ts'
 
 export interface CompactionView {
   readonly eventId: string
@@ -16,7 +16,7 @@ export interface CompactionView {
 
 export interface CompactionIndex {
   readonly ranges: readonly { readonly start: number; readonly end: number; readonly payload: CompactionPayload }[]
-  readonly pruned: ReadonlyMap<string, PrunePayload>
+  readonly pruned: ReadonlyMap<string, PruneItem>
 }
 
 /** 找当前有效的压缩节点（没有被别人取代的）。 */
@@ -33,9 +33,17 @@ export function effectiveCompactions(events: readonly Event[]): CompactionView[]
     if (typeof target === 'string' && target.length > 0) superseded.add(target)
   }
 
+  // UUID 没有顺序意义，必须按事件在流里的位置排。
+  const positions = new Map<string, number>()
+  events.forEach((event, index) => positions.set(event.id, index))
+
   return nodes
     .filter(node => !superseded.has(node.eventId))
-    .sort((a, b) => a.payload.anchor.fromEventId.localeCompare(b.payload.anchor.fromEventId))
+    .sort((a, b) => {
+      const left = positions.get(a.payload.anchor.fromEventId) ?? 0
+      const right = positions.get(b.payload.anchor.fromEventId) ?? 0
+      return left - right
+    })
 }
 
 /** 把锚点转成事件下标，顺便收集裁剪映射。 */
@@ -51,11 +59,26 @@ export function buildCompactionIndex(events: readonly Event[]): CompactionIndex 
     }))
     .filter(range => range.start >= 0 && range.end >= range.start)
 
-  const pruned = new Map<string, PrunePayload>()
+  const pruned = new Map<string, PruneItem>()
   for (const event of events) {
     if (event.type !== 'compaction.pruned') continue
     const payload = event.payload as unknown as PrunePayload
-    for (const id of payload.eventIds ?? []) pruned.set(String(id), payload)
+
+    if (Array.isArray(payload.items)) {
+      for (const item of payload.items) pruned.set(item.eventId, item)
+      continue
+    }
+
+    // 兼容旧事件：所有 id 共享一段 preview。
+    for (const id of payload.eventIds ?? []) {
+      pruned.set(String(id), {
+        eventId: String(id),
+        preview: payload.preview ?? '',
+        ...(payload.ref ? { ref: payload.ref } : {}),
+        beforeBytes: payload.beforeBytes ?? 0,
+        afterBytes: payload.afterBytes ?? 0,
+      })
+    }
   }
 
   return { ranges, pruned }

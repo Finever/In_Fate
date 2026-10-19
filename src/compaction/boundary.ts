@@ -16,13 +16,25 @@ export interface CompactionRange {
   readonly turns: number
 }
 
+export interface BoundaryOptions {
+  /** 从这条事件之后开始找；用于避开已被压缩覆盖的区间 */
+  readonly afterEventId?: string
+}
+
 export function findCompactionRange(
   events: readonly Event[],
   config: CompactionConfig,
   estimator: TokenEstimator,
   contextWindow: number,
+  options: BoundaryOptions = {},
 ): CompactionRange | null {
-  const { closed } = groupTurns(events, userTurnPolicy)
+  let source = events
+  if (options.afterEventId) {
+    const index = events.findIndex(event => event.id === options.afterEventId)
+    if (index >= 0) source = events.slice(index + 1)
+  }
+
+  const { closed } = groupTurns(source, userTurnPolicy)
   if (closed.length <= config.keepRecentTurns) return null
 
   const tokenBudget = contextWindow * config.keepRecentTokenRatio

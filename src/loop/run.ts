@@ -88,6 +88,7 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
   })
 
   // 轮开始前做一次压缩检查；失败要落痕，但不能阻塞这一轮。
+  const currentTurn = options.store.read().filter(event => event.type === 'turn.completed').length + 1
   if (options.compaction) {
     try {
       const history = projectHistory(options.store.read())
@@ -110,6 +111,8 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
         system: rendered.system,
         tools: options.tools.toModelSpecs(),
         messages: rendered.messages,
+        currentTurn,
+        projectMessages: () => projectHistory(options.store.read()),
         ...(options.compaction.summarizer ? { summarizer: options.compaction.summarizer } : {}),
         ...(options.compaction.spill ? { spill: options.compaction.spill } : {}),
       })
@@ -118,7 +121,10 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
         stream,
         actor: 'system',
         type: 'compaction.failed',
-        payload: { reason: error instanceof Error ? error.message : String(error) },
+        payload: {
+          reason: error instanceof Error ? error.message : String(error),
+          turn: currentTurn,
+        },
       })
     }
   }

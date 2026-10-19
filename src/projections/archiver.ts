@@ -17,6 +17,9 @@ import { groupTurns } from '../turn/policy.ts'
 import type { Projection } from './types.ts'
 
 export interface ArchiveState {
+  /** 真相：已经消费到的最后一条事件 id */
+  readonly lastConsumedEventId: string | null
+  /** 只做缓存，不作真相；旧状态文件可能只有它 */
   readonly consumedLines: number
   readonly turn: number
 }
@@ -26,12 +29,13 @@ export interface ProjectionResult<T> {
   readonly lines: readonly T[]
 }
 
-const EMPTY_STATE: ArchiveState = { consumedLines: 0, turn: 0 }
+const EMPTY_STATE: ArchiveState = { lastConsumedEventId: null, consumedLines: 0, turn: 0 }
 
 function loadState(file: string): ArchiveState {
   if (!existsSync(file)) return EMPTY_STATE
   const raw = JSON.parse(readFileSync(file, 'utf8')) as Partial<ArchiveState>
   return {
+    lastConsumedEventId: raw.lastConsumedEventId ?? null,
     consumedLines: raw.consumedLines ?? 0,
     turn: raw.turn ?? 0,
   }
@@ -106,11 +110,22 @@ export function archiveSession<T>(options: ArchiveOptions<T>): number {
 
   const stateFile = join(options.stateDir ?? join(profile.dataRoot, 'archive'), `${sessionId}.state.json`)
   const state = loadState(stateFile)
-  const fresh = store.readFrom(state.consumedLines)
+  const events = store.read()
 
+  // 游标以事件 id 为准；找不到就报错，不猜、不倒退。
+  let startIndex = 0
+  if (state.lastConsumedEventId) {
+    const index = events.findIndex(event => event.id === state.lastConsumedEventId)
+    if (index < 0) throw new Error(`archive cursor not found: ${state.lastConsumedEventId}`)
+    startIndex = index + 1
+  } else if (state.consumedLines > 0) {
+    // 旧状态文件兼容：只在这一轮用行号，之后写回 id。
+    startIndex = Math.min(state.consumedLines, events.length)
+  }
+
+  const fresh = events.slice(startIndex)
   const result = projectEvents(fresh, profile, projections, policy, sessionId, state.turn)
   if (result.lines.length === 0) {
-    // 即使没有闭合轮，也把状态写回，避免重复读同一段
     saveState(stateFile, state)
     return 0
   }
@@ -120,8 +135,10 @@ export function archiveSession<T>(options: ArchiveOptions<T>): number {
   mkdirSync(dirname(target), { recursive: true })
   appendFileSync(target, result.lines.map(line => JSON.stringify(line)).join('\n') + '\n', { encoding: 'utf8' })
 
+  const consumedEvents = fresh.slice(0, result.consumed)
   saveState(stateFile, {
-    consumedLines: state.consumedLines + result.consumed,
+    lastConsumedEventId: consumedEvents.at(-1)?.id ?? state.lastConsumedEventId,
+    consumedLines: startIndex + result.consumed,
     turn: result.turn,
   })
 

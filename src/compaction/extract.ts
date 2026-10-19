@@ -13,15 +13,20 @@ function clip(text: string, max: number): string {
 
 export function extractFacts(events: readonly Event[]): ExtractedFacts {
   const users: string[] = []
+  const system: string[] = []
   const assistant: string[] = []
   const calls = new Map<string, { name: string; args: string }>()
   const results = new Map<string, string>()
   const errors: { what: string; error: string }[] = []
-  const tasks: { id: string; state: string }[] = []
+  const tasks: { id: string; state: string; title: string }[] = []
 
   for (const event of events) {
     if (event.type === 'message.user') {
       users.push(clip(String(event.payload.text ?? ''), 800))
+      continue
+    }
+    if (event.type === 'message.system') {
+      system.push(clip(String(event.payload.text ?? ''), 400))
       continue
     }
     if (event.type === 'message.assistant') {
@@ -49,12 +54,14 @@ export function extractFacts(events: readonly Event[]): ExtractedFacts {
       tasks.push({
         id: String(event.payload.taskId ?? event.refs?.task ?? ''),
         state: String(event.payload.status ?? event.type),
+        title: String(event.payload.title ?? ''),
       })
     }
   }
 
   return {
     users,
+    system,
     assistant,
     tools: [...calls.entries()].map(([id, call]) => ({
       name: call.name,
@@ -72,7 +79,10 @@ export function extractiveSummary(facts: ExtractedFacts) {
     goal: facts.users.at(-1)?.slice(0, 200) ?? '（未记录目标）',
     constraints: facts.users.filter(text => /不要|必须|只能|禁止/.test(text)).slice(0, 5),
     decisions: facts.assistant.slice(-5).map(text => ({ what: text.slice(0, 120), why: '' })),
-    facts: facts.tools.slice(-8).map(tool => `${tool.name}: ${tool.result.slice(0, 120)}`),
+    facts: [
+      ...facts.system.slice(-5).map(text => `[系统] ${text.slice(0, 120)}`),
+      ...facts.tools.slice(-8).map(tool => `${tool.name}: ${tool.result.slice(0, 120)}`),
+    ],
     failed: facts.errors.slice(0, 5).map(error => ({
       tried: error.what,
       why_failed: error.error.slice(0, 120),
