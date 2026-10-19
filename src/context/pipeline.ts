@@ -11,6 +11,7 @@
 import { createHash } from 'node:crypto'
 import type { Profile } from '../config/profile.ts'
 import type { HistoryMessage } from '../projections/history.ts'
+import { markSystem, type SystemMarkKind } from './marks.ts'
 import type { ContextLayer, ContextSection, PipelineContext } from './types.ts'
 
 export interface InjectionRecord {
@@ -49,10 +50,10 @@ function bytesOf(text: string): number {
   return Buffer.byteLength(text, 'utf8')
 }
 
-function toSystemMessage(text: string): HistoryMessage {
+function toSystemMessage(text: string, kind: SystemMarkKind): HistoryMessage {
   return {
     role: 'system',
-    content: [{ type: 'text', text }],
+    content: [{ type: 'text', text: markSystem(kind, text) }],
     origin: 'agent',
   }
 }
@@ -111,7 +112,7 @@ export function renderContext(options: RenderOptions): RenderedContext {
     }
 
     if (text) {
-      lateMessages.push(toSystemMessage(text))
+      lateMessages.push(toSystemMessage(text, 'injection'))
       used += bytes
     }
     if (output.messages) {
@@ -127,7 +128,7 @@ export function renderContext(options: RenderOptions): RenderedContext {
     if (!output) continue
     const text = output.text ?? ''
     if (text) {
-      lateMessages.push(toSystemMessage(text))
+      lateMessages.push(toSystemMessage(text, 'time'))
       used += bytesOf(text)
     }
     if (output.messages) {

@@ -45,6 +45,9 @@ export function registerCoreEvents(): void {
     'token.recorded',
     'turn.completed',
     'context.injected',
+    'context.compacted',
+    'compaction.pruned',
+    'compaction.failed',
   ]
   for (const type of core) {
     if (!specs.has(type)) defineEvent({ type, version: 1 })

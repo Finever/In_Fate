@@ -8,6 +8,9 @@
  * @module if/projections/history
  */
 
+import { buildCompactionIndex } from '../compaction/project.ts'
+import type { CompactionPayload } from '../compaction/types.ts'
+import { markSystem } from '../context/marks.ts'
 import type { Event } from '../core/events.ts'
 
 export interface TextBlock {
@@ -37,8 +40,8 @@ export interface ChatMessage {
   readonly reasoning?: string
   /** 消息来自哪条事件，审计用；渲染给模型前去掉 */
   readonly sourceEventId?: string
-  /** 定时任务推来的 system 消息标 scheduled */
-  readonly origin?: 'user' | 'scheduled' | 'agent'
+  /** 定时任务推来的 system 消息标 scheduled；压缩摘要标 compaction */
+  readonly origin?: 'user' | 'scheduled' | 'agent' | 'compaction'
 }
 
 export interface ToolMessage {
@@ -96,6 +99,9 @@ export function projectHistory(
   const timeZone = options.timeZone ?? 'Asia/Shanghai'
 
   let currentAssistant: ChatMessage | undefined
+  const compaction = buildCompactionIndex(events)
+  let rangeCursor = 0
+  let skipUntil = -1
 
   const tag = (event: Event): string => (addTime ? formatTimeTag(event.ts, timeZone) : '')
 
@@ -106,15 +112,30 @@ export function projectHistory(
     return currentAssistant
   }
 
-  for (const event of events) {
+  for (let eventIndex = 0; eventIndex < events.length; eventIndex += 1) {
+    const event = events[eventIndex]
+
+    // 压缩区间：在起点插一条摘要，区间内的事件全部跳过。
+    while (
+      rangeCursor < compaction.ranges.length
+      && eventIndex === compaction.ranges[rangeCursor].start
+    ) {
+      const range = compaction.ranges[rangeCursor]
+      messages.push(compactionMessage(range.payload))
+      skipUntil = Math.max(skipUntil, range.end)
+      rangeCursor += 1
+    }
+    if (eventIndex <= skipUntil) continue
+
     switch (event.type) {
       case 'message.user':
       case 'message.system': {
         currentAssistant = undefined
         const scheduled = event.type === 'message.system'
+        const body = tag(event) + textOf(event)
         messages.push({
           role: scheduled ? 'system' : 'user',
-          content: [{ type: 'text', text: tag(event) + textOf(event) }],
+          content: [{ type: 'text', text: scheduled ? markSystem('scheduled', body) : body }],
           sourceEventId: event.id,
           origin: scheduled ? 'scheduled' : 'user',
         })
@@ -150,10 +171,14 @@ export function projectHistory(
 
       case 'tool.result': {
         const id = String(event.payload.callId ?? event.refs?.toolCall ?? '')
+        const prune = compaction.pruned.get(event.id)
+        const content = prune
+          ? `${prune.preview}\n…[pruned, ${prune.beforeBytes} bytes${prune.ref ? ` at ${prune.ref}` : ''}]`
+          : String(event.payload.text ?? '')
         messages.push({
           role: 'tool',
           toolUseId: id,
-          content: String(event.payload.text ?? ''),
+          content,
           isError: Boolean(event.payload.isError),
           sourceEventId: event.id,
         })
@@ -181,4 +206,34 @@ export function projectHistory(
   }
 
   return messages
+}
+
+/** 压缩摘要渲染成一条明确的系统消息，带锚点。 */
+function compactionMessage(payload: CompactionPayload): ChatMessage {
+  const summary = payload.summary
+  const lines = [
+    `目标：${summary.goal}`,
+    summary.constraints.length > 0 ? `约束：${summary.constraints.join('；')}` : '',
+    summary.decisions.length > 0
+      ? `决定：${summary.decisions.map(item => item.what + (item.why ? `（${item.why}）` : '')).join('；')}`
+      : '',
+    summary.facts.length > 0 ? `事实：${summary.facts.join('；')}` : '',
+    summary.failed.length > 0
+      ? `失败：${summary.failed.map(item => `${item.tried}—${item.why_failed}`).join('；')}`
+      : '',
+    summary.open.length > 0 ? `未完成：${summary.open.join('；')}` : '',
+  ].filter(line => line.length > 0)
+
+  return {
+    role: 'system',
+    content: [{
+      type: 'text',
+      text: markSystem('compaction', lines.join('\n'), {
+        stream: payload.anchor.stream,
+        from: payload.anchor.fromEventId,
+        to: payload.anchor.toEventId,
+      }),
+    }],
+    origin: 'compaction',
+  }
 }

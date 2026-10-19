@@ -1,0 +1,92 @@
+/**
+ * 压缩的配置、摘要、锚点与事件载荷。
+ *
+ * 压缩只增不改：原始事件保留，摘要节点带地址，链尾有效。
+ *
+ * @module if/compaction/types
+ */
+
+export interface CompactionConfig {
+  readonly triggerAt: number
+  readonly targetAt: number
+  readonly keepRecentTurns: number
+  /** 保留最近多少比例的窗口 token */
+  readonly keepRecentTokenRatio: number
+  readonly minTurnsBetween: number
+  readonly pruneThresholdBytes: number
+  readonly prunePreviewChars: number
+  readonly summaryMaxTokens: number
+  readonly compactionRetries: number
+  readonly strategy: 'extractive' | 'model' | 'hybrid'
+}
+
+export const DEFAULT_COMPACTION: CompactionConfig = {
+  triggerAt: 0.85,
+  targetAt: 0.4,
+  keepRecentTurns: 12,
+  keepRecentTokenRatio: 0.25,
+  minTurnsBetween: 5,
+  pruneThresholdBytes: 8 * 1024,
+  prunePreviewChars: 500,
+  summaryMaxTokens: 1200,
+  compactionRetries: 1,
+  strategy: 'hybrid',
+}
+
+export interface CompactionAnchor {
+  readonly stream: string
+  readonly fromEventId: string
+  readonly toEventId: string
+  readonly logAddr?: string
+}
+
+export interface CompactionSummary {
+  readonly goal: string
+  readonly constraints: readonly string[]
+  readonly decisions: readonly { readonly what: string; readonly why: string }[]
+  readonly facts: readonly string[]
+  readonly failed: readonly { readonly tried: string; readonly why_failed: string }[]
+  readonly open: readonly string[]
+}
+
+export interface CompactionStats {
+  readonly tokensBefore: number
+  readonly tokensAfter: number
+  readonly foldedCount: number
+  readonly prunedCount: number
+  readonly durationMs?: number
+  readonly model?: string
+}
+
+export interface CompactionPayload {
+  readonly anchor: CompactionAnchor
+  readonly supersedes?: string
+  readonly rolledFrom?: string
+  readonly summary: CompactionSummary
+  readonly stats: CompactionStats
+  readonly trigger: 'auto' | 'manual'
+  readonly phase: 'turn-start' | 'in-loop'
+  readonly strategy: string
+}
+
+export interface PrunePayload {
+  readonly eventIds: readonly string[]
+  readonly ref?: string
+  readonly preview: string
+  readonly beforeBytes: number
+  readonly afterBytes: number
+}
+
+export interface ExtractedFacts {
+  readonly users: readonly string[]
+  readonly assistant: readonly string[]
+  readonly tools: readonly { readonly name: string; readonly args: string; readonly result: string }[]
+  readonly errors: readonly { readonly what: string; readonly error: string }[]
+  readonly tasks: readonly { readonly id: string; readonly state: string }[]
+}
+
+/** 摘要生成器：给模型或兜底实现用 */
+export type Summarizer = (input: {
+  readonly previous?: CompactionSummary
+  readonly facts: ExtractedFacts
+}) => Promise<CompactionSummary>

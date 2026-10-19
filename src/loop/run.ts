@@ -9,6 +9,10 @@
 
 import type { Profile } from '../config/profile.ts'
 import { renderContext, type RenderOptions } from '../context/pipeline.ts'
+import type { TokenEstimator } from '../compaction/estimate.ts'
+import { compactIfNeeded } from '../compaction/fold.ts'
+import type { CompactionConfig, Summarizer } from '../compaction/types.ts'
+import type { SpillPolicy } from '../tools/spill.ts'
 import type { EventStore } from '../core/store.ts'
 import { sessionStream } from '../core/streams.ts'
 import { chatOpenAI, type ChatRequest } from '../model/openai.ts'
@@ -35,6 +39,15 @@ export interface RunLoopOptions {
   readonly now?: () => Date
   /** 流式回调，给 UI 用 */
   readonly onModelEvent?: (event: ModelEvent) => void
+  /** 压缩配置；不传就不压 */
+  readonly compaction?: {
+    readonly config: CompactionConfig
+    readonly estimator: TokenEstimator
+    readonly contextWindow: number
+    readonly maxOutputTokens?: number
+    readonly spill?: SpillPolicy
+    readonly summarizer?: Summarizer
+  }
 }
 
 export interface RunUsage {
@@ -73,6 +86,42 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
     type: 'message.user',
     payload: { text: userText },
   })
+
+  // 轮开始前做一次压缩检查；失败要落痕，但不能阻塞这一轮。
+  if (options.compaction) {
+    try {
+      const history = projectHistory(options.store.read())
+      const rendered = renderContext({
+        sections: options.sections,
+        history,
+        profile: options.profile,
+        sessionId: options.sessionId,
+        turn: 1,
+        now: now(),
+      })
+      await compactIfNeeded({
+        store: options.store,
+        stream,
+        config: options.compaction.config,
+        estimator: options.compaction.estimator,
+        contextWindow: options.compaction.contextWindow,
+        ...(options.compaction.maxOutputTokens !== undefined
+          ? { maxOutputTokens: options.compaction.maxOutputTokens } : {}),
+        system: rendered.system,
+        tools: options.tools.toModelSpecs(),
+        messages: rendered.messages,
+        ...(options.compaction.summarizer ? { summarizer: options.compaction.summarizer } : {}),
+        ...(options.compaction.spill ? { spill: options.compaction.spill } : {}),
+      })
+    } catch (error) {
+      options.store.append({
+        stream,
+        actor: 'system',
+        type: 'compaction.failed',
+        payload: { reason: error instanceof Error ? error.message : String(error) },
+      })
+    }
+  }
 
   const usage: RunUsage = { input: 0, output: 0, cacheRead: 0 }
   let steps = 0
