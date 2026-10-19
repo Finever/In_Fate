@@ -1,0 +1,381 @@
+/**
+ * 默认装配：把配置变成一套能跑的服务。
+ *
+ * 原则：
+ *   - 注册表都是实例，不碰模块级单例；
+ *   - 默认只给只读工具，写/执行工具必须显式启用；
+ *   - 子 agent 与主 agent 共用工具注册表，权限靠预设白名单收窄；
+ *   - 关闭顺序由容器逆序保证，先停调度器再关存储。
+ *
+ * @module if/app/bundle
+ */
+
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
+import type { AgentManager as AgentManagerType } from '../agents/manager.ts'
+import { AgentManager } from '../agents/manager.ts'
+import { PresetRegistry } from '../agents/presets.ts'
+import { runSubagent } from '../agents/run.ts'
+import type { AgentPreset, AgentRequest, AgentResult } from '../agents/types.ts'
+import { TokenEstimator } from '../compaction/estimate.ts'
+import { compactIfNeeded } from '../compaction/fold.ts'
+import type { CompactionConfig, CompactionPayload } from '../compaction/types.ts'
+import { staticSection, memorySection, timeSection } from '../context/sections.ts'
+import type { ContextSection } from '../context/types.ts'
+import { registerCoreEvents } from '../core/registry.ts'
+import { EventStore } from '../core/store.ts'
+import { sessionStream } from '../core/streams.ts'
+import { defaultSources } from '../memory/sources.ts'
+import type { ModelRegistry, ResolvedModel } from '../model/registry.ts'
+import { ModelRegistry as Registry } from '../model/registry.ts'
+import { projectHistory, type HistoryMessage } from '../projections/history.ts'
+import { renderContext } from '../context/pipeline.ts'
+import { runTurn, type RunResult } from '../loop/run.ts'
+import { InMemoryApprovalRegistry } from '../tools/approval.ts'
+import { createAgentControlTools } from '../tools/builtin/agent-control.ts'
+import { bashTool } from '../tools/builtin/bash.ts'
+import { editTool } from '../tools/builtin/edit.ts'
+import { fetchTool } from '../tools/builtin/fetch.ts'
+import { readTool } from '../tools/builtin/read.ts'
+import { createRecallTool } from '../tools/builtin/recall.ts'
+import { createRequestAgentTool } from '../tools/builtin/request-agent.ts'
+import { websearchTool } from '../tools/builtin/websearch.ts'
+import { writeTool } from '../tools/builtin/write.ts'
+import { FileSpillStore, SpillPolicy } from '../tools/spill.ts'
+import { ToolRegistry } from '../tools/registry.ts'
+import type { AppConfig } from './config.ts'
+import type { Container } from './container.ts'
+import { applyPatches, mergeCompaction, mergePool } from './patch.ts'
+import {
+  listAgentRuns,
+  listSessions,
+  newSessionId,
+  sessionFile,
+  type AgentRunInfo,
+  type SessionInfo,
+} from './session.ts'
+
+/** 永远可用的只读工具。 */
+const SAFE_TOOLS = [readTool, fetchTool, websearchTool] as const
+/** 必须显式启用的工具：会改文件或执行命令。 */
+const DANGEROUS_TOOLS = {
+  write: writeTool,
+  edit: editTool,
+  bash: bashTool,
+} as const
+
+export interface ChatOptions {
+  readonly sessionId: string
+  readonly text: string
+  readonly onModelEvent?: Parameters<typeof runTurn>[1]['onModelEvent']
+  readonly signal?: AbortSignal
+}
+
+export interface App {
+  readonly config: AppConfig
+  readonly models: ModelRegistry
+  readonly tools: ToolRegistry
+  readonly presets: PresetRegistry
+  readonly approvals: InMemoryApprovalRegistry
+  readonly agents: AgentManagerType
+  readonly compaction: CompactionConfig
+
+  /** 发起一轮对话，落事件后返回统计。 */
+  chat(options: ChatOptions): Promise<RunResult>
+  /** 当前会话的历史投影。 */
+  history(sessionId: string): readonly HistoryMessage[]
+  /** 手动压缩；返回本次压缩载荷，没有可压的返回 null。 */
+  compact(sessionId: string): Promise<CompactionPayload | null>
+  /** 新建会话 id（不落盘，首次 chat 时创建）。 */
+  createSession(): string
+  /** 列举已有会话。 */
+  sessions(): SessionInfo[]
+
+  requestAgent(input: {
+    preset: string
+    prompt: string
+    context?: string
+    acceptance?: readonly string[]
+    priority?: 'interactive' | 'normal' | 'background'
+    sourceSession: string
+    sourceTurn?: number
+  }): AgentRequest
+  agentStatus(id: string): AgentResult | 'queued' | 'running' | undefined
+  agentList(limit?: number): ReturnType<AgentManagerType['list']>
+  /** 从磁盘读全部 agent 终态，跨进程可用。 */
+  agentRuns(): AgentRunInfo[]
+  agentInterrupt(id: string): boolean
+  /** 等子 agent 到终态；超时返回仍在跑/排队的数量。 */
+  waitForAgents(timeoutMs?: number): Promise<{ active: number; queued: number }>
+
+  dispose(): Promise<void>
+}
+
+export interface BuildOptions {
+  readonly cwd?: string
+  readonly now?: () => Date
+}
+
+export function buildBundle(rawConfig: AppConfig, container: Container, options: BuildOptions = {}): App {
+  registerCoreEvents()
+
+  const config = applyPatches(rawConfig)
+  const cwd = options.cwd ?? process.cwd()
+  const now = options.now ?? ((): Date => new Date())
+
+  const sessionsRoot = join(config.profile.dataRoot, 'sessions')
+  mkdirSync(sessionsRoot, { recursive: true })
+
+  // 每个会话一个 store；同一进程里共用实例，避免重复打开。
+  const stores = new Map<string, EventStore>()
+  const storeFor = (sessionId: string): EventStore => {
+    let store = stores.get(sessionId)
+    if (!store) {
+      store = new EventStore(sessionFile(config.profile.dataRoot, sessionId), {
+        segmentMaxBytes: 8 * 1024 * 1024,
+      })
+      stores.set(sessionId, store)
+    }
+    return store
+  }
+  container.register('sessionStore', storeFor)
+
+  const ensureSession = (sessionId: string): EventStore => {
+    const store = storeFor(sessionId)
+    if (store.lineCount() === 0) {
+      store.append({
+        stream: sessionStream(sessionId),
+        actor: 'system',
+        type: 'session.created',
+        payload: { sessionId, createdAt: now().toISOString() },
+      })
+    }
+    return store
+  }
+
+  // 模型：配置提供，代码不猜。
+  const models = new Registry()
+  for (const provider of config.providers) models.register(provider)
+  container.register('models', models)
+
+  let defaultModel: ResolvedModel
+  try {
+    defaultModel = models.resolve(config.defaultModel.provider, config.defaultModel.model)
+  } catch (error) {
+    throw new Error(`defaultModel: ${error instanceof Error ? error.message : String(error)}`)
+  }
+
+  // 工具：只读默认开，危险工具看名单。
+  const tools = new ToolRegistry()
+  for (const tool of SAFE_TOOLS) tools.register(tool, 'builtin')
+  tools.register(createRecallTool(storeFor, {
+    ...(config.profile.memoryLogRoot ? { memoryLogRoot: config.profile.memoryLogRoot } : {}),
+  }), 'builtin')
+
+  const dangerousEnabled = new Set(config.patch?.tools?.enabled ?? [])
+  for (const [name, tool] of Object.entries(DANGEROUS_TOOLS)) {
+    if (dangerousEnabled.has(name)) tools.register(tool, 'builtin')
+  }
+  container.register('tools', tools)
+
+  // 预设：只从配置来，代码不写死模型名。
+  const presets = new PresetRegistry()
+  for (const preset of config.presets) presets.register(preset)
+  container.register('presets', presets)
+
+  const approvals = new InMemoryApprovalRegistry()
+  container.register('approvals', approvals)
+
+  const pool = mergePool(config.patch?.agents)
+  const compaction = mergeCompaction(config.patch?.compaction)
+  const estimator = new TokenEstimator()
+  const spill = new SpillPolicy(new FileSpillStore(join(config.profile.dataRoot, 'spill')))
+
+  const agents = new AgentManager({
+    storeFactory: storeFor,
+    config: pool,
+    runner: (request, signal, store, stream) => runSubagent(request, signal, store, stream, {
+      tools,
+      approvals,
+      profile: config.profile,
+      cwd,
+      models,
+    }),
+    // 终态回送来源会话；正文自带分类标记，模型能认出这不是用户说的。
+    deliver: (result, request) => {
+      const store = storeFor(request.source.session)
+      const lines = [
+        `子 agent 结束：${result.id}`,
+        `预设：${result.preset}｜状态：${result.status}｜步数：${result.steps}`,
+        result.summary ? `摘要：${result.summary}` : '',
+        result.artifacts.length > 0 ? `产物：${result.artifacts.join('、')}` : '',
+        result.error ? `错误：${result.error}` : '',
+      ].filter(Boolean)
+
+      store.append({
+        stream: sessionStream(request.source.session),
+        actor: 'system',
+        type: 'message.system',
+        refs: { agentRequest: result.id },
+        payload: {
+          text: lines.join('\n'),
+          mark: 'injection',
+          requestId: result.id,
+        },
+      })
+    },
+  })
+  container.register('agents', agents)
+  // 先停调度器：它还会往 store 写终态。
+  container.onDispose('agents', () => agents.dispose())
+
+  // 派活与控制面放在 manager 之后注册：工具创建时要用到它。
+  tools.register(createRequestAgentTool({ manager: agents, presets }), 'builtin')
+  for (const tool of createAgentControlTools({ manager: agents })) {
+    tools.register(tool, 'builtin')
+  }
+
+  // 上下文：请求头 + 身份/记忆 + 时间。记忆读不到就跳过。
+  const sections: ContextSection[] = []
+  if (config.profile.header) sections.push(staticSection('header', config.profile.header, 100))
+  if (config.profile.agentDir) {
+    sections.push(memorySection('memory', defaultSources(config.profile.agentDir), 90))
+  }
+  sections.push(timeSection())
+
+  const maxBytes = config.patch?.context?.maxBytes
+
+  let disposed = false
+
+  const app: App = {
+    config,
+    models,
+    tools,
+    presets,
+    approvals,
+    agents,
+    compaction,
+
+    async chat(input) {
+      const store = ensureSession(input.sessionId)
+      return runTurn(input.text, {
+        store,
+        sessionId: input.sessionId,
+        profile: config.profile,
+        model: defaultModel,
+        tools,
+        approvals,
+        sections,
+        cwd,
+        now,
+        ...(maxBytes !== undefined ? { maxBytes } : {}),
+        ...(input.signal ? { signal: input.signal } : {}),
+        ...(input.onModelEvent ? { onModelEvent: input.onModelEvent } : {}),
+        compaction: {
+          config: compaction,
+          estimator,
+          contextWindow: defaultModel.model.contextWindow ?? 128_000,
+          ...(defaultModel.model.maxOutputTokens !== undefined
+            ? { maxOutputTokens: defaultModel.model.maxOutputTokens }
+            : {}),
+          spill,
+        },
+      })
+    },
+
+    history(sessionId) {
+      return projectHistory(storeFor(sessionId).read())
+    },
+
+    async compact(sessionId) {
+      const store = storeFor(sessionId)
+      const history = projectHistory(store.read())
+      const rendered = renderContext({
+        sections,
+        history,
+        profile: config.profile,
+        sessionId,
+        turn: 1,
+        now: now(),
+        ...(maxBytes !== undefined ? { maxBytes } : {}),
+      })
+      const currentTurn = store.read().filter(event => event.type === 'turn.completed').length + 1
+
+      return compactIfNeeded({
+        store,
+        stream: sessionStream(sessionId),
+        config: compaction,
+        estimator,
+        contextWindow: defaultModel.model.contextWindow ?? 128_000,
+        ...(defaultModel.model.maxOutputTokens !== undefined
+          ? { maxOutputTokens: defaultModel.model.maxOutputTokens }
+          : {}),
+        system: rendered.system,
+        tools: tools.toModelSpecs(),
+        messages: rendered.messages,
+        currentTurn,
+        projectMessages: () => projectHistory(store.read()),
+        spill,
+      })
+    },
+
+    createSession() {
+      return newSessionId(now(), config.profile.timeZone)
+    },
+
+    sessions() {
+      return listSessions(config.profile.dataRoot)
+    },
+
+    requestAgent(input) {
+      const preset: AgentPreset | undefined = presets.get(input.preset)
+      if (!preset) throw new Error(`unknown preset: ${input.preset}`)
+      return agents.submit({
+        preset: preset.id,
+        prompt: input.prompt,
+        ...(input.context ? { context: input.context } : {}),
+        ...(input.acceptance ? { acceptance: input.acceptance } : {}),
+        priority: input.priority ?? 'normal',
+        source: {
+          session: input.sourceSession,
+          ...(input.sourceTurn !== undefined ? { turn: input.sourceTurn } : {}),
+        },
+      }, preset)
+    },
+
+    agentStatus(id) {
+      return agents.status(id)
+    },
+
+    agentList(limit) {
+      return agents.list(limit)
+    },
+
+    agentRuns() {
+      return listAgentRuns(config.profile.dataRoot)
+    },
+
+    agentInterrupt(id) {
+      return agents.interrupt(id)
+    },
+
+    async waitForAgents(timeoutMs = 30_000) {
+      const started = Date.now()
+      while (
+        (agents.activeCount() > 0 || agents.queueLength() > 0)
+        && Date.now() - started < timeoutMs
+      ) {
+        await new Promise(resolve => setTimeout(resolve, 50))
+      }
+      return { active: agents.activeCount(), queued: agents.queueLength() }
+    },
+
+    async dispose() {
+      if (disposed) return
+      disposed = true
+      await container.dispose()
+    },
+  }
+
+  return app
+}

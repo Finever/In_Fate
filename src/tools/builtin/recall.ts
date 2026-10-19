@@ -27,7 +27,13 @@ export interface RecallOptions {
   readonly memoryLogRoot?: string
 }
 
-export function createRecallTool(store: EventStore, options: RecallOptions = {}): ToolDefinition {
+/** 允许按会话取 store：App 里每个会话一份事件文件。 */
+export type RecallStore = EventStore | ((sessionId: string) => EventStore)
+
+export function createRecallTool(store: RecallStore, options: RecallOptions = {}): ToolDefinition {
+  const storeOf = (sessionId: string): EventStore =>
+    typeof store === 'function' ? store(sessionId) : store
+
   return {
     name: 'recall',
     description: '按压缩锚点回查原文。给 logAddr，或给 fromEventId + toEventId。',
@@ -44,7 +50,7 @@ export function createRecallTool(store: EventStore, options: RecallOptions = {})
     },
     meta: { readOnly: true },
 
-    async run(args): Promise<ToolResult> {
+    async run(args, context): Promise<ToolResult> {
       const input = args as RecallInput
       const limit = input.limit ?? 50
 
@@ -81,7 +87,7 @@ export function createRecallTool(store: EventStore, options: RecallOptions = {})
         return { text: 'need logAddr or fromEventId + toEventId', isError: true }
       }
 
-      const events = store.read()
+      const events = storeOf(context.sessionId).read()
       const start = events.findIndex(event => event.id === input.fromEventId)
       const end = events.findIndex(event => event.id === input.toEventId)
       if (start < 0 || end < start) return { text: 'anchor not found', isError: true }

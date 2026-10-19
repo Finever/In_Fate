@@ -15,6 +15,8 @@ import type {
 
 export class InMemoryApprovalRegistry implements ApprovalRegistry {
   private readonly entries = new Map<string, PendingApproval>()
+  /** 有 UI 时由驱动层设置：返回 undefined 表示不接管，继续等外部 respond。 */
+  approvalHandler?: (entry: PendingApproval) => Promise<DispatchDecision> | undefined
 
   request(entry: PendingApproval): boolean {
     if (this.entries.has(entry.approvalId)) {
@@ -35,6 +37,13 @@ export class InMemoryApprovalRegistry implements ApprovalRegistry {
         entry.resolve({ approved: false, reason: 'aborted' })
       }
       entry.signal.addEventListener('abort', onAbort, { once: true })
+    }
+
+    const pending = this.approvalHandler?.(entry)
+    if (pending) {
+      void pending
+        .then(decision => this.respond(entry.approvalId, decision))
+        .catch(() => this.respond(entry.approvalId, { approved: false, reason: 'approval failed' }))
     }
 
     return true

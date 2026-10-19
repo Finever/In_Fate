@@ -166,9 +166,15 @@ export function projectHistory(
         currentAssistant = undefined
         const scheduled = event.type === 'message.system'
         const body = tag(event) + textOf(event)
+        // 系统消息可以自带分类；没写就按定时任务处理。
+        const mark = event.payload.mark
+        const kind = mark === 'compaction' || mark === 'scheduled'
+          || mark === 'injection' || mark === 'time'
+          ? mark
+          : 'scheduled'
         messages.push({
           role: scheduled ? 'system' : 'user',
-          content: [{ type: 'text', text: scheduled ? markSystem('scheduled', body) : body }],
+          content: [{ type: 'text', text: scheduled ? markSystem(kind, body) : body }],
           sourceEventId: event.id,
           origin: scheduled ? 'scheduled' : 'user',
         })

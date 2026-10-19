@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "profile": {
+    "dataRoot": "../data",
+    "memoryLogRoot": "C:/Users/qielan/work/memory",
+    "timeZone": "Asia/Shanghai",
+    "agentDir": "C:/Users/qielan/AppData/Roaming/CherryStudio/Data/Agents/1176f2d6-b2c1-565f-b0bc-0576b28e7195",
+    "header": "你是这个对话世界里的助手。按对话历史与记忆文件行动；不确定就查，不编。",
+    "principals": {
+      "user": { "id": "user", "name": "触久" },
+      "agents": [{ "id": "main", "role": "main" }]
+    }
+  },
+  "providers": [
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "defaultChatEndpoint": "openai-chat-completions",
+      "endpoints": {
+        "openai-chat-completions": {
+          "adapterFamily": "openai",
+          "baseUrl": "https://api.deepseek.com/v1"
+        }
+      },
+      "models": [
+        {
+          "id": "deepseek-chat",
+          "capabilities": ["function-call"],
+          "contextWindow": 128000,
+          "maxOutputTokens": 8192
+        }
+      ],
+      "apiKeyEnv": "DEEPSEEK_API_KEY"
+    }
+  ],
+  "presets": [
+    {
+      "id": "researcher",
+      "description": "读文件、整理事实、写报告。适合查资料和核对细节。",
+      "models": [
+        { "provider": "deepseek", "model": "deepseek-chat" }
+      ],
+      "tools": ["read", "recall", "fetch", "websearch"],
+      "maxSteps": 8,
+      "timeoutMs": 180000,
+      "readOnly": true,
+      "systemPrompt": "你是子 agent。只按请求完成任务；先查证据再下结论，不满足验收就明说没完成。"
+    }
+  ],
+  "defaultModel": {
+    "provider": "deepseek",
+    "model": "deepseek-chat"
+  },
+  "patch": {
+    "tools": { "enabled": [] },
+    "agents": {
+      "maxConcurrent": 3,
+      "perProvider": {},
+      "perPreset": {},
+      "queueLimit": 20
+    },
+    "compaction": {
+      "triggerAt": 0.85,
+      "targetAt": 0.4,
+      "keepRecentTurns": 12
+    },
+    "context": { "maxBytes": 131072 }
+  }
+}

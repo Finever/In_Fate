@@ -1,31 +1,12 @@
 /**
- * 模型来源注册表。一个场景可以挂任意多个来源，代码不认具体厂商。
+ * 模型来源注册表。实例级，避免两个 App 互相污染。
+ * 旧的模块级函数保留，内部走一个默认实例，兼容现有 demo。
  *
  * @module if/model/registry
  */
 
 import { readFileSync } from 'node:fs'
 import type { EndpointConfig, ModelCard, ProviderConfig } from './types.ts'
-
-const providers = new Map<string, ProviderConfig>()
-
-export function registerProvider(config: ProviderConfig): void {
-  if (providers.has(config.id)) throw new Error(`provider already registered: ${config.id}`)
-  if (Object.keys(config.endpoints).length === 0) {
-    throw new Error(`provider has no endpoints: ${config.id}`)
-  }
-  providers.set(config.id, config)
-}
-
-export function getProvider(id: string): ProviderConfig {
-  const provider = providers.get(id)
-  if (!provider) throw new Error(`unknown provider: ${id}`)
-  return provider
-}
-
-export function listProviders(): readonly ProviderConfig[] {
-  return [...providers.values()]
-}
 
 export interface ResolvedModel {
   readonly provider: ProviderConfig
@@ -34,46 +15,79 @@ export interface ResolvedModel {
   readonly apiModelId: string
 }
 
-/** 找来源、找模型、选端点。三步都可预测，失败就报错，不猜。 */
-export function resolveModel(
-  providerId: string,
-  modelId: string,
-  apiFamily?: string,
-): ResolvedModel {
-  const provider = getProvider(providerId)
-  const model = provider.models.find(item => item.id === modelId)
-  if (!model) throw new Error(`unknown model: ${providerId}/${modelId}`)
+export class ModelRegistry {
+  private readonly providers = new Map<string, ProviderConfig>()
 
-  const family = apiFamily ?? provider.defaultChatEndpoint ?? 'openai-chat-completions'
-  const endpoint = provider.endpoints[family]
-  if (!endpoint) throw new Error(`provider ${providerId} has no endpoint: ${family}`)
+  register(config: ProviderConfig): void {
+    if (this.providers.has(config.id)) throw new Error(`provider already registered: ${config.id}`)
+    if (Object.keys(config.endpoints).length === 0) {
+      throw new Error(`provider has no endpoints: ${config.id}`)
+    }
+    this.providers.set(config.id, config)
+  }
 
-  return {
-    provider,
-    model,
-    endpoint,
-    apiModelId: model.apiModelId ?? model.id,
+  get(id: string): ProviderConfig {
+    const provider = this.providers.get(id)
+    if (!provider) throw new Error(`unknown provider: ${id}`)
+    return provider
+  }
+
+  list(): readonly ProviderConfig[] {
+    return [...this.providers.values()]
+  }
+
+  resolve(providerId: string, modelId: string, apiFamily?: string): ResolvedModel {
+    const provider = this.get(providerId)
+    const model = provider.models.find(item => item.id === modelId)
+    if (!model) throw new Error(`unknown model: ${providerId}/${modelId}`)
+
+    const family = apiFamily ?? provider.defaultChatEndpoint ?? 'openai-chat-completions'
+    const endpoint = provider.endpoints[family]
+    if (!endpoint) throw new Error(`provider ${providerId} has no endpoint: ${family}`)
+
+    return { provider, model, endpoint, apiModelId: model.apiModelId ?? model.id }
+  }
+
+  resolveApiKey(provider: ProviderConfig): string | undefined {
+    if (provider.apiKey) return provider.apiKey
+    if (provider.apiKeyEnv) return process.env[provider.apiKeyEnv]
+    return undefined
+  }
+
+  load(path: string): readonly ProviderConfig[] {
+    const doc = JSON.parse(readFileSync(path, 'utf8')) as {
+      providers?: readonly ProviderConfig[]
+    }
+    if (!Array.isArray(doc.providers)) throw new Error(`registry has no providers: ${path}`)
+    for (const provider of doc.providers) {
+      if (!this.providers.has(provider.id)) this.register(provider)
+    }
+    return doc.providers
   }
 }
 
-export interface RegistryFile {
-  readonly version?: number
-  readonly providers: readonly ProviderConfig[]
+const defaultRegistry = new ModelRegistry()
+
+export function registerProvider(config: ProviderConfig): void {
+  defaultRegistry.register(config)
 }
 
-/** 从 JSON 加载来源清单；重复注册会报错，避免两份配置打架。 */
-export function loadRegistry(path: string): readonly ProviderConfig[] {
-  const doc = JSON.parse(readFileSync(path, 'utf8')) as RegistryFile
-  if (!Array.isArray(doc.providers)) throw new Error(`registry has no providers: ${path}`)
-  for (const provider of doc.providers) {
-    if (!providers.has(provider.id)) registerProvider(provider)
-  }
-  return doc.providers
+export function getProvider(id: string): ProviderConfig {
+  return defaultRegistry.get(id)
 }
 
-/** 运行时取密钥：优先显式密钥，其次环境变量。 */
+export function listProviders(): readonly ProviderConfig[] {
+  return defaultRegistry.list()
+}
+
+export function resolveModel(providerId: string, modelId: string, apiFamily?: string): ResolvedModel {
+  return defaultRegistry.resolve(providerId, modelId, apiFamily)
+}
+
 export function resolveApiKey(provider: ProviderConfig): string | undefined {
-  if (provider.apiKey) return provider.apiKey
-  if (provider.apiKeyEnv) return process.env[provider.apiKeyEnv]
-  return undefined
+  return defaultRegistry.resolveApiKey(provider)
+}
+
+export function loadRegistry(path: string): readonly ProviderConfig[] {
+  return defaultRegistry.load(path)
 }

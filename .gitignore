@@ -9,3 +9,6 @@ data/
 
 node_modules/
 *.log
+
+# 本机配置（含本机路径/网关）
+config/if.local.json

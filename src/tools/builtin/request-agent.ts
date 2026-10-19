@@ -13,7 +13,8 @@ import type { ToolDefinition, ToolResult } from '../types.ts'
 export interface RequestAgentOptions {
   readonly manager: AgentManager
   readonly presets: PresetRegistry
-  readonly sourceSession: string
+  /** 不传则用工具调用上下文里的 sessionId */
+  readonly sourceSession?: string
   readonly sourceTurn?: number
   /** 父级允许的预设集合；不传表示全部 */
   readonly allowedPresets?: readonly string[]
@@ -59,8 +60,10 @@ export function createRequestAgentTool(options: RequestAgentOptions): ToolDefini
     },
     meta: { readOnly: true },
 
-    async run(args): Promise<ToolResult> {
+    async run(args, context): Promise<ToolResult> {
       const input = args as RequestInput
+      const sourceSession = options.sourceSession ?? context.sessionId
+      if (!sourceSession) return { text: 'no source session', isError: true }
       const preset = options.presets.get(input.preset)
       if (!preset) {
         return { text: `unknown preset: ${input.preset}`, isError: true }
@@ -77,7 +80,7 @@ export function createRequestAgentTool(options: RequestAgentOptions): ToolDefini
           ...(input.acceptance ? { acceptance: input.acceptance } : {}),
           priority: input.priority ?? 'normal',
           source: {
-            session: options.sourceSession,
+            session: sourceSession,
             ...(options.sourceTurn !== undefined ? { turn: options.sourceTurn } : {}),
           },
         }, preset)

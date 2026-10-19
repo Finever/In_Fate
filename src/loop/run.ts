@@ -34,6 +34,8 @@ export interface RunLoopOptions {
   readonly cwd?: string
   /** 防死循环：一步 = 一次模型请求 */
   readonly maxSteps?: number
+  /** 上下文总字节预算；不传用管线默认值 */
+  readonly maxBytes?: number
   readonly signal?: AbortSignal
   /** 注入时间，保持可复现；默认读系统时间 */
   readonly now?: () => Date
@@ -99,6 +101,7 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
         sessionId: options.sessionId,
         turn: 1,
         now: now(),
+        ...(options.maxBytes !== undefined ? { maxBytes: options.maxBytes } : {}),
       })
       await compactIfNeeded({
         store: options.store,
@@ -145,6 +148,7 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
       sessionId: options.sessionId,
       turn: steps + 1,
       now: now(),
+      ...(options.maxBytes !== undefined ? { maxBytes: options.maxBytes } : {}),
     })
 
     const request: ChatRequest = {

@@ -13,7 +13,7 @@ import { staticSection, timeSection } from '../context/sections.ts'
 import type { EventStore } from '../core/store.ts'
 import { agentStream } from '../core/streams.ts'
 import { chatOpenAI } from '../model/openai.ts'
-import { resolveModel, type ResolvedModel } from '../model/registry.ts'
+import { resolveModel, type ModelRegistry, type ResolvedModel } from '../model/registry.ts'
 import type { ModelEvent, ToolSpec } from '../model/types.ts'
 import { projectHistory } from '../projections/history.ts'
 import { executeTool } from '../tools/executor.ts'
@@ -26,6 +26,8 @@ export interface SubagentRuntime {
   readonly approvals: ApprovalRegistry
   readonly profile: Profile
   readonly cwd: string
+  /** 传了就用实例注册表；不传退回模块级默认实例（旧 demo 兼容） */
+  readonly models?: ModelRegistry
 }
 
 interface Collected {
@@ -86,6 +88,19 @@ export async function runSubagent(
   runtime: SubagentRuntime,
 ): Promise<AgentResult> {
   const preset = request.snapshot
+  // 硬约束：子 agent 只做一层，且只读预设永不拿写工具。
+  // 这两条不依赖 guard 或外部配置，预设写错也绕不过去。
+  const writeTools = new Set(['write', 'edit', 'bash'])
+  const allowedTools = preset.tools.filter(name =>
+    name !== 'request_agent'
+    && !name.startsWith('agent_')
+    && !(preset.readOnly && writeTools.has(name)))
+  const allowed = new Set(allowedTools)
+
+  const resolve = runtime.models
+    ? (provider: string, model: string): ResolvedModel => runtime.models!.resolve(provider, model)
+    : resolveModel
+
   const startedAt = new Date().toISOString()
   const usage: AgentUsage = { input: 0, output: 0, cacheRead: 0 }
   const artifacts = new Set<string>()
@@ -125,7 +140,7 @@ export async function runSubagent(
       now: new Date(),
     })
 
-    const tools = runtime.tools.toModelSpecs()
+    const tools = runtime.tools.toModelSpecs().filter(spec => allowed.has(spec.name))
     let collected: Collected | undefined
     let lastError: unknown
 
@@ -133,7 +148,7 @@ export async function runSubagent(
     for (const choice of preset.models) {
       if (signal.aborted) break
       try {
-        const model = resolveModel(choice.provider, choice.model)
+        const model = resolve(choice.provider, choice.model)
         collected = await collectModel(model, rendered.system, rendered.messages, tools, signal)
         break
       } catch (error) {
@@ -199,7 +214,9 @@ export async function runSubagent(
     for (const call of collected.calls) {
       const args = parseArguments(call.arguments)
       let result: ToolResult
-      try {
+      if (!allowed.has(call.name)) {
+        result = { text: `tool not allowed: ${call.name}`, isError: true }
+      } else try {
         result = await executeTool(call.name, args, {
           registry: runtime.tools,
           approvals: runtime.approvals,

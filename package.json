@@ -3,7 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "start": "node bin/if.ts",
+    "chat": "node bin/if.ts chat"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

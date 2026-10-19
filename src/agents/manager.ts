@@ -136,6 +136,18 @@ export class AgentManager {
     return this.queue.length
   }
 
+  /** 关机：中断运行中的请求，清空队列，等待终态写入。 */
+  async dispose(timeoutMs = 5_000): Promise<void> {
+    for (const entry of this.active.values()) {
+      entry.controller.abort(new Error('manager disposed'))
+    }
+    const started = Date.now()
+    while (this.active.size > 0 && Date.now() - started < timeoutMs) {
+      await new Promise(resolve => setTimeout(resolve, 20))
+    }
+    for (const request of [...this.queue]) this.interrupt(request.id)
+  }
+
   activeCount(): number {
     return this.active.size
   }

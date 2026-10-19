@@ -25,6 +25,10 @@ export interface Profile {
   readonly memoryLogRoot?: string
   /** IANA 时区名，渲染给模型看的时间用它 */
   readonly timeZone: string
+  /** 身份文件所在目录（SOUL/USER/FACT 的根） */
+  readonly agentDir?: string
+  /** 主 agent 的 system 头 */
+  readonly header?: string
   /** 这个场景里有哪些人 */
   readonly principals: {
     readonly user?: Principal
