@@ -113,7 +113,7 @@ export function appendLog(path: string, rows: readonly LogRow[]): void {
 /** 文件不存在时写 _meta 头；已存在就不碰。 */
 export function ensureMeta(path: string, meta: LogMeta): void {
   if (existsSync(path)) return
-  appendLog(path, [meta])
+  appendLog(path, [meta as unknown as LogRow])
 }
 
 const PATH_KEYS = ['file_path', 'path', 'notebook_path'] as const

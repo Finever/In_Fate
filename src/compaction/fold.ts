@@ -129,7 +129,7 @@ export async function compactIfNeeded(options: CompactOptions): Promise<Compacti
           stream: options.stream,
           actor: 'system',
           type: 'compaction.pruned',
-          payload: buildPrunePayload(candidates, options.spill),
+          payload: buildPrunePayload(candidates, options.spill) as unknown as Record<string, unknown>,
         })
         prunedCount = candidates.length
       }
@@ -200,7 +200,7 @@ export async function compactIfNeeded(options: CompactOptions): Promise<Compacti
       stream: options.stream,
       actor: 'system',
       type: 'context.compacted',
-      payload,
+      payload: payload as unknown as Record<string, unknown>,
     })
 
     lastPayload = payload

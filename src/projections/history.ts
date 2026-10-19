@@ -37,7 +37,7 @@ export type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock
 export interface ChatMessage {
   readonly role: 'system' | 'user' | 'assistant'
   readonly content: ContentBlock[]
-  readonly reasoning?: string
+  reasoning?: string
   /** 消息来自哪条事件，审计用；渲染给模型前去掉 */
   readonly sourceEventId?: string
   /** 定时任务推来的 system 消息标 scheduled；压缩摘要标 compaction */

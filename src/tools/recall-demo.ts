@@ -50,5 +50,5 @@ const byEvents = await tool.run(
   {} as never,
 )
 
-console.log('logAddr recall:', byLog.text.includes('原话一'), byLog.structured)
-console.log('event recall:', byEvents.text.includes('原话一'), byEvents.structured)
+console.log('logAddr recall:', (byLog.text ?? '').includes('原话一'), byLog.structured)
+console.log('event recall:', (byEvents.text ?? '').includes('原话一'), byEvents.structured)

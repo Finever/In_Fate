@@ -1,19 +1,28 @@
 /**
- * 事件存储：只追加的 JSONL。
+ * 事件存储：只追加的 JSONL，可按大小分段。
  *
- * 这里只有原语：追加、读取、按行游标。聚合、投影、轮次都不属于存储层。
- * 行号是唯一可靠的顺序；事件 id 是 UUID，无序。
+ * 当前段是 `file`；写满后重命名为 `file.<n>`，新建 `file`。
+ * `read()` 合并所有段；`readSince(eventId)` 跨段找游标。
+ * 行号只在不分段时可靠，归档器改用事件 id。
  *
  * @module if/core/store
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
-import { dirname } from 'node:path'
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  statSync,
+} from 'node:fs'
+import { basename, dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { ENVELOPE_VERSION, type Event, type NewEvent } from './events.ts'
+import { withFileLock } from './lock.ts'
 import { getEventSpec } from './registry.ts'
 
-/** 存储层的失败。调用方应当显式处理，不要静默吞掉。 */
 export class IfStorageError extends Error {
   readonly cause?: unknown
 
@@ -24,7 +33,6 @@ export class IfStorageError extends Error {
   }
 }
 
-/** 读到坏行：fail-closed，不猜、不跳过。 */
 export class IfCorruptionError extends IfStorageError {
   readonly file: string
   readonly line: number
@@ -37,11 +45,23 @@ export class IfCorruptionError extends IfStorageError {
   }
 }
 
+export interface EventStoreOptions {
+  /** 单段字节上限；不设就不分段 */
+  readonly segmentMaxBytes?: number
+}
+
 export class EventStore {
   readonly file: string
+  readonly segmentMaxBytes?: number
 
-  constructor(file: string) {
+  constructor(file: string, options: EventStoreOptions = {}) {
     this.file = file
+    this.segmentMaxBytes = options.segmentMaxBytes
+  }
+
+  /** 多进程临界区：加锁后追加。 */
+  async appendLocked(input: NewEvent, options: { timeoutMs?: number } = {}): Promise<Event> {
+    return withFileLock(this.file, () => this.append(input), options)
   }
 
   /** 追加一条事件。注册过的类型先过校验器。 */
@@ -58,6 +78,7 @@ export class EventStore {
     }
 
     mkdirSync(dirname(this.file), { recursive: true })
+    this.maybeRotate()
     try {
       appendFileSync(this.file, JSON.stringify(event) + '\n', { encoding: 'utf8' })
     } catch (error) {
@@ -66,33 +87,109 @@ export class EventStore {
     return event
   }
 
-  /** 读全部事件。 */
+  /** 读全部事件（所有段，按段号顺序）。 */
   read(): readonly Event[] {
-    return this.readFrom(0)
+    const out: Event[] = []
+    for (const segment of this.segments()) {
+      out.push(...this.readSegment(segment))
+    }
+    return out
   }
 
-  /** 从第 line 行开始读（0 起）。游标用它，不用事件 id。 */
+  /** 从某条事件之后读；跨段查找，找不到就报错。 */
+  readSince(eventId: string): readonly Event[] {
+    const marker = `"id":"${eventId}"`
+    const out: Event[] = []
+    let found = false
+
+    for (const segment of this.segments()) {
+      const lines = readFileSync(segment, 'utf8').split('\n')
+      let start = 0
+
+      if (!found) {
+        const index = lines.findIndex(line => line.includes(marker))
+        if (index < 0) continue
+        start = index + 1
+        found = true
+      }
+
+      for (let line = start; line < lines.length; line += 1) {
+        const text = lines[line].trim()
+        if (!text) continue
+        try {
+          out.push(JSON.parse(text) as Event)
+        } catch {
+          throw new IfCorruptionError(segment, line + 1)
+        }
+      }
+    }
+
+    if (!found) throw new IfStorageError(`event not found: ${eventId}`)
+    return out
+  }
+
+  /** 当前段从第 line 行开始读；分段后行号不可靠，只作旧状态兼容。 */
   readFrom(line: number): readonly Event[] {
-    if (!existsSync(this.file)) return []
-    const raw = readFileSync(this.file, 'utf8')
-    const lines = raw.split('\n')
+    return this.readSegment(this.file, line)
+  }
+
+  /** 所有段的行数总和。 */
+  lineCount(): number {
+    return this.segments().reduce(
+      (sum, segment) => sum + this.readSegment(segment).length,
+      0,
+    )
+  }
+
+  /** 段文件列表：`file.1`、`file.2`…，最后是当前 `file`。 */
+  segments(): string[] {
+    const dir = dirname(this.file)
+    const base = basename(this.file)
+    if (!existsSync(dir)) return [this.file]
+
+    const rank = (name: string): number => {
+      if (name === base) return Number.MAX_SAFE_INTEGER
+      const suffix = Number(name.slice(base.length + 1))
+      return Number.isFinite(suffix) ? suffix : -1
+    }
+
+    const names = readdirSync(dir)
+      .filter(name => name === base || name.startsWith(`${base}.`))
+      .filter(name => rank(name) >= 0 && !name.endsWith('.lock'))
+      .sort((a, b) => rank(a) - rank(b))
+
+    return names.length > 0 ? names.map(name => join(dir, name)) : [this.file]
+  }
+
+  private readSegment(file: string, startLine = 0): Event[] {
+    if (!existsSync(file)) return []
+    const lines = readFileSync(file, 'utf8').split('\n')
     const out: Event[] = []
 
-    for (let i = line; i < lines.length; i += 1) {
-      const text = lines[i].trim()
+    for (let line = startLine; line < lines.length; line += 1) {
+      const text = lines[line].trim()
       if (!text) continue
       try {
         out.push(JSON.parse(text) as Event)
       } catch {
-        throw new IfCorruptionError(this.file, i + 1)
+        throw new IfCorruptionError(file, line + 1)
       }
     }
     return out
   }
 
-  /** 当前行数（含空行），用于游标推进。 */
-  lineCount(): number {
-    if (!existsSync(this.file)) return 0
-    return readFileSync(this.file, 'utf8').split('\n').length - 1
+  private maybeRotate(): void {
+    if (!this.segmentMaxBytes) return
+    if (!existsSync(this.file)) return
+    if (statSync(this.file).size < this.segmentMaxBytes) return
+
+    const base = basename(this.file)
+    const dir = dirname(this.file)
+    const existing = this.segments()
+      .filter(path => path !== this.file)
+      .map(path => Number(basename(path).slice(base.length + 1)))
+      .filter(Number.isFinite)
+    const next = existing.length > 0 ? Math.max(...existing) + 1 : 1
+    renameSync(this.file, join(dir, `${base}.${next}`))
   }
 }

@@ -38,6 +38,8 @@ export interface CompactionAnchor {
   readonly fromEventId: string
   readonly toEventId: string
   readonly logAddr?: string
+  /** 分支实现前先留口：当前主链为 main */
+  readonly branch?: string
 }
 
 export interface CompactionSummary {

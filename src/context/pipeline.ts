@@ -30,6 +30,8 @@ export interface RenderedContext {
   readonly bytes: number
   /** stable 前缀的 sha1；两轮一致说明缓存前缀没断 */
   readonly prefixHash: string
+  /** 历史消息的 sha1；用来诊断历史前缀是否变了 */
+  readonly historyHash: string
   readonly overBudget: boolean
 }
 
@@ -141,6 +143,9 @@ export function renderContext(options: RenderOptions): RenderedContext {
   const messages = [...options.history, ...lateMessages]
   const bytes = used + bytesOf(JSON.stringify(messages))
   const prefixHash = createHash('sha1').update(system, 'utf8').digest('hex')
+  const historyHash = createHash('sha1')
+    .update(JSON.stringify(options.history), 'utf8')
+    .digest('hex')
 
   return {
     system,
@@ -148,6 +153,7 @@ export function renderContext(options: RenderOptions): RenderedContext {
     injections,
     bytes,
     prefixHash,
+    historyHash,
     overBudget: used > maxBytes,
   }
 }

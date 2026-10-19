@@ -110,20 +110,11 @@ export function archiveSession<T>(options: ArchiveOptions<T>): number {
 
   const stateFile = join(options.stateDir ?? join(profile.dataRoot, 'archive'), `${sessionId}.state.json`)
   const state = loadState(stateFile)
-  const events = store.read()
 
   // 游标以事件 id 为准；找不到就报错，不猜、不倒退。
-  let startIndex = 0
-  if (state.lastConsumedEventId) {
-    const index = events.findIndex(event => event.id === state.lastConsumedEventId)
-    if (index < 0) throw new Error(`archive cursor not found: ${state.lastConsumedEventId}`)
-    startIndex = index + 1
-  } else if (state.consumedLines > 0) {
-    // 旧状态文件兼容：只在这一轮用行号，之后写回 id。
-    startIndex = Math.min(state.consumedLines, events.length)
-  }
-
-  const fresh = events.slice(startIndex)
+  const fresh = state.lastConsumedEventId
+    ? store.readSince(state.lastConsumedEventId)
+    : store.readFrom(state.consumedLines)
   const result = projectEvents(fresh, profile, projections, policy, sessionId, state.turn)
   if (result.lines.length === 0) {
     saveState(stateFile, state)
@@ -138,7 +129,7 @@ export function archiveSession<T>(options: ArchiveOptions<T>): number {
   const consumedEvents = fresh.slice(0, result.consumed)
   saveState(stateFile, {
     lastConsumedEventId: consumedEvents.at(-1)?.id ?? state.lastConsumedEventId,
-    consumedLines: startIndex + result.consumed,
+    consumedLines: state.consumedLines + result.consumed,
     turn: result.turn,
   })
 
