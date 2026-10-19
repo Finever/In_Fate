@@ -63,6 +63,8 @@ export interface RunResult {
   readonly usage: RunUsage
   readonly aborted: boolean
   readonly hitLimit: boolean
+  /** 模型请求失败的原因；失败也会落一条 turn.completed */
+  readonly error?: string
 }
 
 function parseArguments(text: string): unknown {
@@ -135,6 +137,7 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
   const usage: RunUsage = { input: 0, output: 0, cacheRead: 0 }
   let steps = 0
   let hitLimit = false
+  let failure: string | undefined
 
   while (steps < maxSteps) {
     if (options.signal?.aborted) break
@@ -163,16 +166,23 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
     const reasoning: string[] = []
     const calls: { id: string; name: string; arguments: string }[] = []
 
-    for await (const event of chatOpenAI(request)) {
-      options.onModelEvent?.(event)
-      if (event.type === 'text') text.push(event.text)
-      else if (event.type === 'reasoning') reasoning.push(event.text)
-      else if (event.type === 'tool_call') calls.push(event)
-      else if (event.type === 'usage') {
-        usage.input += event.input ?? 0
-        usage.output += event.output ?? 0
-        usage.cacheRead += event.cacheRead ?? 0
+    try {
+      for await (const event of chatOpenAI(request)) {
+        options.onModelEvent?.(event)
+        if (event.type === 'text') text.push(event.text)
+        else if (event.type === 'reasoning') reasoning.push(event.text)
+        else if (event.type === 'tool_call') calls.push(event)
+        else if (event.type === 'usage') {
+          usage.input += event.input ?? 0
+          usage.output += event.output ?? 0
+          usage.cacheRead += event.cacheRead ?? 0
+        }
       }
+    } catch (error) {
+      // 用户中断不算失败；其它错误落痕后结束这一轮，不把异常漏给调用方。
+      if (options.signal?.aborted) break
+      failure = error instanceof Error ? error.message : String(error)
+      break
     }
 
     if (reasoning.length > 0) {
@@ -240,13 +250,26 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
   }
 
   if (steps >= maxSteps) hitLimit = true
+  const aborted = options.signal?.aborted ?? false
 
   options.store.append({
     stream,
     actor: 'system',
     type: 'turn.completed',
-    payload: { steps, usage, aborted: options.signal?.aborted ?? false, hitLimit },
+    payload: {
+      steps,
+      usage,
+      aborted,
+      hitLimit,
+      ...(failure ? { error: failure } : {}),
+    },
   })
 
-  return { steps, usage, aborted: options.signal?.aborted ?? false, hitLimit }
+  return {
+    steps,
+    usage,
+    aborted,
+    hitLimit,
+    ...(failure ? { error: failure } : {}),
+  }
 }

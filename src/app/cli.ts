@@ -189,6 +189,7 @@ async function runOnce(app: App, sessionId: string, text: string, json: boolean)
   const printer = makePrinter()
   try {
     const result = await app.chat({ sessionId, text, onModelEvent: printer.onModelEvent })
+    if (result.error) process.stderr.write(`[error] ${result.error}\n`)
     const streamed = printer.wrote()
     printer.end()
     const content = lastAssistantText(app, sessionId)
@@ -210,7 +211,14 @@ async function chat(app: App, initialSession?: string): Promise<void> {
 
   app.approvals.approvalHandler = entry => askApproval(entry, text => rl.question(text))
 
+  // 两条中断路径：正在跑模型就 abort 这一轮；闲在提示符就退出。
+  let controller: AbortController | undefined
   rl.on('SIGINT', () => {
+    if (controller) {
+      controller.abort(new Error('interrupted by user'))
+      stdout.write('\n[已中断]\n')
+      return
+    }
     stdout.write('\n')
     rl.close()
   })
@@ -274,8 +282,15 @@ async function chat(app: App, initialSession?: string): Promise<void> {
       }
 
       const printer = makePrinter()
+      controller = new AbortController()
       try {
-        const result = await app.chat({ sessionId, text, onModelEvent: printer.onModelEvent })
+        const result = await app.chat({
+          sessionId,
+          text,
+          onModelEvent: printer.onModelEvent,
+          signal: controller.signal,
+        })
+        if (result.error) process.stderr.write(`[error] ${result.error}\n`)
         const streamed = printer.wrote()
         printer.end()
         if (!streamed) {
@@ -286,6 +301,8 @@ async function chat(app: App, initialSession?: string): Promise<void> {
       } catch (error) {
         printer.end()
         process.stderr.write(`[error] ${error instanceof Error ? error.message : String(error)}\n`)
+      } finally {
+        controller = undefined
       }
     }
   } finally {

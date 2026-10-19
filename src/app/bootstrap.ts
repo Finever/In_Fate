@@ -41,7 +41,8 @@ export function defaultConfigPath(): string {
 
 export async function bootstrap(options: BootstrapOptions = {}): Promise<App> {
   const config = options.config ?? loadConfig(options.configPath ?? defaultConfigPath())
-  const normalized = options.baseDir ? config : normalizePaths(config, process.cwd())
+  // loadConfig 已按配置文件目录解析；这里再解析一次只影响直接传入的相对路径。
+  const normalized = normalizePaths(config, options.baseDir ?? process.cwd())
 
   const container = new Container()
   try {

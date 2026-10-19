@@ -194,6 +194,12 @@ export class AgentManager {
     const store = this.options.storeFactory(request.id)
     const stream = agentStream(request.id)
     const startedAt = new Date().toISOString()
+    // 预设的超时是硬上限：到点中断，状态记 failed 而不是 cancelled。
+    let timedOut = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      controller.abort(new Error(`agent timeout after ${request.snapshot.timeoutMs}ms`))
+    }, request.snapshot.timeoutMs)
     store.append({
       stream,
       actor: 'agent',
@@ -205,28 +211,38 @@ export class AgentManager {
       let result: AgentResult
       try {
         const produced = await this.options.runner(request, controller.signal, store, stream)
-        // 身份以 manager 的请求为准，不信任 runner 返回的 id。
+        // 身份以 manager 的请求为准，不信任 runner 返回的 id；超时统一记 failed。
         result = {
           ...produced,
           id: request.id,
           preset: request.preset,
           stream,
+          ...(timedOut
+            ? {
+              status: 'failed' as const,
+              error: `timeout after ${request.snapshot.timeoutMs}ms`,
+              finishedAt: new Date().toISOString(),
+            }
+            : {}),
         }
       } catch (error) {
         result = {
           id: request.id,
           preset: request.preset,
-          status: controller.signal.aborted ? 'cancelled' : 'failed',
+          status: controller.signal.aborted && !timedOut ? 'cancelled' : 'failed',
           summary: '',
           artifacts: [],
           usage: { input: 0, output: 0, cacheRead: 0 },
           steps: 0,
           stream,
-          error: error instanceof Error ? error.message : String(error),
+          error: timedOut
+            ? `timeout after ${request.snapshot.timeoutMs}ms`
+            : error instanceof Error ? error.message : String(error),
           startedAt,
           finishedAt: new Date().toISOString(),
         }
       } finally {
+        clearTimeout(timer)
         this.release(request)
       }
       this.finish(result)
