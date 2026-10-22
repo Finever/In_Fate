@@ -40,6 +40,8 @@ export interface Event {
   readonly v: number
   /** 该事件类型自己的版本，默认由注册表给 */
   readonly tv?: number
+  /** 会话内单调序号；旧日志可能没有 */
+  readonly seq?: number
   /** 事件 id，无序；顺序看文件行 */
   readonly id: string
   /** ISO UTC 毫秒 */

@@ -10,6 +10,7 @@
 
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { assertWithin } from '../../core/safe-path.ts'
 import type { EventStore } from '../../core/store.ts'
 import { readLog } from '../../memory/log.ts'
 import { parseAddress } from '../../memory/quote.ts'
@@ -60,13 +61,17 @@ export function createRecallTool(store: RecallStore, options: RecallOptions = {}
         }
         const address = parseAddress(input.logAddr)
         const [year, month] = address.date.split('-')
-        const file = join(
+        const file = assertWithin(
           options.memoryLogRoot,
-          'log',
-          year!,
-          month!,
-          address.date,
-          `${address.session}.jsonl`,
+          join(
+            options.memoryLogRoot,
+            'log',
+            year!,
+            month!,
+            address.date,
+            `${address.session}.jsonl`,
+          ),
+          'logAddr',
         )
         if (!existsSync(file)) return { text: `log not found: ${file}`, isError: true }
 

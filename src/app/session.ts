@@ -8,6 +8,7 @@
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { assertSafeSessionId } from '../core/safe-path.ts'
 
 export interface SessionInfo {
   readonly id: string
@@ -21,6 +22,7 @@ export function sessionsDir(dataRoot: string): string {
 }
 
 export function sessionFile(dataRoot: string, sessionId: string): string {
+  assertSafeSessionId(sessionId)
   return join(sessionsDir(dataRoot), `${sessionId}.jsonl`)
 }
 

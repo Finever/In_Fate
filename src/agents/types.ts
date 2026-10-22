@@ -24,6 +24,8 @@ export interface AgentPreset {
   readonly maxSteps: number
   readonly timeoutMs: number
   readonly readOnly: boolean
+  /** 非只读预设是否允许危险工具；默认 false，必须显式信任 */
+  readonly allowDangerousTools?: boolean
   readonly outputSchema?: unknown
 }
 

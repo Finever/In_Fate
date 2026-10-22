@@ -53,6 +53,11 @@ export function decodeAuto(buffer: Buffer, requested?: string): Decoded {
   return { text: new TextDecoder(fallback).decode(buffer), encoding: fallback }
 }
 
+/** 单个命令最多保留的输出字节；超过就截断并终止子进程。 */
+const MAX_OUTPUT_BYTES = 8 * 1024 * 1024
+/** structured 里再带一份 stdout/stderr 的上限；超过只留字节数。 */
+const MAX_STRUCTURED_STREAM_BYTES = 8 * 1024
+
 function execute(
   shell: Shell,
   command: string,
@@ -69,25 +74,56 @@ function execute(
 
     const stdout: Buffer[] = []
     const stderr: Buffer[] = []
-    child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk))
-    child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk))
+    let total = 0
+    let truncated = false
+
+    // stdout 与 stderr 共享一个硬上限，避免整夜命令把进程内存吃光。
+    const collect = (target: Buffer[], chunk: Buffer): void => {
+      if (truncated) return
+      const next = total + chunk.length
+      if (next > MAX_OUTPUT_BYTES) {
+        const remaining = MAX_OUTPUT_BYTES - total
+        if (remaining > 0) target.push(chunk.subarray(0, remaining))
+        total = MAX_OUTPUT_BYTES
+        truncated = true
+        child.kill()
+        return
+      }
+      total = next
+      target.push(chunk)
+    }
+
+    child.stdout.on('data', (chunk: Buffer) => collect(stdout, chunk))
+    child.stderr.on('data', (chunk: Buffer) => collect(stderr, chunk))
     child.on('error', reject)
 
     child.on('close', (code: number | null) => {
-      const out = decodeAuto(Buffer.concat(stdout), requested)
-      const err = decodeAuto(Buffer.concat(stderr), requested)
-      const text = [out.text, err.text].filter(part => part.length > 0).join('\n')
+      const outBuffer = Buffer.concat(stdout)
+      const errBuffer = Buffer.concat(stderr)
+      const out = decodeAuto(outBuffer, requested)
+      const err = decodeAuto(errBuffer, requested)
+      const notice = truncated ? `\n…[output truncated at ${MAX_OUTPUT_BYTES} bytes]` : ''
+      const text = [out.text, err.text].filter(part => part.length > 0).join('\n') + notice
       const encoding = out.encoding
       const requestedEncoding = requested && requested !== encoding ? requested : undefined
 
+      const structured: Record<string, unknown> = {
+        code,
+        encodings: { stdout: out.encoding, stderr: err.encoding },
+        stdoutBytes: outBuffer.length,
+        stderrBytes: errBuffer.length,
+        ...(truncated ? { truncated: true, limitBytes: MAX_OUTPUT_BYTES } : {}),
+      }
+
+      // 短输出保留分流副本，长输出只留 text，避免同一内容在事件里出现三次。
+      if (!truncated && outBuffer.length + errBuffer.length <= MAX_STRUCTURED_STREAM_BYTES) {
+        structured.stdout = out.text
+        structured.stderr = err.text
+      }
+
       resolve({
         text,
-        structured: {
-          code,
-          stdout: out.text,
-          stderr: err.text,
-          encodings: { stdout: out.encoding, stderr: err.encoding },
-        },
+        structured,
         bytes: Buffer.byteLength(text, 'utf8'),
         encoding,
         ...(requestedEncoding ? { requestedEncoding } : {}),

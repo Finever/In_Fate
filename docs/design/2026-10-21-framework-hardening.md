@@ -1,0 +1,441 @@
+# IF 框架加固设计
+
+> 状态：设计稿，未落代码。
+> 日期：2026-10-21
+> 范围：长会话成本、定量卸载、读时取出、UI 契约、P0 可靠性。
+> 原则：能借的借形状，借不了的反复优化；先不变量，后功能；每阶段有回滚点。
+
+---
+
+## 0. 结论先行
+
+这轮不直接做“大卸载 + 大 UI”。先补框架的三块地基：
+
+1. **写入安全**：会话格式、可恢复尾行、单会话写者、路径与 ref 校验。
+2. **投影成本**：投影从有效压缩链尾开始；token 账本与真实 usage 对齐。
+3. **结果保留**：工具层限长 → 写时 spill → `recall(ref)` 取回；UI 与模型使用不同投影。
+
+旧日志不靠“事后卸载”减字节。append-only 下旧行仍在；要减只能段归档或 fork。事后引用只用于投影和取回，不用于回收磁盘。
+
+---
+
+## 1. 问题与实测
+
+### 1.1 已测到的成本
+
+本机 Node 24，合成会话每轮 5 条事件（user / tool.call / tool.result / assistant / turn.completed）：
+
+| 会话规模 | read | projection | render | heap |
+|---|---:|---:|---:|---:|
+| 5,000 事件 / 1KB 结果 | 18ms | 175ms | 18ms | 28MB |
+| 20,000 事件 / 1KB | 64ms | 644ms | 67ms | 96MB |
+| 50,000 事件 / 1KB | 163ms | 1,676ms | 196ms | 219MB |
+| 20,000 事件 / 8KB | 259ms | 646ms | 456ms | 293MB |
+
+结论：`store.read()` 全量重解析、`projectHistory()` 全量扫描；压缩只替换模型看到的区间，不降低事件条数，也不降低旧日志字节。
+
+### 1.2 Cherry 的教训
+
+- 长而快的流逐 chunk 深拷贝整条消息，渲染器内存二次方增长。
+- 长 agent 轮次挤爆回放环，助手消息空白，待审批卡片跟着消失，会话死锁。
+- 压缩预算按虚高的 `contextWindow` 算，触发太晚。
+
+IF 的对应措施：不把完整历史塞进渲染器、不深拷贝、不做内存回放环、审批独立于消息渲染、压缩预算留安全系数。
+
+---
+
+## 2. 不变量
+
+这些是后续所有实现的验收条件：
+
+1. **事件日志只追加**。不修改、不删除、不重写已有事件行。
+2. **投影是纯函数**。同一事件集 + 同一策略 → 同一输出；IO（取 blob）在投影之前完成。
+3. **模型投影、UI 投影、归档检索是三份东西**。模型看预算内的内容；UI 看完整时间线（按需取全文）；归档看原始事件。
+4. **模型投影确定性**。回填决策只由事件位置、大小、配置决定，不由运行时缓存命中率决定。
+5. **事件与 blob 成对**。先写 blob，再追加事件；blob 缺失时降级为预览并报告，不让整轮崩溃。
+6. **所有外部字符串先校验再拼路径**。`sessionId`、`logAddr`、`ref` 一律不信任。
+7. **不做一次性大改**。每阶段有开关、基准、失败注入和回滚点。
+8. **不绑 DSH 运行时**。只借契约、形状、交互；记忆、事件语义、投影、归档自研。
+
+---
+
+## 3. 借用地图
+
+DSH 是 MIT。只借形状与契约，不 import 运行时。
+
+| 层 | DSH 参考 | 借什么 | IF 适配 |
+|---|---|---|---|
+| 卸载存储 | `packages/spill/spill` | 单一 `saveText` 契约；不透明 locator + `bytes` + `retrievalHint`；所有权与来源分离；存储故障由调用方降级 | 换成 `ContentRef`；加 SHA-256、路径校验、session/agent 归属 |
+| 卸载策略 | `packages/spill/spill-policy` | 按估算 token 预算保留首尾；提示中说明省略字节与取回方式；存储失败保留原内容；图片与文本共享预算 | 先文本，后结构化/二进制；预算按实际发送内容计算 |
+| 压缩修剪 | `packages/compaction/compaction-tool-result-pruner` | 确定性单次收敛；按 Unicode 码点切片；头/标记/尾；shadow 事件引用原事件；原文留日志 | 接进现有 `compaction.pruned`；不另起事件体系 |
+| 会话格式 | `packages/session/session-format` | header 版本；相邻迁移链；`recovery: 'recoverable'` 的可恢复后缀；编解码分派 | 首行 `session.created` 带 `formatVersion`；坏尾行只丢后缀，不丢整段 |
+| JSON 存储 | `packages/storage/storage-json` | 临时文件 + fsync + 原子 rename；坏记录视为不存在；版本戳；安全 key 正则 | 用于 blob 写入与 sidecar；键名只接受安全字符 |
+| 子 agent | `packages/subagent/subagent` | 请求即返回；完成通知；`maxDepth`；activation 容量；本地子级持久/冷恢复；取消与清理顺序 | 我们已有请求机制；补权限、预算、重启恢复、跨流取回 |
+| UI 审批 | `packages/client/ui-approval` | 审批独立于消息；作用域交互；键盘/指针共用锁；临时决定与持久策略分离 | 审批收件箱独立于时间线；决定落事件，重启可恢复 |
+| UI 对话 | `packages/client/ui-conversation` | `seq` 游标；增量组装；replace window；transient 事件与持久事件分开；按 Turn/Step 索引 | UI 时间线投影；分页；断线重连从事件日志游标恢复，不用回放环 |
+| UI 工具卡 | `packages/client/ui-tool` | 按工具名注册视图；根/子调用树；折叠行；运行/完成/失败状态；文件大小与 diff 摘要；spill 输出展开 | 工具卡默认折叠；全文按 range 取；审批/工具卡解耦 |
+| Token 计量 | `packages/llm/token-meter` | 回放式确定性估算；提供方 usage 锚点；`contextBreakdown`；CJK/JSON 低估警告 | 补 `TokenEstimator.observe`；按模型因子；留 0.9 安全系数 |
+| 输出保留 | `packages/util/output-retention` | 头/尾字节窗口；不切断 UTF-8；代理项安全；统一省略提示 | `preview` 生成；不用 `slice` 随意切 |
+
+### 3.1 自研部分
+
+- 记忆系统：SOUL / USER / FACT / detail、原话地址、`log` 投影。
+- IF 事件语义与流：`session:` / `task:` / `process:` / `agent:`。
+- actor / principal / 名字解析。
+- 归档器与记忆 log 投影。
+- 卸载的路径/ref 安全边界、删除与保留策略。
+- UI 的 token 占比、多模态聚合、vibecoding 实时进程流。
+- fork / 分支 / 编辑重发语义。
+
+自研部分统一走：不变量 → 小原型 → 失败注入 → 基准 → 集成。
+
+---
+
+## 4. 目标结构
+
+```
+事件日志（JSONL，只追加）
+  ├─ Blob 库（内容寻址，文本/二进制）
+  ├─ 模型投影（确定性、预算内、预览或全文）
+  ├─ UI 时间线投影（游标分页、元数据 + 预览）
+  └─ 归档/recall（显式读取原文）
+```
+
+### 4.1 数据形状
+
+```ts
+interface ContentRef {
+  readonly ref: string          // blob:<sha256>
+  readonly bytes: number
+  readonly sha256: string
+  readonly mime?: string
+  readonly encoding?: string
+  readonly preview: {
+    readonly head: string
+    readonly tail?: string
+    readonly omittedBytes: number
+  }
+}
+```
+
+`tool.result` 事件：
+
+```json
+{
+  "type": "tool.result",
+  "payload": {
+    "callId": "call-1",
+    "text": "<head>…\n[offloaded 184320 bytes; ref blob:ab12…; use recall to read]",
+    "isError": false,
+    "bytes": 184320,
+    "encoding": "utf-8",
+    "contentRef": {
+      "ref": "blob:ab12…",
+      "bytes": 184320,
+      "sha256": "ab12…",
+      "mime": "text/plain",
+      "encoding": "utf-8",
+      "preview": { "head": "…", "tail": "…", "omittedBytes": 180000 }
+    }
+  }
+}
+```
+
+当前代码在写 `tool.result` 时丢掉了 `ToolResult.ref / bytes / encoding`（`src/loop/run.ts`），先修这个，否则任何卸载都取不回。
+
+### 4.2 会话格式
+
+首行 `session.created` 作为 header，增加：
+
+```json
+{
+  "type": "session.created",
+  "seq": 0,
+  "payload": {
+    "formatVersion": 2,
+    "sessionId": "session-...",
+    "createdAt": "2026-10-21T...",
+    "seqBase": 0
+  }
+}
+```
+
+- 新会话每条事件带单调 `seq`；旧会话没有 `seq`，读取时按文件顺序补虚拟序号。
+- `formatVersion` 走相邻迁移链，不做静默重写。
+- 最后一行不完整或非法：`recovery: 'recoverable'`，返回已接受前缀，并把坏后缀留在 `.corrupt.<ts>.txt`；若坏行之后还有合法事件，视为致命损坏。
+
+### 4.3 单写者与锁
+
+- 每会话一个 `SessionWriter`；同进程内所有追加（主循环、子 agent 回送、归档器）都走它。
+- 跨进程写：默认拒绝；需要时用 `withFileLock` + 锁文件 `{pid, host, startedAt, heartbeat}`。
+- 锁超时先检查 pid/host；同机进程不存在 → 清理；否则等待/报错，不静默删除活锁。
+- 段轮转、压缩、归档在锁内做；普通追加在单写者内串行。
+- blob 写入：临时文件 + fsync + rename；内容寻址，重复写入幂等。
+
+### 4.4 卸载策略
+
+三层量：
+
+1. **单条阈值**：`maxInlineBytes` / `maxInlineTokens`。超过 → 写 blob，事件留预览 + ref。
+2. **会话内联预算**：`sessionInlineBytes`。超过 → 只对模型投影做旧结果预览化；**不等于回收旧日志字节**。
+3. **每步回填预算**：`hydrateItemBytes` / `hydrateStepBytes`。只回填当前 step 的结果，且按事件顺序取前 N 条直到预算；旧 step 一律预览 + ref。
+
+v1 建议：
+
+- 工具层先限长：`read` 加 `offset/limit`，`bash` / `fetch` 截断，`bash.structured` 不再复制 stdout/stderr。
+- 仍超限的 `tool.result` 写时 spill。
+- 模型投影：当前 step 内、单条不超回填上限的结果取回全文；其余预览 + ref。
+- 模型需要更多 → `recall({ ref, offset, limit })`。
+- 不做“按剩余预算、最近优先”的动态回填；不做旧事件批量 offload 当性能药。
+
+失败行为：
+
+- blob 写失败：保留内联；若超过硬上限，截断并写警告事件；工具调用仍算成功。
+- blob 缺失/哈希不符：投影用预览 + `[blob missing]`；`recall` 明确报错；`doctor --deep` 报告。
+
+### 4.5 模型投影
+
+- `projectHistory` 从有效压缩链尾之后开始，先放摘要消息，再放尾部事件。
+- 边界保护：若头部出现没有对应 `tool_use` 的 `tool_result`，向后移到下一个安全轮次起点；不把半对调用喂给模型。
+- 回填在投影前完成，投影保持纯函数。
+- `TokenEstimator` 每次模型调用后用真实 `usage.input` 校准；按模型记录因子。
+- 压缩压力计算与实际发送内容同源；`contextWindow` 乘 0.9 安全系数。
+- 子 agent 同样使用该投影；超过预算先压缩或硬停，不无限增长。
+
+### 4.6 UI 契约
+
+UI 不复用模型投影。列表接口只返回元数据和预览：
+
+```ts
+interface UiTimelineItem {
+  id: string
+  seq?: number
+  type: string
+  ts: string
+  actor: string
+  status?: 'running' | 'ok' | 'error' | 'cancelled'
+  title: string
+  summary?: string
+  content?: {
+    preview: string
+    bytes: number
+    mime?: string
+    encoding?: string
+    ref?: string
+    truncated: boolean
+  }
+  tool?: { name: string; argsPreview?: string; resultPreview?: string; isError?: boolean; durationMs?: number }
+  compaction?: { summary: unknown; anchor: unknown; tokensBefore: number; tokensAfter: number }
+  agent?: { requestId: string; preset: string; status: string }
+  usage?: { input: number; output: number; cacheRead: number }
+}
+
+interface PayloadSlice {
+  data: string | Uint8Array
+  offset: number
+  bytes: number
+  eof: boolean
+}
+```
+
+接口：
+
+- `getTimeline(sessionId, cursor, limit)`：按 `seq` 或事件 id 游标分页。
+- `getPayload(ref, offset, limit)`：按 range 取全文；校验 ref 后读 blob。
+- `getApprovals(sessionId)`：独立审批队列，不走消息列表。
+- `getAgents()`：queued / running / terminal。
+- `getSessionStats(sessionId)`：事件数、内联字节、blob 字节、压缩次数、token/费用。
+
+UI 行为：
+
+- 时间线虚拟滚动，只渲染视口。
+- 工具卡默认折叠；展开全文是人的操作，**不改变模型上下文**。
+- 审批收件箱常驻，不依赖某条消息是否展开。
+- 压缩卡带 anchor 和“查看原文”，原文进归档视图。
+- 子 agent 独立面板；父会话只放请求卡。
+- 大文本卡内分页；复制/下载走 blob。
+- 工具输出按不可信内容处理：HTML 不直接渲染，禁脚本/iframe，CSP 兜底。
+- 流式更新节流、增量 append，不深拷贝整条消息。
+- UI 技术栈后定；先做契约和 CLI `if show` 验证。
+
+### 4.7 子 agent 加固
+
+- 只读预设：硬过滤写工具（已做）。
+- 非只读预设：危险工具默认要审批，不再在 guard 里直接 `allow`；按预设显式信任才可放行。
+- 预算：每请求/每会话 token、费用、步数、时长上限；队列上限；并发上限。
+- 队列恢复：启动读 `agent.requested`，找不到终态的运行中请求标 `interrupted`；可选重排。
+- 子 agent 上下文：压缩或硬 token 上限；与主 agent 共用卸载策略。
+- 跨流取回：`contentRef` 带 `sessionId`/`stream`；`recall` 显式允许跨流时校验归属。
+- 结果：父会话只收摘要卡；完整 transcript 在 agent 视图，按需取。
+
+### 4.8 路径与权限
+
+- `sessionId`：`^[A-Za-z0-9._-]{1,128}$`；拼路径后 `resolve`，断言仍在 `sessions/` 下。
+- `logAddr`：日期 `^\d{4}-\d{2}-\d{2}$`；session 段同上；`n` 正整数；拼路径后断言在 `log/` 下。
+- `ref`：`^blob:[0-9a-f]{64}$`；拼路径后断言在 `blobs/` 下。
+- 工具路径：默认限制在配置的 workspace roots；越界需审批。
+- `fetch`：只允许 `http/https`；默认拒绝私网/链路本地/元数据地址；限制响应字节、重定向、超时；不带 `file://`。
+- UI：本地 API 绑 `127.0.0.1` + token；CORS allowlist；HTML 消毒。
+- 预览/日志脱敏：API key、token、密码字段打码。
+
+---
+
+## 5. 分阶段落地
+
+每阶段都必须过：`tsc --noEmit`、对应 demo、失败注入、基准门槛。任一不过，停在本阶段。
+
+### Phase 0：契约与测试骨架（本轮只做这个）
+
+- 本文档。
+- 测试目录骨架：`src/**/*.test.ts` 或 `tests/`。
+- 失败注入工具：临时 dataRoot、假网关、断点 hook。
+- 基准脚本：5k/20k/50k 事件；1KB/8KB/1MB 结果。
+
+回滚：无代码改动。
+
+### Phase 1：写入安全（P0）
+
+- `session-format`：header、`formatVersion`、`seq`、可恢复后缀。
+- `SessionWriter`：单会话串行；跨进程锁；stale lock 清理；段轮转锁内。
+- 路径校验：`sessionId`、`logAddr`、`ref`。
+- 修 `tool.result` 持久化：`ref / bytes / encoding / mime`。
+- `bash.structured` 去重；`fetch` 响应字节上限。
+- 子 agent 危险工具审批；预算字段。
+
+回滚：`formatVersion: 1` 读旧格式；新写入可开关 `writer: legacy`。
+
+### Phase 2：投影成本（P0）
+
+- `projectHistory` 从压缩链尾开始；边界保护。
+- `TokenEstimator.observe` 接入真实 usage；按模型因子；0.9 安全系数。
+- 子 agent 压缩/硬 token 上限。
+- 基准：50k 事件 projection 从 ~1.7s 降到与活跃尾部同量级。
+
+回滚：`projectionCut: false`；`tokenCalibration: false`。
+
+### Phase 3：卸载与取回
+
+- `BlobStore`：SHA-256、分片目录、原子写、路径校验、range 读取。
+- 写时 spill：`tool.result` 文本/结构化；预览生成。
+- `recall(ref, offset, limit)`；跨流可选。
+- 工具层限长：`read offset/limit`、`bash`/`fetch` 截断。
+- 失败注入：blob 写失败、缺失、哈希不符、磁盘满。
+
+回滚：`offload.enabled: false` → 全内联；已有 ref 仍可读。
+
+### Phase 4：UI 契约与 CLI 验证
+
+- `src/ui/timeline.ts`：UI 投影，纯函数。
+- `src/app/ui-api.ts`：timeline 分页、payload range、approvals、agents、stats。
+- CLI：`if show <session> [--full] [--ref]`、`if tail`、`if stats`。
+- 不写正式 UI。
+- 验收：10 万事件时间线分页不一次加载；展开 1MB 结果只取 range；审批队列独立。
+
+回滚：API 纯增，不影响现有 CLI。
+
+### Phase 5：段归档与 fork
+
+- 归档 manifest：已压缩且无活跃引用的段标记 archived；`read()` 默认跳过，`readAll()`/recall 可读。
+- fork：新会话 = 摘要 + 尾部事件 + blob 引用；旧会话只读留档。
+- `if export`：事件 + blob + manifest 打包。
+- 旧日志字节真正下降只在这里发生。
+
+回滚：archive manifest 可删；原段不动。
+
+### Phase 6：UI 实现（需单独定技术栈）
+
+- 虚拟时间线、工具卡、审批收件箱、子 agent 面板、压缩卡、token/费用条。
+- 安全：消毒、CSP、本地 API token。
+- 性能门槛：10 万事件首屏 < 1s；流式更新不触发全列表重绘。
+
+### Phase 7：观测与 CI
+
+- 指标：每步 read/project/render、事件数、内联/blob 字节、回填命中、token/费用、队列深度。
+- `doctor --deep`：blob 完整性、孤儿 agent、stale lock、磁盘、schema 版本。
+- 基准回归门槛；失败注入纳入 CI。
+
+---
+
+## 6. 待定决策
+
+这些需要你拍板，我不替你定：
+
+1. **UI 技术栈**：本地 Web（Vite + React/Svelte） / Tauri / Electron / 先 CLI。建议先契约 + CLI，栈后定。
+2. **单用户单机？** 影响鉴权、多客户端、锁策略。
+3. **卸载阈值**：单条字节/token、会话内联预算、每步回填预算。建议全部进配置。
+4. **回填策略**：当前 step 全回填 / 只回填最新一条 / 纯显式 recall。建议当前 step + 单条上限。
+5. **`structured` 处理**：小保留、大进 blob、还是完全不进事件。
+6. **`seq` 方案**：写入 envelope（格式 v2）还是按文件顺序虚拟序号。建议写入。
+7. **子 agent 危险工具**：一律审批 / 按预设信任 / 只读预设为主。建议默认审批。
+8. **费用预算**：每轮/每会话上限；超限硬停还是只警告。
+9. **保留与删除**：blob GC、会话删除、脱敏、导出；先不做自动删除。
+10. **UI 范围**：只聊天时间线，还是含任务板、进程流、多模态。
+
+---
+
+## 7. 本轮明确不做
+
+- 不写正式 UI。
+- 不做任务驱动的持久队列（只留事件与接口）。
+- 不做加密、压缩、多用户、远程访问。
+- 不重写旧日志来“回收字节”；旧数据靠段归档/fork。
+- 不引入 DSH 运行时依赖。
+- 不自动删除 blob。
+- 不在投影里做同步文件 IO。
+
+---
+
+## 8. 验收清单
+
+### 8.1 失败注入
+
+- [ ] blob 写完、事件未写 → 孤儿 blob，不产生悬空引用。
+- [ ] 事件写完、blob 未落盘 → 读时降级预览 + 报告。
+- [ ] JSONL 尾行半截 → 保留前缀，坏后缀单独存放。
+- [ ] 两个进程同时 append → 单写者拒绝/锁等待，不交错。
+- [ ] 崩溃留下 stale lock → 下次启动清理。
+- [ ] blob 哈希不符/缺失 → `recall` 报错，投影不崩。
+- [ ] `sessionId` / `logAddr` / `ref` 路径穿越 → 拒绝。
+- [ ] 工具执行后结果写失败 → 不重复副作用；记录未完成。
+- [ ] 子 agent 超时/中断/重启 → 终态正确，队列不丢。
+- [ ] 审批中重启 → 恢复或明确取消。
+- [ ] 10 万事件 + 1MB 结果 → 时间线分页、投影不 OOM。
+
+### 8.2 基准门槛
+
+- 50k 事件、1KB 结果：projection < 200ms（从链尾开始后）。
+- 20k 事件、8KB 结果：heap < 150MB（卸载后）。
+- 10 万事件：`if show` 首屏不加载全文，内存 < 200MB。
+- UI 流式 1MB 文本：峰值内存 < 300MB，不冻结。
+
+### 8.3 安全
+
+- 路径穿越、SSRF、HTML 注入、ref 伪造、审批绕过各有测试。
+- 工具输出不执行脚本。
+- 本地 API 未带 token 拒绝。
+
+---
+
+## 9. 代码位置索引
+
+| 主题 | 当前文件 |
+|---|---|
+| 事件存储 / 全量 read | `src/core/store.ts` |
+| 文件锁 | `src/core/lock.ts` |
+| 对话循环 / 每步投影 | `src/loop/run.ts` |
+| 子 agent 执行 / guard | `src/agents/run.ts` |
+| 子 agent 队列 | `src/agents/manager.ts` |
+| 会话文件路径 | `src/app/session.ts` |
+| 工具结果裁剪 | `src/compaction/prune.ts` |
+| 历史投影 | `src/projections/history.ts` |
+| token 估算 | `src/compaction/estimate.ts` |
+| spill | `src/tools/spill.ts` |
+| recall | `src/tools/builtin/recall.ts` |
+| 记忆地址解析 | `src/memory/quote.ts` |
+| 配置 / 装配 | `src/app/config.ts`、`src/app/bundle.ts` |
+
+---
+
+## 10. 一句话
+
+先把“不坏档、不越权、投影不扫全量”做稳，再谈卸载和 UI。卸载只对新数据减字节；旧数据靠段归档/fork。UI 和模型看两份投影，永远不要共用一份。

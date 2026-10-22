@@ -21,6 +21,7 @@ import type { ModelEvent } from '../model/types.ts'
 import { projectHistory } from '../projections/history.ts'
 import type { ApprovalRegistry, ToolResult } from '../tools/types.ts'
 import { executeTool } from '../tools/executor.ts'
+import { toolResultPayload } from '../tools/result-payload.ts'
 import type { ToolRegistry } from '../tools/registry.ts'
 
 export interface RunLoopOptions {
@@ -238,13 +239,7 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
         actor: 'tool',
         type: 'tool.result',
         refs: { toolCall: call.id },
-        payload: {
-          callId: call.id,
-          text: result.text ?? '',
-          isError: result.isError ?? false,
-          ...(result.structured !== undefined ? { structured: result.structured } : {}),
-          ...(result.mime ? { mime: result.mime } : {}),
-        },
+        payload: toolResultPayload(call.id, result),
       })
     }
   }

@@ -12,6 +12,7 @@
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { assertSafeSegment } from '../core/safe-path.ts'
 
 export interface QuoteAddress {
   readonly date: string
@@ -19,7 +20,7 @@ export interface QuoteAddress {
   readonly n: number
 }
 
-export const ADDRESS_PATTERN = /^(\d{4}-\d{2}-\d{2})-(.+)-(\d+)$/
+export const ADDRESS_PATTERN = /^(\d{4}-\d{2}-\d{2})-([A-Za-z0-9._-]{1,128})-(\d+)$/
 
 export function formatAddress(date: string, session: string, n: number): string {
   return `${date}-${session}-${n}`
@@ -28,7 +29,12 @@ export function formatAddress(date: string, session: string, n: number): string 
 export function parseAddress(address: string): QuoteAddress {
   const match = ADDRESS_PATTERN.exec(address)
   if (!match) throw new Error(`invalid quote address: ${address}`)
-  return { date: match[1], session: match[2], n: Number(match[3]) }
+  const session = assertSafeSegment(match[2]!, 'quote session')
+  const n = Number(match[3])
+  if (!Number.isSafeInteger(n) || n <= 0) {
+    throw new Error(`invalid quote address number: ${address}`)
+  }
+  return { date: match[1]!, session, n }
 }
 
 export function isValidAddress(address: string): boolean {

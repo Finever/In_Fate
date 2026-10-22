@@ -9,6 +9,7 @@
 import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { assertWithin, spillHash } from '../core/safe-path.ts'
 
 export interface SpillStore {
   put(text: string): string
@@ -30,8 +31,9 @@ export class FileSpillStore implements SpillStore {
   }
 
   get(ref: string): string {
-    const hash = ref.replace(/^spill:/, '')
-    return readFileSync(join(this.root, `${hash}.txt`), 'utf8')
+    const hash = spillHash(ref)
+    const file = assertWithin(this.root, join(this.root, `${hash}.txt`), 'spill ref')
+    return readFileSync(file, 'utf8')
   }
 }
 

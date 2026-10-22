@@ -50,6 +50,7 @@ presets.register({
   maxSteps: 8,
   timeoutMs: 120_000,
   readOnly: false,
+  allowDangerousTools: true,
   systemPrompt: '你是子 agent。先读文件，再写报告；完成后说明路径。',
 })
 

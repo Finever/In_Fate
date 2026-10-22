@@ -9,6 +9,42 @@
 import type { ToolContext, ToolDefinition, ToolResult } from '../types.ts'
 
 const DEFAULT_BASE = 'https://api.deepseek.com/v1/tools'
+/** 单次响应最多保留的字节；超过就截断，不把整个响应读进内存。 */
+const MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+
+async function readCapped(
+  response: Response,
+  maxBytes: number,
+): Promise<{ buffer: Buffer; truncated: boolean }> {
+  if (!response.body) return { buffer: Buffer.alloc(0), truncated: false }
+
+  const reader = response.body.getReader()
+  const chunks: Buffer[] = []
+  let total = 0
+  let truncated = false
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      if (total + value.length > maxBytes) {
+        const remaining = maxBytes - total
+        if (remaining > 0) chunks.push(Buffer.from(value.subarray(0, remaining)))
+        truncated = true
+        await reader.cancel()
+        break
+      }
+
+      total += value.length
+      chunks.push(Buffer.from(value))
+    }
+  } finally {
+    reader.releaseLock()
+  }
+
+  return { buffer: Buffer.concat(chunks), truncated }
+}
 
 interface FetchInput {
   readonly url: string
@@ -26,22 +62,24 @@ async function directFetch(input: FetchInput, context: ToolContext): Promise<Too
     signal: context.signal,
   })
 
-  const buffer = Buffer.from(await response.arrayBuffer())
+  const { buffer, truncated } = await readCapped(response, MAX_RESPONSE_BYTES)
   const mime = response.headers.get('content-type') ?? 'application/octet-stream'
   const textual =
     mime.startsWith('text/') ||
     mime.includes('json') ||
     mime.includes('xml') ||
     mime.includes('javascript')
+  const notice = truncated ? `\n…[response truncated at ${MAX_RESPONSE_BYTES} bytes]` : ''
 
   return {
-    text: textual
+    text: (textual
       ? new TextDecoder('utf-8').decode(buffer)
-      : `[binary ${buffer.length} bytes, ${mime}]`,
+      : `[binary ${buffer.length} bytes, ${mime}]`) + notice,
     structured: {
       backend: 'direct',
       status: response.status,
       headers: Object.fromEntries(response.headers.entries()),
+      ...(truncated ? { truncated: true, limitBytes: MAX_RESPONSE_BYTES } : {}),
     },
     bytes: buffer.length,
     encoding: textual ? 'utf-8' : 'binary',
@@ -71,7 +109,11 @@ async function deepseekFetch(input: FetchInput, context: ToolContext): Promise<T
     throw new Error(`deepseek fetch http ${response.status}: ${detail.slice(0, 300)}`)
   }
 
-  const payload = (await response.json()) as { content?: string }
+  const { buffer, truncated } = await readCapped(response, MAX_RESPONSE_BYTES)
+  if (truncated) {
+    throw new Error(`deepseek fetch response too large (> ${MAX_RESPONSE_BYTES} bytes)`)
+  }
+  const payload = JSON.parse(buffer.toString('utf8')) as { content?: string }
   const content = typeof payload.content === 'string' ? payload.content : ''
 
   return {

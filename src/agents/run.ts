@@ -19,7 +19,8 @@ import { projectHistory } from '../projections/history.ts'
 import { executeTool } from '../tools/executor.ts'
 import type { ToolRegistry } from '../tools/registry.ts'
 import type { ApprovalRegistry, ToolResult } from '../tools/types.ts'
-import type { AgentRequest, AgentResult, AgentUsage } from './types.ts'
+import { toolResultPayload } from '../tools/result-payload.ts'
+import type { AgentPreset, AgentRequest, AgentResult, AgentUsage } from './types.ts'
 
 export interface SubagentRuntime {
   readonly tools: ToolRegistry
@@ -80,6 +81,23 @@ function buildPrompt(request: AgentRequest): string {
   return parts.join('\n\n')
 }
 
+/**
+ * 子 agent 实际可用的工具名。
+ *
+ * 硬约束不依赖 guard：只读预设永远没有写工具；非只读预设的危险工具
+ * 只有 allowDangerousTools === true 才可见；子 agent 不再派活。
+ */
+export function allowedToolNames(preset: AgentPreset, tools: ToolRegistry): string[] {
+  const writeTools = new Set(['write', 'edit', 'bash'])
+  return preset.tools.filter(name => {
+    if (name === 'request_agent' || name.startsWith('agent_')) return false
+    if (preset.readOnly && writeTools.has(name)) return false
+    const policy = tools.policy(name)
+    if (policy?.approval === 'required' && preset.allowDangerousTools !== true) return false
+    return true
+  })
+}
+
 export async function runSubagent(
   request: AgentRequest,
   signal: AbortSignal,
@@ -88,14 +106,7 @@ export async function runSubagent(
   runtime: SubagentRuntime,
 ): Promise<AgentResult> {
   const preset = request.snapshot
-  // 硬约束：子 agent 只做一层，且只读预设永不拿写工具。
-  // 这两条不依赖 guard 或外部配置，预设写错也绕不过去。
-  const writeTools = new Set(['write', 'edit', 'bash'])
-  const allowedTools = preset.tools.filter(name =>
-    name !== 'request_agent'
-    && !name.startsWith('agent_')
-    && !(preset.readOnly && writeTools.has(name)))
-  const allowed = new Set(allowedTools)
+  const allowed = new Set(allowedToolNames(preset, runtime.tools))
 
   const resolve = runtime.models
     ? (provider: string, model: string): ResolvedModel => runtime.models!.resolve(provider, model)
@@ -228,8 +239,10 @@ export async function runSubagent(
             guard: name => {
               const policy = runtime.tools.policy(name)
               if (policy?.approval !== 'required') return 'allow'
-              // 只读预设拒绝；非只读预设放行它白名单里的工具。
-              return preset.readOnly ? 'deny' : 'allow'
+              // 危险工具默认拒绝；只有预设显式信任才放行。
+              return preset.allowDangerousTools === true && !preset.readOnly
+                ? 'allow'
+                : 'deny'
             },
           },
         })
@@ -247,12 +260,7 @@ export async function runSubagent(
         actor: 'tool',
         type: 'tool.result',
         refs: { toolCall: call.id },
-        payload: {
-          callId: call.id,
-          text: result.text ?? '',
-          isError: result.isError ?? false,
-          ...(result.structured !== undefined ? { structured: result.structured } : {}),
-        },
+        payload: toolResultPayload(call.id, result),
       })
     }
 

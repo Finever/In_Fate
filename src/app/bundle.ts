@@ -147,7 +147,12 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         stream: sessionStream(sessionId),
         actor: 'system',
         type: 'session.created',
-        payload: { sessionId, createdAt: now().toISOString() },
+        payload: {
+          sessionId,
+          createdAt: now().toISOString(),
+          formatVersion: 2,
+          seqBase: 0,
+        },
       })
     }
     return store
