@@ -10,7 +10,7 @@
  * @module if/app/bundle
  */
 
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AgentManager as AgentManagerType } from '../agents/manager.ts'
 import { AgentManager } from '../agents/manager.ts'
@@ -44,6 +44,18 @@ import { websearchTool } from '../tools/builtin/websearch.ts'
 import { writeTool } from '../tools/builtin/write.ts'
 import { FileSpillStore, SpillPolicy } from '../tools/spill.ts'
 import { ToolRegistry } from '../tools/registry.ts'
+import {
+  slicePayload,
+  type UiApproval,
+  type UiPayloadInput,
+  type UiPayloadSlice,
+  type UiSessionStats,
+} from '../ui/api.ts'
+import {
+  projectUiTimeline,
+  type UiTimelineOptions,
+  type UiTimelinePage,
+} from '../ui/timeline.ts'
 import type { AppConfig } from './config.ts'
 import type { Container } from './container.ts'
 import { applyPatches, mergeCompaction, mergePool } from './patch.ts'
@@ -85,6 +97,14 @@ export interface App {
   chat(options: ChatOptions): Promise<RunResult>
   /** 当前会话的历史投影。 */
   history(sessionId: string): readonly HistoryMessage[]
+  /** UI 时间线分页；只返回预览，不展开全文。 */
+  timeline(sessionId: string, options?: UiTimelineOptions): UiTimelinePage
+  /** 按 ref/事件 id 取全文切片。 */
+  payload(sessionId: string, input: UiPayloadInput): UiPayloadSlice
+  /** UI 用的会话统计。 */
+  uiStats(sessionId: string): UiSessionStats
+  /** 待审批队列；不经过消息列表。 */
+  uiApprovals(sessionId?: string): UiApproval[]
   /** 手动压缩；返回本次压缩载荷，没有可压的返回 null。 */
   compact(sessionId: string): Promise<CompactionPayload | null>
   /** 新建会话 id（不落盘，首次 chat 时创建）。 */
@@ -310,6 +330,90 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
 
     history(sessionId) {
       return projectHistory(storeFor(sessionId).read())
+    },
+
+    timeline(sessionId, options) {
+      return projectUiTimeline(sessionId, storeFor(sessionId).read(), options)
+    },
+
+    payload(sessionId, input) {
+      const store = storeFor(sessionId)
+      let text: string | undefined
+      let mime: string | undefined
+      let encoding: string | undefined
+
+      if (input.ref) {
+        text = spill.store.get(input.ref)
+        mime = 'text/plain'
+        encoding = 'utf-8'
+      } else if (input.eventId) {
+        const event = store.read().find(item => item.id === input.eventId)
+        if (!event) throw new Error(`event not found: ${input.eventId}`)
+        const payload = event.payload as {
+          text?: unknown
+          ref?: unknown
+          mime?: unknown
+          encoding?: unknown
+          contentRef?: { ref?: unknown } | undefined
+        }
+        const ref = typeof payload.ref === 'string'
+          ? payload.ref
+          : typeof payload.contentRef?.ref === 'string'
+            ? payload.contentRef.ref
+            : undefined
+        text = ref ? spill.store.get(ref) : String(payload.text ?? '')
+        mime = typeof payload.mime === 'string' ? payload.mime : undefined
+        encoding = typeof payload.encoding === 'string' ? payload.encoding : 'utf-8'
+      } else {
+        throw new Error('payload needs ref or eventId')
+      }
+
+      return slicePayload(
+        text,
+        input.offset ?? 0,
+        input.limit ?? 20_000,
+        {
+          ...(mime ? { mime } : {}),
+          ...(encoding ? { encoding } : {}),
+        },
+      )
+    },
+
+    uiStats(sessionId) {
+      const store = storeFor(sessionId)
+      const events = store.read()
+      const segments = store.segments()
+      let fileBytes = 0
+      for (const segment of segments) {
+        try {
+          fileBytes += statSync(segment).size
+        } catch {
+          // 段可能刚被轮转/清理
+        }
+      }
+      return {
+        sessionId,
+        events: events.length,
+        turns: events.filter(event => event.type === 'turn.completed').length,
+        compacted: events.filter(event => event.type === 'context.compacted').length,
+        pruned: events.filter(event => event.type === 'compaction.pruned').length,
+        lastSeq: events.at(-1)?.seq ?? Math.max(0, events.length - 1),
+        fileBytes,
+        segments: segments.length,
+      }
+    },
+
+    uiApprovals(sessionId) {
+      return approvals
+        .pending()
+        .filter(entry => !sessionId || entry.sessionId === sessionId)
+        .map(entry => ({
+          approvalId: entry.approvalId,
+          sessionId: entry.sessionId,
+          toolCallId: entry.toolCallId,
+          toolName: entry.toolName,
+          input: entry.originalInput,
+        }))
     },
 
     async compact(sessionId) {

@@ -13,6 +13,7 @@ import { stdin, stdout } from 'node:process'
 import { parseArgs } from 'node:util'
 import type { ModelEvent } from '../model/types.ts'
 import type { ChatMessage } from '../projections/history.ts'
+import type { UiTimelineItem } from '../ui/timeline.ts'
 import type { PendingApproval } from '../tools/types.ts'
 import { bootstrap, classifyError } from './bootstrap.ts'
 import type { App } from './bundle.ts'
@@ -22,6 +23,11 @@ const HELP = `IF — In_Fate
 用法：
   if [chat] [-c 配置] [-s 会话]     进入对话（默认）
   if run <文本> [-s 会话]           单轮执行后退出
+  if show [会话] [--limit N]        查看会话窗时间线（分页预览）
+  if tail [会话] [--limit N]        查看最近几轮（show 的别名）
+  if payload <ref|事件id> [-s 会话] 取全文切片（--offset / --limit）
+  if stats [会话]                   会话统计
+  if approvals [-s 会话]            待审批队列
   if tools                          列出工具
   if agents                         列出子 agent
   if compact [-s 会话]              手动压缩
@@ -82,6 +88,21 @@ function oneLine(text: string, max = 120): string {
   return flat.length <= max ? flat : flat.slice(0, max) + '…'
 }
 
+function numberArg(value: unknown): number | undefined {
+  if (typeof value !== 'string' || value.trim() === '') return undefined
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? Math.floor(parsed) : undefined
+}
+
+function printTimeline(items: readonly UiTimelineItem[]): void {
+  for (const item of items) {
+    const tool = item.tool ? ` · ${item.tool.name}` : ''
+    stdout.write(`[${item.seq}] ${item.kind}${tool} ${item.title}\n`)
+    const text = item.content?.preview ?? item.tool?.result?.preview
+    if (text) stdout.write(`  ${oneLine(text, 160)}\n`)
+  }
+}
+
 function statsText(result: { steps: number; usage: { input: number; output: number; cacheRead: number } }): string {
   const { steps, usage } = result
   return `（${steps} 步 · 输入 ${usage.input} / 输出 ${usage.output} / 缓存 ${usage.cacheRead}）`
@@ -105,6 +126,10 @@ export async function runCli(argv: string[]): Promise<void> {
       config: { type: 'string', short: 'c' },
       session: { type: 'string', short: 's' },
       json: { type: 'boolean' },
+      limit: { type: 'string' },
+      before: { type: 'string' },
+      after: { type: 'string' },
+      offset: { type: 'string' },
       help: { type: 'boolean', short: 'h' },
     },
   })
@@ -133,6 +158,79 @@ export async function runCli(argv: string[]): Promise<void> {
   try {
     if (command === 'chat') {
       await chat(app, typeof values.session === 'string' ? values.session : undefined)
+    } else if (command === 'show' || command === 'tail') {
+      const sessionId = typeof values.session === 'string'
+        ? values.session
+        : (rest[0] ?? app.sessions()[0]?.id)
+      if (!sessionId) {
+        stdout.write('（没有会话）\n')
+        return
+      }
+      const limit = numberArg(values.limit) ?? 20
+      const before = numberArg(values.before)
+      const after = numberArg(values.after)
+      const page = app.timeline(sessionId, {
+        limit,
+        ...(before !== undefined ? { before } : {}),
+        ...(after !== undefined ? { after } : {}),
+      })
+      if (values.json) {
+        stdout.write(JSON.stringify(page, null, 2) + '\n')
+      } else {
+        printTimeline(page.items)
+        stdout.write(
+          `\n（${page.turns} 轮；上翻${page.hasMoreBefore ? '有' : '无'}更多，`
+          + `下翻${page.hasMoreAfter ? '有' : '无'}更多）\n`,
+        )
+      }
+    } else if (command === 'payload') {
+      const target = rest[0]
+      if (!target) {
+        process.stderr.write('payload: 缺少 ref 或事件 id\n')
+        process.exitCode = 1
+        return
+      }
+      const sessionId = typeof values.session === 'string'
+        ? values.session
+        : app.sessions()[0]?.id
+      if (!sessionId) {
+        stdout.write('（没有会话）\n')
+        return
+      }
+      const input = target.startsWith('spill:') || target.startsWith('blob:')
+        ? { ref: target }
+        : { eventId: target }
+      const slice = app.payload(sessionId, {
+        ...input,
+        ...(numberArg(values.offset) !== undefined ? { offset: numberArg(values.offset)! } : {}),
+        ...(numberArg(values.limit) !== undefined ? { limit: numberArg(values.limit)! } : {}),
+      })
+      if (values.json) {
+        stdout.write(JSON.stringify({ ...slice, data: undefined }, null, 2) + '\n')
+        stdout.write(slice.data + (slice.eof ? '' : '\n'))
+      } else {
+        stdout.write(slice.data)
+        if (!slice.eof) stdout.write('\n…\n')
+      }
+    } else if (command === 'stats') {
+      const sessionId = typeof values.session === 'string'
+        ? values.session
+        : (rest[0] ?? app.sessions()[0]?.id)
+      if (!sessionId) {
+        stdout.write('（没有会话）\n')
+        return
+      }
+      const stats = app.uiStats(sessionId)
+      stdout.write(values.json
+        ? JSON.stringify(stats, null, 2) + '\n'
+        : `${stats.sessionId}\t${stats.events} 事件\t${stats.turns} 轮\t`
+          + `${stats.compacted} 次压缩\t${stats.fileBytes} bytes\t${stats.segments} 段\n`)
+    } else if (command === 'approvals') {
+      const items = app.uiApprovals(typeof values.session === 'string' ? values.session : undefined)
+      if (items.length === 0) stdout.write('（没有待审批）\n')
+      for (const item of items) {
+        stdout.write(`${item.approvalId}\t${item.toolName}\t${JSON.stringify(item.input)}\n`)
+      }
     } else if (command === 'run') {
       const text = rest.join(' ').trim()
       if (!text) {
