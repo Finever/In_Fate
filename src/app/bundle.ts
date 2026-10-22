@@ -53,9 +53,11 @@ import {
 } from '../ui/api.ts'
 import {
   projectUiTimeline,
+  type UiTimelineItem,
   type UiTimelineOptions,
   type UiTimelinePage,
 } from '../ui/timeline.ts'
+import type { UiTurnMeta } from '../ui/index.ts'
 import type { AppConfig } from './config.ts'
 import type { Container } from './container.ts'
 import { applyPatches, mergeCompaction, mergePool } from './patch.ts'
@@ -64,9 +66,11 @@ import {
   listSessions,
   newSessionId,
   sessionFile,
+  uiIndexFile,
   type AgentRunInfo,
   type SessionInfo,
 } from './session.ts'
+import { UiIndex } from '../ui/index.ts'
 
 /** 永远可用的只读工具。 */
 const SAFE_TOOLS = [readTool, fetchTool, websearchTool] as const
@@ -99,6 +103,10 @@ export interface App {
   history(sessionId: string): readonly HistoryMessage[]
   /** UI 时间线分页；只返回预览，不展开全文。 */
   timeline(sessionId: string, options?: UiTimelineOptions): UiTimelinePage
+  /** 全部轮的轻量元数据，供虚拟列表使用。 */
+  uiTurns(sessionId: string): UiTurnMeta[]
+  /** 某一轮的全部卡片。 */
+  uiTurnItems(sessionId: string, turn: number): UiTimelineItem[]
   /** 按 ref/事件 id 取全文切片。 */
   payload(sessionId: string, input: UiPayloadInput): UiPayloadSlice
   /** UI 用的会话统计。 */
@@ -174,6 +182,20 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   container.onDispose('sessionWriters', () => {
     for (const writer of writers.values()) writer.close()
     writers.clear()
+  })
+
+  // UI 元数据索引：只加速分页，不是真相；坏了回退到纯投影。
+  const uiIndexes = new Map<string, UiIndex>()
+  const uiIndexFor = (sessionId: string): UiIndex => {
+    const current = uiIndexes.get(sessionId)
+    if (current) return current
+    const index = UiIndex.open(uiIndexFile(config.profile.dataRoot, sessionId))
+    uiIndexes.set(sessionId, index)
+    return index
+  }
+  container.onDispose('uiIndexes', () => {
+    for (const index of uiIndexes.values()) index.close()
+    uiIndexes.clear()
   })
 
   const ensureSession = (sessionId: string): EventStore => {
@@ -333,7 +355,49 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     },
 
     timeline(sessionId, options) {
-      return projectUiTimeline(sessionId, storeFor(sessionId).read(), options)
+      const store = storeFor(sessionId)
+      try {
+        const index = uiIndexFor(sessionId)
+        index.sync(store)
+        return index.page(sessionId, options)
+      } catch {
+        return projectUiTimeline(sessionId, store.read(), options)
+      }
+    },
+
+    uiTurns(sessionId) {
+      const store = storeFor(sessionId)
+      try {
+        const index = uiIndexFor(sessionId)
+        index.sync(store)
+        return index.turns()
+      } catch {
+        const page = projectUiTimeline(sessionId, store.read(), { limit: 200 })
+        const map = new Map<number, UiTurnMeta>()
+        for (const item of page.items) {
+          const prev = map.get(item.turn)
+          map.set(item.turn, {
+            turn: item.turn,
+            startSeq: prev?.startSeq ?? item.seq,
+            endSeq: item.seq,
+            itemCount: (prev?.itemCount ?? 0) + 1,
+          })
+        }
+        return [...map.values()].sort((a, b) => a.turn - b.turn)
+      }
+    },
+
+    uiTurnItems(sessionId, turn) {
+      const store = storeFor(sessionId)
+      try {
+        const index = uiIndexFor(sessionId)
+        index.sync(store)
+        return index.itemsOfTurn(turn)
+      } catch {
+        return projectUiTimeline(sessionId, store.read(), { limit: 200 })
+          .items
+          .filter(item => item.turn === turn)
+      }
     },
 
     payload(sessionId, input) {
@@ -381,25 +445,31 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
 
     uiStats(sessionId) {
       const store = storeFor(sessionId)
-      const events = store.read()
-      const segments = store.segments()
-      let fileBytes = 0
-      for (const segment of segments) {
-        try {
-          fileBytes += statSync(segment).size
-        } catch {
-          // 段可能刚被轮转/清理
+      try {
+        const index = uiIndexFor(sessionId)
+        index.sync(store)
+        return index.stats(sessionId, store)
+      } catch {
+        const events = store.read()
+        const segments = store.segments()
+        let fileBytes = 0
+        for (const segment of segments) {
+          try {
+            fileBytes += statSync(segment).size
+          } catch {
+            // 段可能刚被轮转/清理
+          }
         }
-      }
-      return {
-        sessionId,
-        events: events.length,
-        turns: events.filter(event => event.type === 'turn.completed').length,
-        compacted: events.filter(event => event.type === 'context.compacted').length,
-        pruned: events.filter(event => event.type === 'compaction.pruned').length,
-        lastSeq: events.at(-1)?.seq ?? Math.max(0, events.length - 1),
-        fileBytes,
-        segments: segments.length,
+        return {
+          sessionId,
+          events: events.length,
+          turns: events.filter(event => event.type === 'turn.completed').length,
+          compacted: events.filter(event => event.type === 'context.compacted').length,
+          pruned: events.filter(event => event.type === 'compaction.pruned').length,
+          lastSeq: events.at(-1)?.seq ?? Math.max(0, events.length - 1),
+          fileBytes,
+          segments: segments.length,
+        }
       }
     },
 

@@ -17,6 +17,7 @@ import type { UiTimelineItem } from '../ui/timeline.ts'
 import type { PendingApproval } from '../tools/types.ts'
 import { bootstrap, classifyError } from './bootstrap.ts'
 import type { App } from './bundle.ts'
+import { startServer } from './server.ts'
 
 const HELP = `IF — In_Fate
 
@@ -28,6 +29,7 @@ const HELP = `IF — In_Fate
   if payload <ref|事件id> [-s 会话] 取全文切片（--offset / --limit）
   if stats [会话]                   会话统计
   if approvals [-s 会话]            待审批队列
+  if serve [--port 8787] [--token]  启动本地 UI API（仅 127.0.0.1）
   if tools                          列出工具
   if agents                         列出子 agent
   if compact [-s 会话]              手动压缩
@@ -130,6 +132,9 @@ export async function runCli(argv: string[]): Promise<void> {
       before: { type: 'string' },
       after: { type: 'string' },
       offset: { type: 'string' },
+      port: { type: 'string' },
+      token: { type: 'string' },
+      host: { type: 'string' },
       help: { type: 'boolean', short: 'h' },
     },
   })
@@ -231,6 +236,24 @@ export async function runCli(argv: string[]): Promise<void> {
       for (const item of items) {
         stdout.write(`${item.approvalId}\t${item.toolName}\t${JSON.stringify(item.input)}\n`)
       }
+    } else if (command === 'serve') {
+      const handle = await startServer(app, {
+        ...(typeof values.port === 'string' ? { port: numberArg(values.port) ?? 8787 } : {}),
+        ...(typeof values.token === 'string' ? { token: values.token } : {}),
+        ...(typeof values.host === 'string' ? { host: values.host } : {}),
+      })
+      stdout.write(`IF UI API: ${handle.url}\n`)
+      stdout.write(`Token: ${handle.token}\n`)
+      stdout.write('Ctrl-C 停止。\n')
+      await new Promise<void>(resolve => {
+        const stop = (): void => {
+          process.off('SIGINT', stop)
+          resolve()
+        }
+        process.on('SIGINT', stop)
+      })
+      await handle.close()
+      return
     } else if (command === 'run') {
       const text = rest.join(' ').trim()
       if (!text) {

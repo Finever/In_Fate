@@ -26,6 +26,12 @@ export function sessionFile(dataRoot: string, sessionId: string): string {
   return join(sessionsDir(dataRoot), `${sessionId}.jsonl`)
 }
 
+/** UI 元数据索引；不是事件真相，坏了可以重建。 */
+export function uiIndexFile(dataRoot: string, sessionId: string): string {
+  assertSafeSessionId(sessionId)
+  return join(dataRoot, 'ui', `${sessionId}.sqlite`)
+}
+
 const SESSION_FILE = /^(.+)\.jsonl$/
 
 export function listSessions(dataRoot: string): SessionInfo[] {

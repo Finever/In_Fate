@@ -27,6 +27,7 @@ export interface UiToolCard {
   readonly argsPreview: string
   readonly argsBytes: number
   readonly result?: UiContent
+  readonly resultEventId?: string
   readonly isError: boolean
   readonly status: 'running' | 'ok' | 'error'
   readonly durationMs?: number
@@ -117,7 +118,7 @@ function bytesOf(text: string): number {
   return Buffer.byteLength(text, 'utf8')
 }
 
-function contentOf(
+export function uiContentOf(
   text: string,
   payload: Readonly<Record<string, unknown>>,
   pruned?: PruneItem,
@@ -144,7 +145,7 @@ function contentOf(
   }
 }
 
-function argsOf(event: Event): { preview: string; bytes: number } {
+export function uiArgsOf(event: Event): { preview: string; bytes: number } {
   try {
     const text = JSON.stringify(event.payload.args ?? {})
     return { preview: clip(text, ARGS_PREVIEW_CHARS), bytes: bytesOf(text) }
@@ -230,7 +231,7 @@ function itemsOfTurn(turn: Turn, pruned: Map<string, PruneItem>): UiTimelineItem
           ...base,
           kind: event.type === 'message.user' ? 'user' : 'system',
           title: event.type === 'message.user' ? '你' : '系统',
-          content: contentOf(textOf(event), event.payload),
+          content: uiContentOf(textOf(event), event.payload),
         })
         break
       }
@@ -240,7 +241,7 @@ function itemsOfTurn(turn: Turn, pruned: Map<string, PruneItem>): UiTimelineItem
           ...base,
           kind: 'assistant',
           title: '助手',
-          content: contentOf(textOf(event), event.payload),
+          content: uiContentOf(textOf(event), event.payload),
         })
         break
       }
@@ -250,14 +251,14 @@ function itemsOfTurn(turn: Turn, pruned: Map<string, PruneItem>): UiTimelineItem
           ...base,
           kind: 'thoughts',
           title: '思考',
-          content: contentOf(textOf(event), event.payload),
+          content: uiContentOf(textOf(event), event.payload),
         })
         break
       }
 
       case 'tool.call': {
         const callId = String(event.payload.callId ?? event.id)
-        const args = argsOf(event)
+        const args = uiArgsOf(event)
         const item: UiTimelineItem = {
           ...base,
           kind: 'tool',
@@ -283,12 +284,12 @@ function itemsOfTurn(turn: Turn, pruned: Map<string, PruneItem>): UiTimelineItem
         const prunedItem = pruned.get(event.id)
         const text = prunedItem?.preview ?? textOf(event)
         const raw = prunedItem
-          ? contentOf(text, {
+          ? uiContentOf(text, {
             ...event.payload,
             ...(prunedItem.ref ? { ref: prunedItem.ref } : {}),
             bytes: prunedItem.beforeBytes,
           })
-          : contentOf(text, event.payload)
+          : uiContentOf(text, event.payload)
         const existing = calls.get(callId)
         if (existing) {
           const started = callTimes.get(callId)
@@ -296,6 +297,7 @@ function itemsOfTurn(turn: Turn, pruned: Map<string, PruneItem>): UiTimelineItem
           const card: UiToolCard = {
             ...existing.tool!,
             result: raw,
+            resultEventId: event.id,
             isError: Boolean(event.payload.isError),
             status: event.payload.isError ? 'error' : 'ok',
             ...(typeof started === 'number' && Number.isFinite(started) && Number.isFinite(finished)
@@ -320,6 +322,7 @@ function itemsOfTurn(turn: Turn, pruned: Map<string, PruneItem>): UiTimelineItem
               argsPreview: '',
               argsBytes: 0,
               result: raw,
+              resultEventId: event.id,
               isError: Boolean(event.payload.isError),
               status: event.payload.isError ? 'error' : 'ok',
             },
@@ -340,7 +343,7 @@ function itemsOfTurn(turn: Turn, pruned: Map<string, PruneItem>): UiTimelineItem
           ...base,
           kind: 'compaction',
           title: '压缩摘要',
-          content: contentOf(goal, event.payload),
+          content: uiContentOf(goal, event.payload),
           compaction: {
             summary: payload.summary,
             anchor: payload.anchor,
