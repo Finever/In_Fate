@@ -118,6 +118,39 @@ function stripEchoedTimeTag(text: string, ts: string, timeZone: string): string 
   return text.slice(match[0].length)
 }
 
+const MESSAGE_EVENT_TYPES = new Set([
+  'message.user',
+  'message.system',
+  'message.assistant',
+  'tool.call',
+  'tool.result',
+])
+
+/**
+ * 能不能直接从压缩链尾开始投影。
+ *
+ * 只有链尾之前所有会进入消息的事件都被有效压缩区间覆盖时才允许；
+ * 否则保留全量投影，宁可慢，不丢未压缩的旧消息。
+ */
+export function findProjectionStart(
+  events: readonly Event[],
+  ranges: ReturnType<typeof buildCompactionIndex>['ranges'],
+  includeReasoning: boolean,
+): { readonly start: number; readonly end: number; readonly payload: CompactionPayload } | undefined {
+  const tail = ranges.at(-1)
+  if (!tail || tail.end < 0 || tail.end >= events.length) return undefined
+
+  for (let index = 0; index <= tail.end; index += 1) {
+    const event = events[index]!
+    const relevant = MESSAGE_EVENT_TYPES.has(event.type)
+      || (includeReasoning && event.type === 'thoughts.segment')
+    if (!relevant) continue
+    if (!ranges.some(range => index >= range.start && index <= range.end)) return undefined
+  }
+
+  return { start: tail.end + 1, end: tail.end, payload: tail.payload }
+}
+
 /** 投影。输入事件数组，输出消息数组；同样的输入永远同样的输出。 */
 export function projectHistory(
   events: readonly Event[],
@@ -133,8 +166,12 @@ export function projectHistory(
 
   let currentAssistant: ChatMessage | undefined
   const compaction = buildCompactionIndex(events)
-  let rangeCursor = 0
-  let skipUntil = -1
+  const cut = findProjectionStart(events, compaction.ranges, includeReasoning)
+  let rangeCursor = cut ? compaction.ranges.length : 0
+  let skipUntil = cut ? cut.end : -1
+  const startIndex = cut ? cut.start : 0
+
+  if (cut) messages.push(compactionMessage(cut.payload))
 
   const tag = (event: Event): string => (addTime ? formatTimeTag(event.ts, timeZone) : '')
 
@@ -145,7 +182,7 @@ export function projectHistory(
     return currentAssistant
   }
 
-  for (let eventIndex = 0; eventIndex < events.length; eventIndex += 1) {
+  for (let eventIndex = startIndex; eventIndex < events.length; eventIndex += 1) {
     const event = events[eventIndex]
 
     // 压缩区间：在起点插一条摘要，区间内的事件全部跳过。

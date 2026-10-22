@@ -7,6 +7,8 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import type { Event, NewEvent } from '../core/events.ts'
+import type { SessionWriter } from '../core/session-writer.ts'
 import { agentStream } from '../core/streams.ts'
 import type { EventStore } from '../core/store.ts'
 import {
@@ -19,11 +21,14 @@ import {
 
 export interface AgentManagerOptions {
   readonly storeFactory: (id: string) => EventStore
+  /** 每个 agent 流的单写者；不传则直接写 store */
+  readonly writerFactory?: (id: string) => SessionWriter
   readonly runner: (
     request: AgentRequest,
     signal: AbortSignal,
     store: EventStore,
     stream: string,
+    writer?: SessionWriter,
   ) => Promise<AgentResult>
   /** 终态回送：由调用方写入来源会话的系统消息 */
   readonly deliver?: (result: AgentResult, request: AgentRequest) => void
@@ -45,6 +50,7 @@ export class AgentManager {
   private readonly results = new Map<string, AgentResult>()
   private readonly runningProvider = new Map<string, number>()
   private readonly runningPreset = new Map<string, number>()
+  private readonly writers = new Map<string, SessionWriter>()
   private pumping = false
 
   constructor(options: AgentManagerOptions) {
@@ -68,8 +74,7 @@ export class AgentManager {
     }
 
     this.requests.set(request.id, request)
-    const store = this.options.storeFactory(request.id)
-    store.append({
+    this.append(request.id, {
       stream: agentStream(request.id),
       actor: 'user',
       type: 'agent.requested',
@@ -146,6 +151,7 @@ export class AgentManager {
       await new Promise(resolve => setTimeout(resolve, 20))
     }
     for (const request of [...this.queue]) this.interrupt(request.id)
+    for (const id of [...this.writers.keys()]) this.closeWriter(id)
   }
 
   activeCount(): number {
@@ -191,7 +197,8 @@ export class AgentManager {
     this.runningProvider.set(provider, (this.runningProvider.get(provider) ?? 0) + 1)
     this.runningPreset.set(request.preset, (this.runningPreset.get(request.preset) ?? 0) + 1)
 
-    const store = this.options.storeFactory(request.id)
+    const writer = this.writerFor(request.id)
+    const store = writer?.store ?? this.options.storeFactory(request.id)
     const stream = agentStream(request.id)
     const startedAt = new Date().toISOString()
     // 预设的超时是硬上限：到点中断，状态记 failed 而不是 cancelled。
@@ -200,7 +207,7 @@ export class AgentManager {
       timedOut = true
       controller.abort(new Error(`agent timeout after ${request.snapshot.timeoutMs}ms`))
     }, request.snapshot.timeoutMs)
-    store.append({
+    this.append(request.id, {
       stream,
       actor: 'agent',
       type: 'agent.started',
@@ -210,7 +217,7 @@ export class AgentManager {
     void (async () => {
       let result: AgentResult
       try {
-        const produced = await this.options.runner(request, controller.signal, store, stream)
+        const produced = await this.options.runner(request, controller.signal, store, stream, writer)
         // 身份以 manager 的请求为准，不信任 runner 返回的 id；超时统一记 failed。
         result = {
           ...produced,
@@ -243,9 +250,13 @@ export class AgentManager {
         }
       } finally {
         clearTimeout(timer)
+      }
+      // 先写终态/关写者，再释放并发名额；否则 dispose 可能在终态写入前关锁。
+      try {
+        this.finish(result)
+      } finally {
         this.release(request)
       }
-      this.finish(result)
     })()
   }
 
@@ -262,7 +273,6 @@ export class AgentManager {
     if (this.results.has(result.id)) return
     this.results.set(result.id, result)
 
-    const store = this.options.storeFactory(result.id)
     const stream = agentStream(result.id)
     const type = result.status === 'completed'
       ? 'agent.completed'
@@ -272,7 +282,7 @@ export class AgentManager {
           ? 'agent.interrupted'
           : 'agent.failed'
 
-    store.append({
+    this.append(result.id, {
       stream,
       actor: 'agent',
       type,
@@ -286,9 +296,32 @@ export class AgentManager {
         ...(result.error ? { error: result.error } : {}),
       },
     })
+    // agent 流到此结束，释放写者锁；后续只读。
+    this.closeWriter(result.id)
 
     const request = this.requests.get(result.id)
     if (request) this.options.deliver?.(result, request)
     void this.pump()
+  }
+
+  private writerFor(id: string): SessionWriter | undefined {
+    if (!this.options.writerFactory) return undefined
+    const existing = this.writers.get(id)
+    if (existing && !existing.closed) return existing
+    const writer = this.options.writerFactory(id)
+    this.writers.set(id, writer)
+    return writer
+  }
+
+  private append(id: string, input: NewEvent): Event {
+    const writer = this.writerFor(id)
+    return writer ? writer.append(input) : this.options.storeFactory(id).append(input)
+  }
+
+  private closeWriter(id: string): void {
+    const writer = this.writers.get(id)
+    if (!writer) return
+    this.writers.delete(id)
+    writer.close()
   }
 }

@@ -20,7 +20,7 @@ export interface LockOptions {
   readonly staleMs?: number
 }
 
-interface LockMeta {
+export interface LockMeta {
   readonly pid: number
   readonly host: string
   readonly startedAt: string
@@ -28,7 +28,7 @@ interface LockMeta {
 
 const HOST = hostname()
 
-function readMeta(path: string): LockMeta | undefined {
+export function readLockMeta(path: string): LockMeta | undefined {
   try {
     const raw = JSON.parse(readFileSync(path, 'utf8')) as Partial<LockMeta>
     if (typeof raw.pid !== 'number' || typeof raw.host !== 'string') return undefined
@@ -48,7 +48,7 @@ function pidAlive(pid: number): boolean {
   }
 }
 
-function isStale(path: string, meta: LockMeta | undefined, staleMs: number): boolean {
+export function lockIsStale(path: string, meta: LockMeta | undefined, staleMs: number): boolean {
   if (meta?.host === HOST) return !pidAlive(meta.pid)
   try {
     return Date.now() - statSync(path).mtimeMs > staleMs
@@ -88,8 +88,8 @@ export async function withFileLock<T>(
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
 
-      const meta = readMeta(path)
-      if (isStale(path, meta, staleMs)) {
+      const meta = readLockMeta(path)
+      if (lockIsStale(path, meta, staleMs)) {
         try {
           unlinkSync(path)
         } catch {

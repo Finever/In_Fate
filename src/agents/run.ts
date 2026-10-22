@@ -10,6 +10,8 @@
 import type { Profile } from '../config/profile.ts'
 import { renderContext } from '../context/pipeline.ts'
 import { staticSection, timeSection } from '../context/sections.ts'
+import type { Event, NewEvent } from '../core/events.ts'
+import type { SessionWriter } from '../core/session-writer.ts'
 import type { EventStore } from '../core/store.ts'
 import { agentStream } from '../core/streams.ts'
 import { chatOpenAI } from '../model/openai.ts'
@@ -27,6 +29,8 @@ export interface SubagentRuntime {
   readonly approvals: ApprovalRegistry
   readonly profile: Profile
   readonly cwd: string
+  /** 子 agent 自己的会话写者；不传则直接写 store */
+  readonly writer?: SessionWriter
   /** 传了就用实例注册表；不传退回模块级默认实例（旧 demo 兼容） */
   readonly models?: ModelRegistry
 }
@@ -107,6 +111,8 @@ export async function runSubagent(
 ): Promise<AgentResult> {
   const preset = request.snapshot
   const allowed = new Set(allowedToolNames(preset, runtime.tools))
+  const append = (input: NewEvent): Event =>
+    runtime.writer ? runtime.writer.append(input) : store.append(input)
 
   const resolve = runtime.models
     ? (provider: string, model: string): ResolvedModel => runtime.models!.resolve(provider, model)
@@ -120,7 +126,7 @@ export async function runSubagent(
   let status: AgentResult['status'] = 'completed'
   let errorText: string | undefined
 
-  store.append({
+  append({
     stream,
     actor: 'user',
     type: 'message.user',
@@ -183,7 +189,7 @@ export async function runSubagent(
     usage.cacheRead += collected.usage.cacheRead
 
     if (collected.reasoning) {
-      store.append({
+      append({
         stream,
         actor: 'agent',
         type: 'thoughts.segment',
@@ -193,7 +199,7 @@ export async function runSubagent(
 
     if (collected.text) {
       lastText = collected.text
-      store.append({
+      append({
         stream,
         actor: 'agent',
         type: 'message.assistant',
@@ -204,7 +210,7 @@ export async function runSubagent(
     steps += 1
 
     if (collected.calls.length === 0) {
-      store.append({
+      append({
         stream,
         actor: 'agent',
         type: 'agent.step',
@@ -214,7 +220,7 @@ export async function runSubagent(
     }
 
     for (const call of collected.calls) {
-      store.append({
+      append({
         stream,
         actor: 'agent',
         type: 'tool.call',
@@ -255,7 +261,7 @@ export async function runSubagent(
         if (typeof path === 'string') artifacts.add(path)
       }
 
-      store.append({
+      append({
         stream,
         actor: 'tool',
         type: 'tool.result',
@@ -264,7 +270,7 @@ export async function runSubagent(
       })
     }
 
-    store.append({
+    append({
       stream,
       actor: 'agent',
       type: 'agent.step',

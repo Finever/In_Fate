@@ -12,6 +12,8 @@ export interface CompactionConfig {
   readonly keepRecentTurns: number
   /** 保留最近多少比例的窗口 token */
   readonly keepRecentTokenRatio: number
+  /** 模型卡窗口的保守系数；默认 0.9，防止声明值高于真实上限 */
+  readonly contextSafetyMargin?: number
   readonly minTurnsBetween: number
   readonly pruneThresholdBytes: number
   readonly prunePreviewChars: number
@@ -25,6 +27,7 @@ export const DEFAULT_COMPACTION: CompactionConfig = {
   targetAt: 0.4,
   keepRecentTurns: 12,
   keepRecentTokenRatio: 0.25,
+  contextSafetyMargin: 0.9,
   minTurnsBetween: 5,
   pruneThresholdBytes: 8 * 1024,
   prunePreviewChars: 500,

@@ -23,6 +23,7 @@ import type { CompactionConfig, CompactionPayload } from '../compaction/types.ts
 import { staticSection, memorySection, timeSection } from '../context/sections.ts'
 import type { ContextSection } from '../context/types.ts'
 import { registerCoreEvents } from '../core/registry.ts'
+import { SessionWriter } from '../core/session-writer.ts'
 import { EventStore } from '../core/store.ts'
 import { sessionStream } from '../core/streams.ts'
 import { defaultSources } from '../memory/sources.ts'
@@ -140,10 +141,25 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   }
   container.register('sessionStore', storeFor)
 
+  // 每会话一个长写者；同一时刻只允许一个进程/实例持锁。
+  const writers = new Map<string, SessionWriter>()
+  const writerFor = (sessionId: string): SessionWriter => {
+    const current = writers.get(sessionId)
+    if (current && !current.closed) return current
+    const writer = SessionWriter.open(storeFor(sessionId))
+    writers.set(sessionId, writer)
+    return writer
+  }
+  container.register('sessionWriter', writerFor)
+  container.onDispose('sessionWriters', () => {
+    for (const writer of writers.values()) writer.close()
+    writers.clear()
+  })
+
   const ensureSession = (sessionId: string): EventStore => {
     const store = storeFor(sessionId)
     if (store.lineCount() === 0) {
-      store.append({
+      writerFor(sessionId).append({
         stream: sessionStream(sessionId),
         actor: 'system',
         type: 'session.created',
@@ -198,17 +214,19 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
 
   const agents = new AgentManager({
     storeFactory: storeFor,
+    writerFactory: writerFor,
     config: pool,
-    runner: (request, signal, store, stream) => runSubagent(request, signal, store, stream, {
+    runner: (request, signal, store, stream, writer) => runSubagent(request, signal, store, stream, {
       tools,
       approvals,
       profile: config.profile,
       cwd,
+      ...(writer ? { writer } : {}),
       models,
     }),
     // 终态回送来源会话；正文自带分类标记，模型能认出这不是用户说的。
     deliver: (result, request) => {
-      const store = storeFor(request.source.session)
+      const writer = writerFor(request.source.session)
       const lines = [
         `子 agent 结束：${result.id}`,
         `预设：${result.preset}｜状态：${result.status}｜步数：${result.steps}`,
@@ -217,7 +235,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         result.error ? `错误：${result.error}` : '',
       ].filter(Boolean)
 
-      store.append({
+      writer.append({
         stream: sessionStream(request.source.session),
         actor: 'system',
         type: 'message.system',
@@ -263,8 +281,10 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
 
     async chat(input) {
       const store = ensureSession(input.sessionId)
+      const writer = writerFor(input.sessionId)
       return runTurn(input.text, {
         store,
+        writer,
         sessionId: input.sessionId,
         profile: config.profile,
         model: defaultModel,
@@ -294,6 +314,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
 
     async compact(sessionId) {
       const store = storeFor(sessionId)
+      const writer = writerFor(sessionId)
       const history = projectHistory(store.read())
       const rendered = renderContext({
         sections,
@@ -308,6 +329,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
 
       return compactIfNeeded({
         store,
+        writer,
         stream: sessionStream(sessionId),
         config: compaction,
         estimator,

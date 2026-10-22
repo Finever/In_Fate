@@ -13,6 +13,8 @@ import type { TokenEstimator } from '../compaction/estimate.ts'
 import { compactIfNeeded } from '../compaction/fold.ts'
 import type { CompactionConfig, Summarizer } from '../compaction/types.ts'
 import type { SpillPolicy } from '../tools/spill.ts'
+import type { Event, NewEvent } from '../core/events.ts'
+import type { SessionWriter } from '../core/session-writer.ts'
 import type { EventStore } from '../core/store.ts'
 import { sessionStream } from '../core/streams.ts'
 import { chatOpenAI, type ChatRequest } from '../model/openai.ts'
@@ -26,6 +28,8 @@ import type { ToolRegistry } from '../tools/registry.ts'
 
 export interface RunLoopOptions {
   readonly store: EventStore
+  /** 会话写者；不传则直接写 store（demo/单测兼容） */
+  readonly writer?: SessionWriter
   readonly sessionId: string
   readonly profile: Profile
   readonly model: ResolvedModel
@@ -83,8 +87,10 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
   const agentId = options.profile.principals.agents?.[0]?.id ?? 'agent'
   const cwd = options.cwd ?? process.cwd()
   const maxSteps = options.maxSteps ?? 32
+  const append = (input: NewEvent): Event =>
+    options.writer ? options.writer.append(input) : options.store.append(input)
 
-  options.store.append({
+  append({
     stream,
     actor: 'user',
     actorId: userId,
@@ -108,6 +114,7 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
       })
       await compactIfNeeded({
         store: options.store,
+        ...(options.writer ? { writer: options.writer } : {}),
         stream,
         config: options.compaction.config,
         estimator: options.compaction.estimator,
@@ -123,7 +130,7 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
         ...(options.compaction.spill ? { spill: options.compaction.spill } : {}),
       })
     } catch (error) {
-      options.store.append({
+      append({
         stream,
         actor: 'system',
         type: 'compaction.failed',
@@ -166,6 +173,7 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
     const text: string[] = []
     const reasoning: string[] = []
     const calls: { id: string; name: string; arguments: string }[] = []
+    let stepInput = 0
 
     try {
       for await (const event of chatOpenAI(request)) {
@@ -177,6 +185,7 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
           usage.input += event.input ?? 0
           usage.output += event.output ?? 0
           usage.cacheRead += event.cacheRead ?? 0
+          stepInput += event.input ?? 0
         }
       }
     } catch (error) {
@@ -186,8 +195,16 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
       break
     }
 
+    // 用真实 usage 校准估算器；没有 usage 的提供方保持原系数。
+    if (stepInput > 0 && options.compaction) {
+      const chars = JSON.stringify(request.messages).length
+        + request.system.length
+        + JSON.stringify(request.tools).length
+      options.compaction.estimator.observe(chars, stepInput)
+    }
+
     if (reasoning.length > 0) {
-      options.store.append({
+      append({
         stream,
         actor: 'agent',
         actorId: agentId,
@@ -197,7 +214,7 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
     }
 
     if (text.length > 0) {
-      options.store.append({
+      append({
         stream,
         actor: 'agent',
         actorId: agentId,
@@ -210,7 +227,7 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
     if (calls.length === 0) break
 
     for (const call of calls) {
-      options.store.append({
+      append({
         stream,
         actor: 'agent',
         actorId: agentId,
@@ -234,7 +251,7 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
         result = { text: error instanceof Error ? error.message : String(error), isError: true }
       }
 
-      options.store.append({
+      append({
         stream,
         actor: 'tool',
         type: 'tool.result',
@@ -247,7 +264,7 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
   if (steps >= maxSteps) hitLimit = true
   const aborted = options.signal?.aborted ?? false
 
-  options.store.append({
+  append({
     stream,
     actor: 'system',
     type: 'turn.completed',

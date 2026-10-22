@@ -6,7 +6,8 @@
  * @module if/compaction/fold
  */
 
-import type { Event } from '../core/events.ts'
+import type { Event, NewEvent } from '../core/events.ts'
+import type { SessionWriter } from '../core/session-writer.ts'
 import type { EventStore } from '../core/store.ts'
 import type { ToolSpec } from '../model/types.ts'
 import type { HistoryMessage } from '../projections/history.ts'
@@ -26,6 +27,8 @@ import type {
 
 export interface CompactOptions {
   readonly store: EventStore
+  /** 会话写者；不传则直接写 store */
+  readonly writer?: SessionWriter
   readonly stream: string
   readonly config: CompactionConfig
   readonly estimator: TokenEstimator
@@ -88,7 +91,11 @@ function limitFacts(facts: ExtractedFacts, maxChars: number): ExtractedFacts {
 
 export async function compactIfNeeded(options: CompactOptions): Promise<CompactionPayload | null> {
   const currentTurn = options.currentTurn ?? 0
+  // 声明窗口可能高于真实上限；预算先打折，别等提供商拒收。
+  const contextWindow = options.contextWindow * (options.config.contextSafetyMargin ?? 0.9)
   const initialEvents = options.store.read()
+  const append = (input: NewEvent): Event =>
+    options.writer ? options.writer.append(input) : options.store.append(input)
 
   // 冷却：最近一次压缩/失败之后，未满 minTurnsBetween 不再压。
   const lastTurn = lastCompactionTurn(initialEvents)
@@ -115,7 +122,7 @@ export async function compactIfNeeded(options: CompactOptions): Promise<Compacti
       messages,
       system: options.system,
       tools: options.tools,
-      contextWindow: options.contextWindow,
+      contextWindow,
       maxOutputTokens: options.maxOutputTokens,
     }, options.estimator)
 
@@ -125,7 +132,7 @@ export async function compactIfNeeded(options: CompactOptions): Promise<Compacti
     if (attempt === 0 && options.spill) {
       const candidates = findPrunable(events, options.config.pruneThresholdBytes)
       if (candidates.length > 0) {
-        options.store.append({
+        append({
           stream: options.stream,
           actor: 'system',
           type: 'compaction.pruned',
@@ -141,7 +148,7 @@ export async function compactIfNeeded(options: CompactOptions): Promise<Compacti
       current,
       options.config,
       options.estimator,
-      options.contextWindow,
+      contextWindow,
       previous ? { afterEventId: previous.payload.anchor.toEventId } : {},
     )
     if (!range) break
@@ -196,7 +203,7 @@ export async function compactIfNeeded(options: CompactOptions): Promise<Compacti
       strategy: options.config.strategy,
     }
 
-    options.store.append({
+    append({
       stream: options.stream,
       actor: 'system',
       type: 'context.compacted',
