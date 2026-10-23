@@ -339,7 +339,11 @@ export class UiIndex {
       return
     }
 
-    if (event.type === 'message.user' || event.type === 'message.system') {
+    if (
+      event.type === 'message.user'
+      || event.type === 'message.system'
+      || event.type === 'session.message'
+    ) {
       this.currentTurn = this.maxTurn() + 1
       this.db.prepare(
         'INSERT OR REPLACE INTO ui_turns(turn, start_seq, end_seq) VALUES(?,?,?)',
@@ -363,6 +367,7 @@ export class UiIndex {
     switch (event.type) {
       case 'message.user':
       case 'message.system':
+      case 'session.message':
       case 'message.assistant':
       case 'thoughts.segment':
         this.insertItem(this.itemFor(event, this.currentTurn, seq))
@@ -484,6 +489,12 @@ export class UiIndex {
         return { ...base, kind: 'user', title: '你', content: uiContentOf(String(event.payload.text ?? ''), event.payload) }
       case 'message.system':
         return { ...base, kind: 'system', title: '系统', content: uiContentOf(String(event.payload.text ?? ''), event.payload) }
+      case 'session.message': {
+        const from = typeof event.payload.fromSession === 'string'
+          ? event.payload.fromSession
+          : (event.refs?.fromSession ?? '?')
+        return { ...base, kind: 'system', title: `跨会话 · ${from}`, content: uiContentOf(String(event.payload.text ?? ''), event.payload) }
+      }
       case 'message.assistant':
         return { ...base, kind: 'assistant', title: '助手', content: uiContentOf(String(event.payload.text ?? ''), event.payload) }
       case 'thoughts.segment':

@@ -58,6 +58,8 @@ export interface RunLoopOptions {
   readonly network?: NetworkGuard
   readonly metrics?: Metrics
   readonly signal?: AbortSignal
+  /** 触发事件已由调用方写入（跨会话消息/唤醒），本轮不再追加 message.user */
+  readonly skipStartEvent?: boolean
   /** 注入时间，保持可复现；默认读系统时间 */
   readonly now?: () => Date
   /** 流式回调，给 UI 用 */
@@ -112,13 +114,15 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
     else options.store.flush()
   }
 
-  append({
-    stream,
-    actor: 'user',
-    actorId: userId,
-    type: 'message.user',
-    payload: { text: userText },
-  })
+  if (!options.skipStartEvent) {
+    append({
+      stream,
+      actor: 'user',
+      actorId: userId,
+      type: 'message.user',
+      payload: { text: userText },
+    })
+  }
 
   // 本轮已产生结果的调用 id；重放时不再执行第二次副作用。
   const turnEvents = options.store.read()
@@ -186,13 +190,17 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
   let steps = 0
   let hitLimit = false
   let failure: string | undefined
+  /** 最后一轮模型请求实际看到的事件 seq；给跨会话唤醒判断是否已读。 */
+  let lastSeenSeq = -1
 
   while (steps < maxSteps) {
     if (options.signal?.aborted) break
     flush()
 
     // 每一步都从事件流重新投影：真相只有一份。
-    const history = projectHistory(options.store.read())
+    const snapshot = options.store.read()
+    lastSeenSeq = snapshot.at(-1)?.seq ?? Math.max(0, snapshot.length - 1)
+    const history = projectHistory(snapshot)
     const rendered = renderContext({
       sections: options.sections,
       history,
@@ -333,6 +341,7 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
       usage,
       aborted,
       hitLimit,
+      lastSeenSeq,
       ...(failure ? { error: failure } : {}),
     },
   })

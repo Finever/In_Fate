@@ -121,6 +121,7 @@ function stripEchoedTimeTag(text: string, ts: string, timeZone: string): string 
 const MESSAGE_EVENT_TYPES = new Set([
   'message.user',
   'message.system',
+  'session.message',
   'message.assistant',
   'tool.call',
   'tool.result',
@@ -218,6 +219,36 @@ export function projectHistory(
           origin: scheduled ? 'scheduled' : 'user',
         }
         if (scheduled && pending.size > 0) deferredSystem.push(message)
+        else messages.push(message)
+        break
+      }
+
+      case 'session.message': {
+        currentAssistant = undefined
+        const from = typeof event.payload.fromSession === 'string'
+          ? event.payload.fromSession
+          : (event.refs?.fromSession ?? '?')
+        const kind = typeof event.payload.kind === 'string' ? event.payload.kind : 'note'
+        const replyTo = typeof event.payload.replyTo === 'string' ? event.payload.replyTo : undefined
+        const link = typeof event.payload.linkId === 'string'
+          ? event.payload.linkId
+          : event.refs?.link
+        const body = tag(event) + textOf(event)
+        const message: ChatMessage = {
+          role: 'system',
+          content: [{
+            type: 'text',
+            text: markSystem('session', body, {
+              from,
+              kind,
+              ...(link ? { link } : {}),
+              ...(replyTo ? { replyTo } : {}),
+            }),
+          }],
+          sourceEventId: event.id,
+          origin: 'scheduled',
+        }
+        if (pending.size > 0) deferredSystem.push(message)
         else messages.push(message)
         break
       }

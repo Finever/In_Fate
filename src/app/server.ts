@@ -260,6 +260,49 @@ async function handle(app: App, req: IncomingMessage, res: ServerResponse, token
     return
   }
 
+  if (req.method === 'POST' && action === 'inbox' && parts.length === 4) {
+    const body = JSON.parse(await readBody(req)) as {
+      from?: unknown
+      text?: unknown
+      kind?: unknown
+      linkId?: unknown
+      replyTo?: unknown
+      wake?: unknown
+      hop?: unknown
+    }
+    if (typeof body.from !== 'string' || typeof body.text !== 'string') {
+      json(res, 400, { error: 'from and text are required' })
+      return
+    }
+    if (body.kind !== undefined
+      && body.kind !== 'note'
+      && body.kind !== 'question'
+      && body.kind !== 'result'
+      && body.kind !== 'wake') {
+      json(res, 400, { error: 'invalid kind' })
+      return
+    }
+    const delivery = app.sendMessage({
+      from: body.from,
+      to: sessionId,
+      text: body.text,
+      ...(typeof body.kind === 'string' ? { kind: body.kind as 'note' | 'question' | 'result' | 'wake' } : {}),
+      ...(typeof body.linkId === 'string' ? { linkId: body.linkId } : {}),
+      ...(typeof body.replyTo === 'string' ? { replyTo: body.replyTo } : {}),
+      ...(typeof body.wake === 'boolean' ? { wake: body.wake } : {}),
+      ...(typeof body.hop === 'number' ? { hop: body.hop } : {}),
+    })
+    json(res, 200, delivery)
+    return
+  }
+
+  if (req.method === 'POST' && action === 'wake' && parts.length === 4) {
+    const body = JSON.parse(await readBody(req)) as { text?: unknown }
+    const result = await app.wake(sessionId, typeof body.text === 'string' ? body.text : undefined)
+    json(res, 200, { result })
+    return
+  }
+
   if (req.method === 'POST' && action === 'messages' && parts.length === 4) {
     const body = JSON.parse(await readBody(req)) as { text?: unknown }
     if (typeof body.text !== 'string' || body.text.trim() === '') {

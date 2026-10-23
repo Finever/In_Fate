@@ -10,6 +10,7 @@
  * @module if/app/bundle
  */
 
+import { randomUUID } from 'node:crypto'
 import { mkdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AgentManager as AgentManagerType } from '../agents/manager.ts'
@@ -49,6 +50,11 @@ import {
   type SessionTail,
   type SessionTailOptions,
 } from './inspect.ts'
+import { SessionHost } from '../session/host.ts'
+import type {
+  SendSessionMessageInput,
+  SessionMessageDelivery,
+} from '../session/message.ts'
 import { projectHistory, type HistoryMessage } from '../projections/history.ts'
 import { renderContext } from '../context/pipeline.ts'
 import { runTurn, type RunResult } from '../loop/run.ts'
@@ -155,6 +161,11 @@ export interface App {
   /** 会话当前状态、pending 工具与连接。 */
   inspectSession(sessionId: string): SessionInspection
 
+  /** 往另一个已连接会话投递消息；目标空闲时按 wake 策略开一轮。 */
+  sendMessage(input: SendSessionMessageInput): SessionMessageDelivery
+  /** 手动唤醒一个会话；text 会作为 system 注入写入它的流。 */
+  wake(sessionId: string, text?: string): Promise<RunResult>
+
   /** 会话连接图。不传 sessionId 就返回全图。 */
   links(sessionId?: string, options?: LinkQuery): SessionLink[]
   /** 建立连接；createdBy 默认 user，只做溯源。 */
@@ -235,6 +246,11 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   const sessionGraph = new SessionGraph(graphStore, graphWriter)
   container.register('sessionGraph', sessionGraph)
   container.onDispose('sessionGraph', () => graphWriter.close())
+
+  // 同一会话同一时刻只允许一个 turn；不同会话并行。
+  const sessionHost = new SessionHost()
+  container.register('sessionHost', sessionHost)
+  container.onDispose('sessionHost', () => sessionHost.dispose())
 
   // 每个会话一个 store；同一进程里共用实例，避免重复打开。
   const stores = new Map<string, EventStore>()
@@ -468,6 +484,41 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
 
   let disposed = false
 
+  const runSessionTurn = (input: ChatOptions, skipStartEvent = false): Promise<RunResult> => {
+    const store = ensureSession(input.sessionId)
+    const writer = writerFor(input.sessionId)
+    return runTurn(input.text, {
+      store,
+      writer,
+      sessionId: input.sessionId,
+      profile: config.profile,
+      model: defaultModel,
+      tools,
+      approvals,
+      sections,
+      cwd,
+      now,
+      offload,
+      modelRetry,
+      ...(skipStartEvent ? { skipStartEvent: true } : {}),
+      ...(fsPolicy ? { sandbox: fsPolicy } : {}),
+      ...(networkPolicy ? { network: networkPolicy } : {}),
+      ...(metrics ? { metrics } : {}),
+      ...(maxBytes !== undefined ? { maxBytes } : {}),
+      ...(input.signal ? { signal: input.signal } : {}),
+      ...(input.onModelEvent ? { onModelEvent: input.onModelEvent } : {}),
+      compaction: {
+        config: compaction,
+        estimator,
+        contextWindow: defaultModel.model.contextWindow ?? 128_000,
+        ...(defaultModel.model.maxOutputTokens !== undefined
+          ? { maxOutputTokens: defaultModel.model.maxOutputTokens }
+          : {}),
+        spill,
+      },
+    })
+  }
+
   const app: App = {
     config,
     models,
@@ -478,37 +529,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     compaction,
 
     async chat(input) {
-      const store = ensureSession(input.sessionId)
-      const writer = writerFor(input.sessionId)
-      return runTurn(input.text, {
-        store,
-        writer,
-        sessionId: input.sessionId,
-        profile: config.profile,
-        model: defaultModel,
-        tools,
-        approvals,
-        sections,
-        cwd,
-        now,
-        offload,
-        modelRetry,
-        ...(fsPolicy ? { sandbox: fsPolicy } : {}),
-        ...(networkPolicy ? { network: networkPolicy } : {}),
-        ...(metrics ? { metrics } : {}),
-        ...(maxBytes !== undefined ? { maxBytes } : {}),
-        ...(input.signal ? { signal: input.signal } : {}),
-        ...(input.onModelEvent ? { onModelEvent: input.onModelEvent } : {}),
-        compaction: {
-          config: compaction,
-          estimator,
-          contextWindow: defaultModel.model.contextWindow ?? 128_000,
-          ...(defaultModel.model.maxOutputTokens !== undefined
-            ? { maxOutputTokens: defaultModel.model.maxOutputTokens }
-            : {}),
-          spill,
-        },
-      })
+      return sessionHost.run(input.sessionId, () => runSessionTurn(input))
     },
 
     history(sessionId) {
@@ -749,6 +770,88 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
 
     unlink(linkId, reason) {
       return sessionGraph.close(linkId, 'user', reason)
+    },
+
+    sendMessage(input) {
+      const kind = input.kind ?? 'note'
+      const wake = input.wake ?? kind !== 'note'
+      const link = input.linkId
+        ? sessionGraph.get(input.linkId)
+        : sessionGraph.links(input.from, { includeClosed: false }).find(item =>
+          (item.from === input.from && item.to === input.to)
+          || (item.to === input.from && item.from === input.to))
+      if (!link || link.status !== 'active') {
+        throw new Error(`no active link: ${input.from} -> ${input.to}`)
+      }
+      if (!sessionGraph.canMessage(input.from, input.to)) {
+        throw new Error(`link does not allow messages: ${input.from} -> ${input.to}`)
+      }
+
+      const text = input.text.trim()
+      if (text.length === 0) throw new Error('session message text is empty')
+      ensureSession(input.to)
+      const messageId = `msg-${randomUUID()}`
+      const event = writerFor(input.to).append({
+        stream: sessionStream(input.to),
+        actor: 'system',
+        type: 'session.message',
+        refs: {
+          fromSession: input.from,
+          link: link.linkId,
+          ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+        },
+        payload: {
+          messageId,
+          fromSession: input.from,
+          linkId: link.linkId,
+          kind,
+          text,
+          hop: Math.max(1, Math.floor(input.hop ?? 1)),
+          ...(wake ? { wake: true } : {}),
+        },
+      })
+      writerFor(input.to).flush()
+
+      const messageSeq = typeof event.seq === 'number'
+        ? event.seq
+        : storeFor(input.to).read().length - 1
+      const seenByLastTurn = (): boolean => {
+        const events = storeFor(input.to).read()
+        const lastTurn = [...events].reverse().find(item => item.type === 'turn.completed')
+        const seen = lastTurn?.payload.lastSeenSeq
+        return typeof seen === 'number' && messageSeq <= seen
+      }
+
+      const woke = wake
+      if (wake) {
+        // 目标正在跑时也排队：当前 turn 若在后续 step 已经看到这条消息，
+        // 队列任务会直接跳过；只有它没看到，才补一轮。
+        void sessionHost.run(input.to, async () => {
+          if (seenByLastTurn()) return
+          await runSessionTurn({ sessionId: input.to, text }, true)
+        }).catch(() => {
+          // runTurn 自己会落 turn.completed；这里只兜底存储层异常，避免未处理拒绝。
+        })
+      }
+
+      return { messageId, eventId: event.id, linkId: link.linkId, woke }
+    },
+
+    async wake(sessionId, text) {
+      ensureSession(sessionId)
+      if (text && text.trim().length > 0) {
+        writerFor(sessionId).append({
+          stream: sessionStream(sessionId),
+          actor: 'system',
+          type: 'message.system',
+          payload: { text, mark: 'injection' },
+        })
+        writerFor(sessionId).flush()
+      }
+      return sessionHost.run(sessionId, () => runSessionTurn({
+        sessionId,
+        text: text ?? '',
+      }, true))
     },
 
     requestAgent(input) {

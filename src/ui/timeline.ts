@@ -180,7 +180,11 @@ function groupUiTurns(events: readonly Event[]): Turn[] {
   }
 
   events.forEach((event, index) => {
-    if (event.type === 'message.user' || event.type === 'message.system') {
+    if (
+      event.type === 'message.user'
+      || event.type === 'message.system'
+      || event.type === 'session.message'
+    ) {
       push()
       current = [{ event, index, seq: seqOf(event, index) }]
       return
@@ -237,6 +241,19 @@ function itemsOfTurn(turn: Turn, pruned: Map<string, PruneItem>): UiTimelineItem
           ...base,
           kind: event.type === 'message.user' ? 'user' : 'system',
           title: event.type === 'message.user' ? '你' : '系统',
+          content: uiContentOf(textOf(event), event.payload),
+        })
+        break
+      }
+
+      case 'session.message': {
+        const from = typeof event.payload.fromSession === 'string'
+          ? event.payload.fromSession
+          : (event.refs?.fromSession ?? '?')
+        items.push({
+          ...base,
+          kind: 'system',
+          title: `跨会话 · ${from}`,
           content: uiContentOf(textOf(event), event.payload),
         })
         break

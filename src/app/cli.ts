@@ -34,6 +34,8 @@ const HELP = `IF — In_Fate
   if links [会话]                   查看会话连接
   if link <from> <to>               建立连接（--relation peer|handoff|reference）
   if unlink <link-id>               关闭连接
+  if send <to> <text>               跨会话投递（--from 会话 --kind note|question|result）
+  if wake <会话> [text]             唤醒会话并跑一轮
   if approvals [-s 会话]            待审批队列
   if serve [--port 8787] [--token]  启动本地 UI API（仅 127.0.0.1）
   if tools                          列出工具
@@ -143,6 +145,10 @@ export async function runCli(argv: string[]): Promise<void> {
       host: { type: 'string' },
       relation: { type: 'string' },
       reason: { type: 'string' },
+      from: { type: 'string' },
+      kind: { type: 'string' },
+      wake: { type: 'boolean' },
+      'reply-to': { type: 'string' },
       help: { type: 'boolean', short: 'h' },
     },
   })
@@ -327,6 +333,39 @@ export async function runCli(argv: string[]): Promise<void> {
       }
       const link = app.unlink(linkId, typeof values.reason === 'string' ? values.reason : undefined)
       stdout.write(link ? JSON.stringify(link, null, 2) + '\n' : '（没有这个连接）\n')
+    } else if (command === 'send') {
+      const to = rest[0]
+      const text = rest.slice(1).join(' ').trim()
+      const from = typeof values.from === 'string' ? values.from : (typeof values.session === 'string' ? values.session : undefined)
+      if (!from || !to || !text) {
+        process.stderr.write('send: 需要 --from <会话> <to> <text>\n')
+        process.exitCode = 1
+        return
+      }
+      const kind = typeof values.kind === 'string' ? values.kind : 'note'
+      if (kind !== 'note' && kind !== 'question' && kind !== 'result' && kind !== 'wake') {
+        process.stderr.write(`send: 未知 kind ${kind}\n`)
+        process.exitCode = 1
+        return
+      }
+      const delivery = app.sendMessage({
+        from,
+        to,
+        text,
+        kind,
+        ...(typeof values['reply-to'] === 'string' ? { replyTo: values['reply-to'] } : {}),
+        ...(values.wake ? { wake: true } : {}),
+      })
+      stdout.write(JSON.stringify(delivery, null, 2) + '\n')
+    } else if (command === 'wake') {
+      const sessionId = rest[0] ?? (typeof values.session === 'string' ? values.session : undefined)
+      if (!sessionId) {
+        process.stderr.write('wake: 需要 <会话>\n')
+        process.exitCode = 1
+        return
+      }
+      const result = await app.wake(sessionId, rest.slice(1).join(' ').trim() || undefined)
+      stdout.write(JSON.stringify(result, null, 2) + '\n')
     } else if (command === 'approvals') {
       const items = app.uiApprovals(typeof values.session === 'string' ? values.session : undefined)
       if (items.length === 0) stdout.write('（没有待审批）\n')

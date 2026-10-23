@@ -74,6 +74,11 @@ export function previewEvent(event: Event): string {
     case 'message.system':
     case 'thoughts.segment':
       return clip(payloadText(event))
+    case 'session.message': {
+      const from = typeof event.payload.fromSession === 'string' ? event.payload.fromSession : '?'
+      const kind = typeof event.payload.kind === 'string' ? event.payload.kind : 'note'
+      return clip(`${from}/${kind} ${payloadText(event)}`)
+    }
     case 'tool.call': {
       const call = String(event.payload.call ?? '')
       const args = event.payload.args
@@ -160,7 +165,11 @@ export function inspectEvents(
   let lastStartIndex = -1
   events.forEach((event, index) => {
     if (event.type === 'turn.completed') lastTurnIndex = index
-    if (event.type === 'message.user' || event.type === 'message.system') lastStartIndex = index
+    if (
+      event.type === 'message.user'
+      || event.type === 'message.system'
+      || event.type === 'session.message'
+    ) lastStartIndex = index
   })
 
   const lastType = events.at(-1)?.type

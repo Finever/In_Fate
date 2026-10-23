@@ -36,6 +36,7 @@ export function registerCoreEvents(): void {
     'session.created',
     'session.link',
     'session.link.closed',
+    'session.message',
     'message.user',
     'message.system',
     'message.assistant',
