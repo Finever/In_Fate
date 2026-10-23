@@ -36,6 +36,9 @@ const HELP = `IF — In_Fate
   if unlink <link-id>               关闭连接
   if send <to> <text>               跨会话投递（--from 会话 --kind note|question|result）
   if wake <会话> [text]             唤醒会话并跑一轮
+  if join <会话> <target...>        等待目标会话完成（--mode all|any --timeout ms）
+  if joins [会话]                   查看未完成等待
+  if cancel-joins <会话> [join-id]  取消等待
   if approvals [-s 会话]            待审批队列
   if serve [--port 8787] [--token]  启动本地 UI API（仅 127.0.0.1）
   if tools                          列出工具
@@ -149,6 +152,8 @@ export async function runCli(argv: string[]): Promise<void> {
       kind: { type: 'string' },
       wake: { type: 'boolean' },
       'reply-to': { type: 'string' },
+      mode: { type: 'string' },
+      timeout: { type: 'string' },
       help: { type: 'boolean', short: 'h' },
     },
   })
@@ -366,6 +371,51 @@ export async function runCli(argv: string[]): Promise<void> {
       }
       const result = await app.wake(sessionId, rest.slice(1).join(' ').trim() || undefined)
       stdout.write(JSON.stringify(result, null, 2) + '\n')
+    } else if (command === 'join') {
+      const sessionId = rest[0]
+      const targets = rest.slice(1)
+      if (!sessionId || targets.length === 0) {
+        process.stderr.write('join: 需要 <会话> <target...>\n')
+        process.exitCode = 1
+        return
+      }
+      const mode = typeof values.mode === 'string' ? values.mode : 'all'
+      if (mode !== 'all' && mode !== 'any') {
+        process.stderr.write(`join: 未知 mode ${mode}\n`)
+        process.exitCode = 1
+        return
+      }
+      const timeoutMs = numberArg(values.timeout)
+      const join = app.join({
+        sessionId,
+        targets,
+        mode,
+        ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      })
+      stdout.write(JSON.stringify({ ...join, satisfied: [...join.satisfied] }, null, 2) + '\n')
+    } else if (command === 'joins') {
+      const sessionId = typeof values.session === 'string' ? values.session : rest[0]
+      const joins = app.pendingJoins(sessionId)
+      if (values.json) {
+        stdout.write(JSON.stringify({ joins: joins.map(join => ({ ...join, satisfied: [...join.satisfied] })) }, null, 2) + '\n')
+        return
+      }
+      if (joins.length === 0) stdout.write('（没有未完成等待）\n')
+      for (const join of joins) {
+        stdout.write(
+          `${join.joinId}\t${join.sessionId}\t${join.mode}\t${join.targets.join(',')}\t`
+          + `satisfied=${[...join.satisfied].join(',')}\n`,
+        )
+      }
+    } else if (command === 'cancel-joins') {
+      const sessionId = rest[0]
+      if (!sessionId) {
+        process.stderr.write('cancel-joins: 需要 <会话>\n')
+        process.exitCode = 1
+        return
+      }
+      const count = app.cancelJoins(sessionId, rest[1])
+      stdout.write(`cancelled ${count}\n`)
     } else if (command === 'approvals') {
       const items = app.uiApprovals(typeof values.session === 'string' ? values.session : undefined)
       if (items.length === 0) stdout.write('（没有待审批）\n')

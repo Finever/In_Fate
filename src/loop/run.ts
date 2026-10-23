@@ -86,6 +86,7 @@ export interface RunResult {
   readonly usage: RunUsage
   readonly aborted: boolean
   readonly hitLimit: boolean
+  readonly status: 'completed' | 'waiting' | 'failed' | 'cancelled'
   /** 模型请求失败的原因；失败也会落一条 turn.completed */
   readonly error?: string
 }
@@ -189,6 +190,7 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
   const usage: RunUsage = { input: 0, output: 0, cacheRead: 0 }
   let steps = 0
   let hitLimit = false
+  let waiting = false
   let failure: string | undefined
   /** 最后一轮模型请求实际看到的事件 seq；给跨会话唤醒判断是否已读。 */
   let lastSeenSeq = -1
@@ -199,8 +201,14 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
 
     // 每一步都从事件流重新投影：真相只有一份。
     const snapshot = options.store.read()
-    lastSeenSeq = snapshot.at(-1)?.seq ?? Math.max(0, snapshot.length - 1)
     const history = projectHistory(snapshot)
+    // 只把真正进入投影的事件算作“模型看过”；工具调用期间被延迟的
+    // 跨会话消息不能提前算已读，否则它会被永远跳过。
+    const seqById = new Map(snapshot.map((event, index) => [event.id, event.seq ?? index]))
+    lastSeenSeq = history.reduce(
+      (max, message) => Math.max(max, seqById.get(message.sourceEventId ?? '') ?? -1),
+      -1,
+    )
     const rendered = renderContext({
       sections: options.sections,
       history,
@@ -324,13 +332,23 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
         result = { text: error instanceof Error ? error.message : String(error), isError: true }
       }
 
+      if (result.waiting) waiting = true
       const finalResult = options.offload ? options.offload.apply(result) : result
       recordToolResultOnce({ append, stream, callId: call.id, result: finalResult, seen: answered })
     }
+
+    if (waiting) break
   }
 
   if (steps >= maxSteps) hitLimit = true
   const aborted = options.signal?.aborted ?? false
+  const status: RunResult['status'] = waiting
+    ? 'waiting'
+    : failure
+      ? 'failed'
+      : aborted || hitLimit
+        ? 'cancelled'
+        : 'completed'
 
   append({
     stream,
@@ -341,6 +359,7 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
       usage,
       aborted,
       hitLimit,
+      status,
       lastSeenSeq,
       ...(failure ? { error: failure } : {}),
     },
@@ -350,13 +369,20 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
 
   options.metrics?.inc('turn.steps', steps)
   options.metrics?.observe('turn.duration_ms', Date.now() - startedAt)
-  options.metrics?.inc(failure ? 'turn.failed' : aborted ? 'turn.aborted' : 'turn.completed')
+  options.metrics?.inc(
+    status === 'waiting'
+      ? 'turn.waiting'
+      : status === 'failed'
+        ? 'turn.failed'
+        : status === 'cancelled' ? 'turn.aborted' : 'turn.completed',
+  )
 
   return {
     steps,
     usage,
     aborted,
     hitLimit,
+    status,
     ...(failure ? { error: failure } : {}),
   }
 }

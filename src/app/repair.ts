@@ -85,6 +85,7 @@ export function repairInterruptedSession(
       usage: { input: 0, output: 0, cacheRead: 0 },
       aborted: true,
       hitLimit: false,
+      status: 'cancelled',
       error: 'process restarted',
     },
   })

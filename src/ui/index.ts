@@ -517,11 +517,16 @@ export class UiIndex {
       }
       case 'turn.completed': {
         const usage = event.payload.usage as { input?: number; output?: number; cacheRead?: number } | undefined
+        const waiting = event.payload.status === 'waiting'
         return {
           ...base,
           kind: 'turn',
-          title: '本轮完成',
-          status: event.payload.aborted ? 'cancelled' : 'ok',
+          title: waiting ? '等待中' : '本轮完成',
+          status: waiting
+            ? 'waiting'
+            : event.payload.status === 'failed'
+              ? 'error'
+              : event.payload.aborted ? 'cancelled' : 'ok',
           turnUsage: {
             steps: Number(event.payload.steps ?? 0),
             usage: {

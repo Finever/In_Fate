@@ -260,6 +260,50 @@ async function handle(app: App, req: IncomingMessage, res: ServerResponse, token
     return
   }
 
+  if (req.method === 'POST' && action === 'join' && parts.length === 4) {
+    const body = JSON.parse(await readBody(req)) as {
+      targets?: unknown
+      mode?: unknown
+      timeoutMs?: unknown
+    }
+    if (!Array.isArray(body.targets) || body.targets.some(item => typeof item !== 'string')) {
+      json(res, 400, { error: 'targets must be a string array' })
+      return
+    }
+    if (body.mode !== undefined && body.mode !== 'all' && body.mode !== 'any') {
+      json(res, 400, { error: 'invalid mode' })
+      return
+    }
+    const join = app.join({
+      sessionId,
+      targets: body.targets as string[],
+      ...(typeof body.mode === 'string' ? { mode: body.mode as 'all' | 'any' } : {}),
+      ...(typeof body.timeoutMs === 'number' ? { timeoutMs: body.timeoutMs } : {}),
+    })
+    json(res, 200, { join: { ...join, satisfied: [...join.satisfied] } })
+    return
+  }
+
+  if (req.method === 'GET' && action === 'joins' && parts.length === 4) {
+    json(res, 200, {
+      joins: app.pendingJoins(sessionId).map(join => ({
+        ...join,
+        satisfied: [...join.satisfied],
+      })),
+    })
+    return
+  }
+
+  if (req.method === 'POST' && action === 'joins' && parts[4] === 'cancel' && parts.length === 5) {
+    const body = JSON.parse(await readBody(req)) as { joinId?: unknown }
+    const count = app.cancelJoins(
+      sessionId,
+      typeof body.joinId === 'string' ? body.joinId : undefined,
+    )
+    json(res, 200, { cancelled: count })
+    return
+  }
+
   if (req.method === 'POST' && action === 'inbox' && parts.length === 4) {
     const body = JSON.parse(await readBody(req)) as {
       from?: unknown

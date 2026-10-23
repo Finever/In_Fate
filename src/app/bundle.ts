@@ -51,6 +51,11 @@ import {
   type SessionTailOptions,
 } from './inspect.ts'
 import { SessionHost } from '../session/host.ts'
+import {
+  SessionJoinScheduler,
+  type SessionJoinInput,
+  type SessionJoinRecord,
+} from '../session/joins.ts'
 import type {
   SendSessionMessageInput,
   SessionMessageDelivery,
@@ -61,6 +66,7 @@ import { runTurn, type RunResult } from '../loop/run.ts'
 import { InMemoryApprovalRegistry } from '../tools/approval.ts'
 import { createAgentControlTools } from '../tools/builtin/agent-control.ts'
 import { bashTool } from '../tools/builtin/bash.ts'
+import { createSessionJoinTool } from '../tools/builtin/session-join.ts'
 import { editTool } from '../tools/builtin/edit.ts'
 import { fetchTool } from '../tools/builtin/fetch.ts'
 import { readTool } from '../tools/builtin/read.ts'
@@ -165,6 +171,12 @@ export interface App {
   sendMessage(input: SendSessionMessageInput): SessionMessageDelivery
   /** 手动唤醒一个会话；text 会作为 system 注入写入它的流。 */
   wake(sessionId: string, text?: string): Promise<RunResult>
+  /** 等待一组已连接会话；不阻塞模型。 */
+  join(input: SessionJoinInput): SessionJoinRecord
+  /** 取消等待；返回取消数量。 */
+  cancelJoins(sessionId: string, joinId?: string): number
+  /** 当前未完成的等待。 */
+  pendingJoins(sessionId?: string): SessionJoinRecord[]
 
   /** 会话连接图。不传 sessionId 就返回全图。 */
   links(sessionId?: string, options?: LinkQuery): SessionLink[]
@@ -298,6 +310,8 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     uiIndexes.clear()
   })
 
+  let joinScheduler: SessionJoinScheduler | undefined
+
   const repaired = new Set<string>()
   const ensureSession = (sessionId: string): EventStore => {
     const store = storeFor(sessionId)
@@ -327,6 +341,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       const writer = writerFor(sessionId)
       repairInterruptedSession(store, writer)
       settleInterruptedApprovals(store, writer)
+      joinScheduler?.restore(sessionId)
     }
     return store
   }
@@ -454,6 +469,8 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
           stream: agentStream(result.id),
         },
       })
+      writer.flush()
+      joinScheduler?.onTurnCompleted(result.id, result.status)
     },
   })
   container.register('agents', agents)
@@ -484,10 +501,10 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
 
   let disposed = false
 
-  const runSessionTurn = (input: ChatOptions, skipStartEvent = false): Promise<RunResult> => {
+  const runSessionTurn = async (input: ChatOptions, skipStartEvent = false): Promise<RunResult> => {
     const store = ensureSession(input.sessionId)
     const writer = writerFor(input.sessionId)
-    return runTurn(input.text, {
+    const result = await runTurn(input.text, {
       store,
       writer,
       sessionId: input.sessionId,
@@ -517,7 +534,33 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         spill,
       },
     })
+    joinScheduler?.onTurnCompleted(input.sessionId, result.status)
+    return result
   }
+
+  joinScheduler = new SessionJoinScheduler({
+    storeFor,
+    writerFor,
+    isRunning: id => {
+      const state = inspectEvents(
+        id,
+        storeFor(id).read(),
+        sessionInfo(config.profile.dataRoot, id),
+      ).state
+      return state === 'running' || state === 'waiting'
+    },
+    linked: (from, to) => sessionGraph.canRead(from, to) || sessionGraph.canMessage(from, to),
+    wake: id => {
+      void sessionHost.run(id, () => runSessionTurn({ sessionId: id, text: '' }, true))
+        .catch(() => {
+          // runTurn 自己会落 turn.completed；这里只兜底存储层异常。
+        })
+    },
+    now,
+  })
+  container.register('sessionJoins', joinScheduler)
+  container.onDispose('sessionJoins', () => joinScheduler?.dispose())
+  tools.register(createSessionJoinTool({ joins: joinScheduler }), 'builtin')
 
   const app: App = {
     config,
@@ -753,10 +796,15 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     },
 
     inspectSession(sessionId) {
+      joinScheduler?.restore(sessionId)
       const info = sessionInfo(config.profile.dataRoot, sessionId)
       return {
         ...inspectEvents(sessionId, storeFor(sessionId).read(), info),
         links: sessionGraph.links(sessionId, { includeClosed: false }),
+        joins: joinScheduler!.pending(sessionId).map(record => ({
+          ...record,
+          satisfied: [...record.satisfied],
+        })),
       }
     },
 
@@ -852,6 +900,20 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         sessionId,
         text: text ?? '',
       }, true))
+    },
+
+    join(input) {
+      ensureSession(input.sessionId)
+      return joinScheduler!.create(input)
+    },
+
+    cancelJoins(sessionId, joinId) {
+      return joinScheduler!.cancel(sessionId, joinId)
+    },
+
+    pendingJoins(sessionId) {
+      if (sessionId) joinScheduler!.restore(sessionId)
+      return joinScheduler!.pending(sessionId)
     },
 
     requestAgent(input) {

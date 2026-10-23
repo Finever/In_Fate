@@ -126,7 +126,7 @@ function buildPrompt(request: AgentRequest): string {
 export function allowedToolNames(preset: AgentPreset, tools: ToolRegistry): string[] {
   const writeTools = new Set(['write', 'edit', 'bash'])
   return preset.tools.filter(name => {
-    if (name === 'request_agent' || name.startsWith('agent_')) return false
+    if (name === 'request_agent' || name === 'session_join' || name.startsWith('agent_')) return false
     if (preset.readOnly && writeTools.has(name)) return false
     const policy = tools.policy(name)
     if (policy?.approval === 'required' && preset.allowDangerousTools !== true) return false

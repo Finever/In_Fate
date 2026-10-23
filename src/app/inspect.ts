@@ -8,6 +8,7 @@
 
 import type { Event } from '../core/events.ts'
 import type { SessionLink } from '../graph/links.ts'
+import type { SessionJoinSnapshot } from '../session/joins.ts'
 import type { SessionInfo } from './session.ts'
 
 export interface SessionEventView {
@@ -46,7 +47,7 @@ export interface SessionInspection {
   readonly createdFrom?: { readonly sessionId: string; readonly eventId?: string }
   readonly reason?: string
   readonly kind?: 'user' | 'agent'
-  readonly state: 'idle' | 'running' | 'done' | 'unknown'
+  readonly state: 'idle' | 'running' | 'waiting' | 'done' | 'unknown'
   readonly events: number
   readonly lastSeq: number
   readonly lastType?: string
@@ -54,6 +55,7 @@ export interface SessionInspection {
   readonly lastTurnSeq?: number
   readonly pendingToolCalls: PendingToolCall[]
   readonly links?: readonly SessionLink[]
+  readonly joins?: readonly SessionJoinSnapshot[]
 }
 
 function clip(text: string, max = 240): string {
@@ -178,11 +180,17 @@ export function inspectEvents(
     || lastType === 'agent.cancelled'
     || lastType === 'agent.interrupted'
 
+  const lastTurn = lastTurnIndex >= 0 ? events[lastTurnIndex] : undefined
+  const waiting = lastTurn?.payload.status === 'waiting'
+    && lastTurnIndex >= lastStartIndex
+
   const state: SessionInspection['state'] = events.length === 0
     ? 'unknown'
     : agentTerminal
       ? 'done'
-      : lastStartIndex > lastTurnIndex ? 'running' : 'idle'
+      : waiting
+        ? 'waiting'
+        : lastStartIndex > lastTurnIndex ? 'running' : 'idle'
 
   const pending = new Map<string, PendingToolCall>()
   for (let index = lastTurnIndex + 1; index < events.length; index += 1) {

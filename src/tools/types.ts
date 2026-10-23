@@ -43,6 +43,8 @@ export interface ToolResult {
   /** 卸载失败时保留的错误说明；正文仍在原字段 */
   readonly offloadError?: string
   readonly isError?: boolean
+  /** 工具要求当前 turn 结束后进入 waiting；本轮不再继续请求模型 */
+  readonly waiting?: boolean
   /** presentResult 的产物，给 UI；模型看不到 */
   readonly presentation?: unknown
 }

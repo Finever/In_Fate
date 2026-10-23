@@ -14,6 +14,7 @@ export function toolResultPayload(callId: string, result: ToolResult): Record<st
     callId,
     text: result.text ?? '',
     isError: result.isError ?? false,
+    ...(result.waiting ? { waiting: true } : {}),
     ...(result.structured !== undefined ? { structured: result.structured } : {}),
     ...(result.mime ? { mime: result.mime } : {}),
     ...(result.ref ? { ref: result.ref } : {}),

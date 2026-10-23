@@ -30,6 +30,23 @@ test('tail 从尾部取、按 afterSeq 续读', () => {
   }
 })
 
+test('inspect 识别 waiting 状态', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'if-inspect-wait-'))
+  try {
+    const store = new EventStore(join(dir, 'session.jsonl'))
+    store.append({ stream: 'session:s', actor: 'user', type: 'message.user', payload: { text: 'go' } })
+    store.append({
+      stream: 'session:s',
+      actor: 'system',
+      type: 'turn.completed',
+      payload: { steps: 1, status: 'waiting', aborted: false },
+    })
+    assert.equal(inspectEvents('s', store.read()).state, 'waiting')
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+  }
+})
+
 test('inspect 识别 running、pending 工具与 agent 终态', () => {
   const store = new EventStore(join(mkdtempSync(join(tmpdir(), 'if-inspect-')), 'session.jsonl'))
   const add = (type: string, payload: Record<string, unknown> = {}): void => {
