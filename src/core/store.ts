@@ -10,8 +10,11 @@
 
 import {
   appendFileSync,
+  closeSync,
   existsSync,
+  fsyncSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   renameSync,
@@ -55,6 +58,7 @@ export class EventStore {
   readonly file: string
   readonly segmentMaxBytes?: number
   private nextSeqCache?: number
+  private dirty = false
 
   constructor(file: string, options: EventStoreOptions = {}) {
     this.file = file
@@ -91,10 +95,26 @@ export class EventStore {
     this.maybeRotate()
     try {
       appendFileSync(this.file, JSON.stringify(event) + '\n', { encoding: 'utf8' })
+      this.dirty = true
     } catch (error) {
       throw new IfStorageError(`append failed: ${this.file}`, error)
     }
     return event
+  }
+
+  /**
+   * 检查点：把已 append 的批次刷到磁盘。
+   * 不是每条事件都 fsync；只在模型请求前、工具正文前、轮结束这些屏障调用。
+   */
+  flush(): void {
+    if (!this.dirty || !existsSync(this.file)) return
+    const fd = openSync(this.file, 'r+')
+    try {
+      fsyncSync(fd)
+      this.dirty = false
+    } finally {
+      closeSync(fd)
+    }
   }
 
   /** 读全部事件（所有段，按段号顺序）。只容忍最后一段的半条尾行。 */

@@ -40,6 +40,9 @@ export interface CompactionAnchor {
   readonly stream: string
   readonly fromEventId: string
   readonly toEventId: string
+  /** 新事件带 seq；归档后即使旧 id 不在活跃事件里，也能定位区间 */
+  readonly fromSeq?: number
+  readonly toSeq?: number
   readonly logAddr?: string
   /** 分支实现前先留口：当前主链为 main */
   readonly branch?: string

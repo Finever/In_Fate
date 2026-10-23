@@ -296,6 +296,9 @@ export class AgentManager {
         ...(result.error ? { error: result.error } : {}),
       },
     })
+    const terminalWriter = this.writerFor(result.id)
+    if (terminalWriter) terminalWriter.flush()
+    else this.options.storeFactory(result.id).flush()
     // agent 流到此结束，释放写者锁；后续只读。
     this.closeWriter(result.id)
 

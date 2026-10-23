@@ -159,6 +159,8 @@ export function projectHistory(
   const messages: HistoryMessage[] = []
   const pending = new Map<string, ChatMessage>()
   const fulfilled = new Set<string>()
+  // 工具调用期间到达的 system 注入不能插在 tool_use / tool_result 之间。
+  const deferredSystem: ChatMessage[] = []
 
   const includeReasoning = options.includeReasoning ?? false
   const addTime = options.timeTag ?? true
@@ -209,12 +211,14 @@ export function projectHistory(
           || mark === 'injection' || mark === 'time'
           ? mark
           : 'scheduled'
-        messages.push({
+        const message: ChatMessage = {
           role: scheduled ? 'system' : 'user',
           content: [{ type: 'text', text: scheduled ? markSystem(kind, body) : body }],
           sourceEventId: event.id,
           origin: scheduled ? 'scheduled' : 'user',
-        })
+        }
+        if (scheduled && pending.size > 0) deferredSystem.push(message)
+        else messages.push(message)
         break
       }
 
@@ -262,6 +266,10 @@ export function projectHistory(
         pending.delete(id)
         fulfilled.add(id)
         currentAssistant = undefined
+        // 所有尚未回填的工具调用都结束后，才放 system 注入。
+        if (pending.size === 0 && deferredSystem.length > 0) {
+          messages.push(...deferredSystem.splice(0))
+        }
         break
       }
 
@@ -281,6 +289,8 @@ export function projectHistory(
       })
     }
   }
+
+  if (deferredSystem.length > 0) messages.push(...deferredSystem.splice(0))
 
   return messages
 }

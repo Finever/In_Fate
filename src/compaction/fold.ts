@@ -186,8 +186,20 @@ export async function compactIfNeeded(options: CompactOptions): Promise<Compacti
       options.estimator.estimate(JSON.stringify(summary)) + retained,
     )
 
+    const firstSeq = range.events[0]?.seq
+    const lastSeq = range.events[range.events.length - 1]?.seq
+    const fromSeq = previous?.payload.anchor.fromSeq
+      ?? (typeof firstSeq === 'number' ? firstSeq : undefined)
+    const toSeq = typeof lastSeq === 'number' ? lastSeq : undefined
+
     const payload: CompactionPayload = {
-      anchor: { stream: options.stream, fromEventId, toEventId },
+      anchor: {
+        stream: options.stream,
+        fromEventId,
+        toEventId,
+        ...(fromSeq !== undefined ? { fromSeq } : {}),
+        ...(toSeq !== undefined ? { toSeq } : {}),
+      },
       ...(previous ? { supersedes: previous.eventId, rolledFrom: previous.eventId } : {}),
       summary,
       turn: currentTurn,

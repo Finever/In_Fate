@@ -61,6 +61,7 @@ import type { UiTurnMeta } from '../ui/index.ts'
 import type { AppConfig } from './config.ts'
 import type { Container } from './container.ts'
 import { applyPatches, mergeCompaction, mergePool } from './patch.ts'
+import { repairInterruptedSession } from './repair.ts'
 import {
   listAgentRuns,
   listSessions,
@@ -198,6 +199,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     uiIndexes.clear()
   })
 
+  const repaired = new Set<string>()
   const ensureSession = (sessionId: string): EventStore => {
     const store = storeFor(sessionId)
     if (store.lineCount() === 0) {
@@ -212,6 +214,13 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
           seqBase: 0,
         },
       })
+      return store
+    }
+
+    // 第一次真正打开这个会话时修崩溃尾巴；之后同一进程不再重复扫。
+    if (!repaired.has(sessionId)) {
+      repaired.add(sessionId)
+      repairInterruptedSession(store, writerFor(sessionId))
     }
     return store
   }
@@ -247,6 +256,41 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   container.register('presets', presets)
 
   const approvals = new InMemoryApprovalRegistry()
+  approvals.audit = {
+    asked: entry => {
+      const writer = writerFor(entry.sessionId)
+      writer.append({
+        stream: sessionStream(entry.sessionId),
+        actor: 'system',
+        type: 'approval.asked',
+        payload: {
+          approvalId: entry.approvalId,
+          toolCallId: entry.toolCallId,
+          toolName: entry.toolName,
+          input: entry.originalInput,
+          createdAt: new Date().toISOString(),
+        },
+      })
+      writer.flush()
+    },
+    decided: (entry, decision, source) => {
+      const writer = writerFor(entry.sessionId)
+      writer.append({
+        stream: sessionStream(entry.sessionId),
+        actor: 'system',
+        type: 'approval.decided',
+        payload: {
+          approvalId: entry.approvalId,
+          approved: decision.approved,
+          ...(decision.reason ? { reason: decision.reason } : {}),
+          ...(decision.updatedInput ? { updatedInput: decision.updatedInput } : {}),
+          source,
+          resolvedAt: new Date().toISOString(),
+        },
+      })
+      writer.flush()
+    },
+  }
   container.register('approvals', approvals)
 
   const pool = mergePool(config.patch?.agents)

@@ -86,6 +86,11 @@ export class SessionWriter {
     return this.store.append(input)
   }
 
+  flush(): void {
+    if (this.closedFlag) return
+    this.store.flush()
+  }
+
   close(): void {
     if (this.closedFlag) return
     this.closedFlag = true

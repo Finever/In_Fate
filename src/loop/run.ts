@@ -89,6 +89,10 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
   const maxSteps = options.maxSteps ?? 32
   const append = (input: NewEvent): Event =>
     options.writer ? options.writer.append(input) : options.store.append(input)
+  const flush = (): void => {
+    if (options.writer) options.writer.flush()
+    else options.store.flush()
+  }
 
   append({
     stream,
@@ -142,6 +146,9 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
     }
   }
 
+  // 模型请求前先落盘：请求发出后崩溃，用户消息和压缩结果不会丢。
+  flush()
+
   const usage: RunUsage = { input: 0, output: 0, cacheRead: 0 }
   let steps = 0
   let hitLimit = false
@@ -149,6 +156,7 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
 
   while (steps < maxSteps) {
     if (options.signal?.aborted) break
+    flush()
 
     // 每一步都从事件流重新投影：真相只有一份。
     const history = projectHistory(options.store.read())
@@ -235,6 +243,8 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
         payload: { callId: call.id, call: call.name, args: parseArguments(call.arguments) },
       })
     }
+    // 工具正文执行前落盘：外部副作用发生后崩溃，调用意图仍在。
+    flush()
 
     for (const call of calls) {
       let result: ToolResult
@@ -276,6 +286,8 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
       ...(failure ? { error: failure } : {}),
     },
   })
+
+  flush()
 
   return {
     steps,

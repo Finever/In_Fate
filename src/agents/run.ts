@@ -113,6 +113,10 @@ export async function runSubagent(
   const allowed = new Set(allowedToolNames(preset, runtime.tools))
   const append = (input: NewEvent): Event =>
     runtime.writer ? runtime.writer.append(input) : store.append(input)
+  const flush = (): void => {
+    if (runtime.writer) runtime.writer.flush()
+    else store.flush()
+  }
 
   const resolve = runtime.models
     ? (provider: string, model: string): ResolvedModel => runtime.models!.resolve(provider, model)
@@ -139,6 +143,7 @@ export async function runSubagent(
       errorText = 'aborted'
       break
     }
+    flush()
 
     const history = projectHistory(store.read())
     const rendered = renderContext({
@@ -227,6 +232,7 @@ export async function runSubagent(
         payload: { callId: call.id, call: call.name, args: parseArguments(call.arguments) },
       })
     }
+    flush()
 
     for (const call of collected.calls) {
       const args = parseArguments(call.arguments)
@@ -282,6 +288,8 @@ export async function runSubagent(
     status = 'failed'
     errorText = `hit maxSteps (${preset.maxSteps})`
   }
+
+  flush()
 
   return {
     id: request.id,

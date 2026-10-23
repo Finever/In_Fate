@@ -19,6 +19,8 @@ export type CoreEventType =
   | 'thoughts.segment'
   | 'tool.call'
   | 'tool.result'
+  | 'approval.asked'
+  | 'approval.decided'
   | 'task.created'
   | 'task.updated'
   | 'token.recorded'
