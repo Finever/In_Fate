@@ -37,6 +37,7 @@ import { agentStream, sessionStream } from '../core/streams.ts'
 import { defaultSources } from '../memory/sources.ts'
 import type { ModelRegistry, ResolvedModel } from '../model/registry.ts'
 import { ModelRegistry as Registry } from '../model/registry.ts'
+import { ModelGate, type ModelPriority } from '../model/gate.ts'
 import { resolveRetryPolicy } from '../model/retry.ts'
 import {
   SessionGraph,
@@ -124,6 +125,7 @@ const DANGEROUS_TOOLS = {
 export interface ChatOptions {
   readonly sessionId: string
   readonly text: string
+  readonly priority?: ModelPriority
   readonly onModelEvent?: Parameters<typeof runTurn>[1]['onModelEvent']
   readonly signal?: AbortSignal
 }
@@ -227,6 +229,30 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   // 运行时策略：默认开；配置可以关，但关的是检查，不是事件记录。
   const metrics = config.patch?.runtime?.metrics === false ? undefined : new Metrics()
   const modelRetry = resolveRetryPolicy(config.patch?.runtime?.model?.retry)
+  const admission = config.patch?.runtime?.model?.admission
+  const modelGate = admission?.enabled === false
+    ? undefined
+    : new ModelGate({
+      ...(admission?.maxConcurrentPerProvider !== undefined
+        ? { maxConcurrentPerProvider: admission.maxConcurrentPerProvider }
+        : {}),
+      ...(admission?.requestsPerMinute !== undefined
+        ? { requestsPerMinute: admission.requestsPerMinute }
+        : {}),
+      ...(admission?.queueLimit !== undefined ? { queueLimit: admission.queueLimit } : {}),
+      ...(admission?.waitMs !== undefined ? { waitMs: admission.waitMs } : {}),
+      ...(admission?.cooldownBaseMs !== undefined
+        ? { cooldownBaseMs: admission.cooldownBaseMs }
+        : {}),
+      ...(admission?.cooldownMaxMs !== undefined
+        ? { cooldownMaxMs: admission.cooldownMaxMs }
+        : {}),
+      ...(admission?.providers ? { providers: admission.providers } : {}),
+    })
+  if (modelGate) {
+    container.register('modelGate', modelGate)
+    container.onDispose('modelGate', () => modelGate.dispose())
+  }
 
   const fsPatch = config.patch?.runtime?.fs
   const defaultFsRoots = [cwd, config.profile.memoryLogRoot, config.profile.agentDir]
@@ -470,6 +496,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       ...(networkPolicy ? { network: networkPolicy } : {}),
       ...(leases ? { leases } : {}),
       workspaceId,
+      ...(modelGate ? { modelGate } : {}),
       ...(metrics ? { metrics } : {}),
     }),
     // 终态回送来源会话；正文自带分类标记，模型能认出这不是用户说的。
@@ -543,6 +570,8 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       now,
       offload,
       modelRetry,
+      ...(modelGate ? { modelGate } : {}),
+      priority: input.priority ?? 'interactive',
       ...(skipStartEvent ? { skipStartEvent: true } : {}),
       ...(fsPolicy ? { sandbox: fsPolicy } : {}),
       ...(networkPolicy ? { network: networkPolicy } : {}),
@@ -621,7 +650,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       // 队列任务会直接跳过；只有它没看到，才补一轮。
       void sessionHost.run(input.to, async () => {
         if (seenByLastTurn()) return
-        await runSessionTurn({ sessionId: input.to, text }, true)
+        await runSessionTurn({ sessionId: input.to, text, priority: 'normal' }, true)
       }).catch(() => {
         // runTurn 自己会落 turn.completed；这里只兜底存储层异常，避免未处理拒绝。
       })
@@ -687,7 +716,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     },
     linked: (from, to) => sessionGraph.canRead(from, to) || sessionGraph.canMessage(from, to),
     wake: id => {
-      void sessionHost.run(id, () => runSessionTurn({ sessionId: id, text: '' }, true))
+      void sessionHost.run(id, () => runSessionTurn({ sessionId: id, text: '', priority: 'normal' }, true))
         .catch(() => {
           // runTurn 自己会落 turn.completed；这里只兜底存储层异常。
         })

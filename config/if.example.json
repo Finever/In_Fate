@@ -79,6 +79,14 @@
           "baseDelayMs": 500,
           "maxDelayMs": 8000,
           "timeoutMs": 180000
+        },
+        "admission": {
+          "enabled": true,
+          "maxConcurrentPerProvider": 3,
+          "queueLimit": 64,
+          "waitMs": 120000,
+          "cooldownBaseMs": 1000,
+          "cooldownMaxMs": 60000
         }
       },
       "fs": { "enforce": true },

@@ -18,6 +18,7 @@ import type { EventStore } from '../core/store.ts'
 import type { WorkspaceLeaseManager } from '../core/workspace-lease.ts'
 import { agentStream } from '../core/streams.ts'
 import { chatOpenAI } from '../model/openai.ts'
+import type { ModelGate } from '../model/gate.ts'
 import { resolveModel, type ModelRegistry, type ResolvedModel } from '../model/registry.ts'
 import type { ModelRetryPolicy } from '../model/retry.ts'
 import type { ModelEvent, ToolSpec } from '../model/types.ts'
@@ -53,6 +54,7 @@ export interface SubagentRuntime {
   readonly network?: NetworkGuard
   readonly leases?: WorkspaceLeaseManager
   readonly workspaceId?: string
+  readonly modelGate?: ModelGate
   readonly metrics?: Metrics
 }
 
@@ -71,6 +73,8 @@ async function collectModel(
   signal: AbortSignal,
   retry?: ModelRetryPolicy,
   metrics?: Metrics,
+  gate?: ModelGate,
+  priority: 'interactive' | 'normal' | 'background' = 'normal',
 ): Promise<Collected> {
   const text: string[] = []
   const reasoning: string[] = []
@@ -84,6 +88,8 @@ async function collectModel(
     tools,
     signal,
     ...(retry ? { retry } : {}),
+    ...(gate ? { gate } : {}),
+    priority,
     onAttempt: () => metrics?.inc('model.attempts', 1, { source: 'agent' }),
     onRetry: info => {
       metrics?.inc('model.retries', 1, { source: 'agent' })
@@ -238,6 +244,8 @@ export async function runSubagent(
           signal,
           runtime.modelRetry,
           runtime.metrics,
+          runtime.modelGate,
+          request.priority,
         )
         break
       } catch (error) {

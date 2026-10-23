@@ -22,6 +22,7 @@ import {
   type ModelRetryInfo,
   type ModelRetryPolicy,
 } from './retry.ts'
+import type { ModelGate, ModelPriority } from './gate.ts'
 
 export interface ChatRequest {
   readonly resolved: ResolvedModel
@@ -33,6 +34,9 @@ export interface ChatRequest {
   readonly signal?: AbortSignal
   /** system 角色的消息是否转成 user（部分来源不认 system）。默认 false。 */
   readonly systemAsUser?: boolean
+  /** provider 级准入；不传就不排队 */
+  readonly gate?: ModelGate
+  readonly priority?: ModelPriority
   /** 重试、超时、退避；不传用默认策略 */
   readonly retry?: ModelRetryPolicy
   /** 每次尝试前回调，给指标用 */
@@ -266,37 +270,51 @@ async function* chatAttempt(
 /** 流式对话。产出统一的 ModelEvent，不把厂商格式漏给上层。 */
 export async function* chatOpenAI(request: ChatRequest): AsyncGenerator<ModelEvent> {
   const policy = resolveRetryPolicy(request.retry)
+  const providerId = request.resolved.provider.id
+  const release = request.gate
+    ? await request.gate.acquire({
+      providerId,
+      priority: request.priority ?? 'normal',
+      ...(request.signal ? { signal: request.signal } : {}),
+    })
+    : undefined
   let attempt = 0
 
-  while (true) {
-    attempt += 1
-    request.onAttempt?.(attempt)
-    let emitted = 0
+  try {
+    while (true) {
+      attempt += 1
+      request.onAttempt?.(attempt)
+      let emitted = 0
 
-    try {
-      for await (const event of chatAttempt(request, policy.timeoutMs)) {
-        emitted += 1
-        yield event
-      }
-      return
-    } catch (error) {
-      // 用户中断永远不重试；超时由策略决定。
-      if (request.signal?.aborted) throw error
-      if (emitted > 0 || attempt >= policy.maxAttempts || !isRetryableModelError(error, policy)) {
-        throw error
-      }
+      try {
+        for await (const event of chatAttempt(request, policy.timeoutMs)) {
+          emitted += 1
+          yield event
+        }
+        request.gate?.noteSuccess(providerId)
+        return
+      } catch (error) {
+        request.gate?.noteError(providerId, error)
+        // 用户中断永远不重试；超时由策略决定。
+        if (request.signal?.aborted) throw error
+        if (emitted > 0 || attempt >= policy.maxAttempts || !isRetryableModelError(error, policy)) {
+          throw error
+        }
 
-      const status = error instanceof ModelHttpError ? error.status : undefined
-      const retryAfterMs = error instanceof ModelHttpError ? error.retryAfterMs : undefined
-      const delayMs = retryDelayMs(attempt, policy, retryAfterMs)
-      request.onRetry?.({
-        attempt,
-        maxAttempts: policy.maxAttempts,
-        delayMs,
-        error: error instanceof Error ? error.message : String(error),
-        ...(status !== undefined ? { status } : {}),
-      })
-      await policy.sleep(delayMs, request.signal)
+        const status = error instanceof ModelHttpError ? error.status : undefined
+        const retryAfterMs = error instanceof ModelHttpError ? error.retryAfterMs : undefined
+        const delayMs = retryDelayMs(attempt, policy, retryAfterMs)
+        request.onRetry?.({
+          attempt,
+          maxAttempts: policy.maxAttempts,
+          delayMs,
+          error: error instanceof Error ? error.message : String(error),
+          ...(status !== undefined ? { status } : {}),
+        })
+        await policy.sleep(delayMs, request.signal)
+      }
     }
+  } finally {
+    release?.()
   }
 }

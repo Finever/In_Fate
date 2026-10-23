@@ -22,6 +22,7 @@ import type { WorkspaceLeaseManager } from '../core/workspace-lease.ts'
 import { sessionStream } from '../core/streams.ts'
 import { chatOpenAI, type ChatRequest } from '../model/openai.ts'
 import type { ResolvedModel } from '../model/registry.ts'
+import type { ModelGate, ModelPriority } from '../model/gate.ts'
 import type { ModelRetryPolicy } from '../model/retry.ts'
 import type { ModelEvent } from '../model/types.ts'
 import { projectHistory } from '../projections/history.ts'
@@ -55,6 +56,9 @@ export interface RunLoopOptions {
   readonly offload?: OffloadPolicy
   /** 模型重试/超时；不传由适配器用默认策略 */
   readonly modelRetry?: ModelRetryPolicy
+  /** provider 级准入；不传就不排队 */
+  readonly modelGate?: ModelGate
+  readonly priority?: ModelPriority
   readonly sandbox?: PathSandbox
   readonly network?: NetworkGuard
   readonly leases?: WorkspaceLeaseManager
@@ -229,6 +233,8 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
       tools: options.tools.toModelSpecs(),
       signal: options.signal,
       ...(options.modelRetry ? { retry: options.modelRetry } : {}),
+      ...(options.modelGate ? { gate: options.modelGate } : {}),
+      priority: options.priority ?? 'normal',
       onAttempt: () => options.metrics?.inc('model.attempts'),
       onRetry: info => {
         options.metrics?.inc('model.retries')

@@ -16,6 +16,19 @@ import type { OffloadConfig } from '../tools/offload.ts'
 export interface RuntimePatch {
   readonly model?: {
     readonly retry?: ModelRetryPolicy
+    readonly admission?: {
+      readonly enabled?: boolean
+      readonly maxConcurrentPerProvider?: number
+      readonly queueLimit?: number
+      readonly waitMs?: number
+      readonly cooldownBaseMs?: number
+      readonly cooldownMaxMs?: number
+      readonly requestsPerMinute?: number
+      readonly providers?: Readonly<Record<string, {
+        readonly maxConcurrent?: number
+        readonly requestsPerMinute?: number
+      }>>
+    }
   }
   readonly fs?: {
     /** false = 不注入沙箱（默认 true） */
