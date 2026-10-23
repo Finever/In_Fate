@@ -7,7 +7,7 @@
  */
 
 import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { assertSafeSessionId } from '../core/safe-path.ts'
 
 export interface SessionOrigin {
@@ -96,6 +96,24 @@ function readOrigin(file: string, name: string): SessionOriginInfo {
     }
   } catch {
     return fallback
+  }
+}
+
+export function sessionInfo(dataRoot: string, sessionId: string): SessionInfo | undefined {
+  const file = sessionFile(dataRoot, sessionId)
+  if (!existsSync(file)) return undefined
+  const stat = statSync(file)
+  if (!stat.isFile()) return undefined
+  const origin = readOrigin(file, basename(file))
+  return {
+    id: sessionId,
+    file,
+    bytes: stat.size,
+    updatedAt: stat.mtime.toISOString(),
+    ...(origin.createdBy ? { createdBy: origin.createdBy } : {}),
+    ...(origin.createdFrom ? { createdFrom: origin.createdFrom } : {}),
+    ...(origin.reason ? { reason: origin.reason } : {}),
+    kind: origin.kind,
   }
 }
 

@@ -26,6 +26,8 @@ const HELP = `IF — In_Fate
   if run <文本> [-s 会话]           单轮执行后退出
   if show [会话] [--limit N]        查看会话窗时间线（分页预览）
   if tail [会话] [--limit N]        查看最近几轮（show 的别名）
+  if events [会话] [--after N]      查看原始事件流（调试）
+  if inspect [会话]                 查看会话状态、pending 工具与连接
   if payload <ref|事件id> [-s 会话] 取全文切片（--offset / --limit）
   if stats [会话]                   会话统计
   if metrics                        进程内指标
@@ -222,6 +224,50 @@ export async function runCli(argv: string[]): Promise<void> {
       } else {
         stdout.write(slice.data)
         if (!slice.eof) stdout.write('\n…\n')
+      }
+    } else if (command === 'events') {
+      const sessionId = typeof values.session === 'string'
+        ? values.session
+        : (rest[0] ?? app.sessions()[0]?.id)
+      if (!sessionId) {
+        stdout.write('（没有会话）\n')
+        return
+      }
+      const afterSeq = numberArg(values.after)
+      const limit = numberArg(values.limit)
+      const tail = app.sessionEvents(sessionId, {
+        ...(afterSeq !== undefined ? { afterSeq } : {}),
+        ...(limit !== undefined ? { limit } : {}),
+      })
+      if (values.json) {
+        stdout.write(JSON.stringify(tail, null, 2) + '\n')
+        return
+      }
+      for (const event of tail.events) {
+        const actor = event.actorId ? `${event.actor}:${event.actorId}` : event.actor
+        stdout.write(`[${event.seq}] ${event.type} (${actor}) ${event.preview}\n`)
+      }
+      if (!tail.eof) stdout.write(`… 还有事件；用 --after ${tail.nextSeq} 继续\n`)
+    } else if (command === 'inspect') {
+      const sessionId = typeof values.session === 'string'
+        ? values.session
+        : (rest[0] ?? app.sessions()[0]?.id)
+      if (!sessionId) {
+        stdout.write('（没有会话）\n')
+        return
+      }
+      const info = app.inspectSession(sessionId)
+      if (values.json) {
+        stdout.write(JSON.stringify(info, null, 2) + '\n')
+        return
+      }
+      stdout.write(`${info.sessionId}\t${info.state}\t${info.events} 事件\tlast=${info.lastSeq} ${info.lastType ?? ''}\n`)
+      if (info.createdBy) stdout.write(`createdBy=${info.createdBy}${info.reason ? ` reason=${info.reason}` : ''}\n`)
+      if (info.pendingToolCalls.length > 0) {
+        stdout.write(`pending: ${info.pendingToolCalls.map(item => `${item.name}#${item.callId}`).join(', ')}\n`)
+      }
+      if (info.links && info.links.length > 0) {
+        stdout.write(`links: ${info.links.map(link => `${link.linkId}:${link.relation}`).join(', ')}\n`)
       }
     } else if (command === 'stats') {
       const sessionId = typeof values.session === 'string'

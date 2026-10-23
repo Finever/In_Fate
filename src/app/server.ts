@@ -199,6 +199,21 @@ async function handle(app: App, req: IncomingMessage, res: ServerResponse, token
   const sessionId = parts[2]
   const action = parts[3]
 
+  if (req.method === 'GET' && action === 'events' && parts.length === 4) {
+    const afterSeq = numberParam(url, 'afterSeq')
+    const limit = numberParam(url, 'limit')
+    json(res, 200, app.sessionEvents(sessionId, {
+      ...(afterSeq !== undefined ? { afterSeq } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+    }))
+    return
+  }
+
+  if (req.method === 'GET' && action === 'inspect' && parts.length === 4) {
+    json(res, 200, app.inspectSession(sessionId))
+    return
+  }
+
   if (req.method === 'GET' && action === 'timeline' && parts.length === 4) {
     const before = numberParam(url, 'before')
     const after = numberParam(url, 'after')

@@ -42,6 +42,13 @@ import {
   type LinkQuery,
   type SessionLink,
 } from '../graph/links.ts'
+import {
+  inspectEvents,
+  tailSession,
+  type SessionInspection,
+  type SessionTail,
+  type SessionTailOptions,
+} from './inspect.ts'
 import { projectHistory, type HistoryMessage } from '../projections/history.ts'
 import { renderContext } from '../context/pipeline.ts'
 import { runTurn, type RunResult } from '../loop/run.ts'
@@ -81,6 +88,7 @@ import {
   listSessions,
   newSessionId,
   sessionFile,
+  sessionInfo,
   uiIndexFile,
   type AgentRunInfo,
   type SessionInfo,
@@ -142,6 +150,10 @@ export interface App {
   createSession(input?: CreateSessionInput): string
   /** 列举已有会话；扁平列表，不用父子树。 */
   sessions(): SessionInfo[]
+  /** 只读事件尾部；调试用，不进模型上下文。 */
+  sessionEvents(sessionId: string, options?: SessionTailOptions): SessionTail
+  /** 会话当前状态、pending 工具与连接。 */
+  inspectSession(sessionId: string): SessionInspection
 
   /** 会话连接图。不传 sessionId 就返回全图。 */
   links(sessionId?: string, options?: LinkQuery): SessionLink[]
@@ -713,6 +725,18 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
 
     sessions() {
       return listSessions(config.profile.dataRoot)
+    },
+
+    sessionEvents(sessionId, options) {
+      return tailSession(sessionId, storeFor(sessionId).read(), options)
+    },
+
+    inspectSession(sessionId) {
+      const info = sessionInfo(config.profile.dataRoot, sessionId)
+      return {
+        ...inspectEvents(sessionId, storeFor(sessionId).read(), info),
+        links: sessionGraph.links(sessionId, { includeClosed: false }),
+      }
     },
 
     links(sessionId, options) {
