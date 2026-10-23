@@ -18,6 +18,7 @@ import type { Event, NewEvent } from '../core/events.ts'
 import type { Metrics } from '../core/metrics.ts'
 import type { SessionWriter } from '../core/session-writer.ts'
 import type { EventStore } from '../core/store.ts'
+import type { WorkspaceLeaseManager } from '../core/workspace-lease.ts'
 import { sessionStream } from '../core/streams.ts'
 import { chatOpenAI, type ChatRequest } from '../model/openai.ts'
 import type { ResolvedModel } from '../model/registry.ts'
@@ -56,6 +57,8 @@ export interface RunLoopOptions {
   readonly modelRetry?: ModelRetryPolicy
   readonly sandbox?: PathSandbox
   readonly network?: NetworkGuard
+  readonly leases?: WorkspaceLeaseManager
+  readonly workspaceId?: string
   readonly metrics?: Metrics
   readonly signal?: AbortSignal
   /** 触发事件已由调用方写入（跨会话消息/唤醒），本轮不再追加 message.user */
@@ -326,6 +329,8 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
           ...(options.signal ? { signal: options.signal } : {}),
           ...(options.sandbox ? { sandbox: options.sandbox } : {}),
           ...(options.network ? { network: options.network } : {}),
+          ...(options.leases ? { leases: options.leases } : {}),
+          ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
           ...(options.metrics ? { metrics: options.metrics } : {}),
         })
       } catch (error) {

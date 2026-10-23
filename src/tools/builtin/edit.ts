@@ -22,7 +22,7 @@ export const editTool: ToolDefinition = {
     required: ['file_path', 'old_string', 'new_string'],
     additionalProperties: false,
   },
-  meta: { dangerous: true },
+  meta: { dangerous: true, writeScope: 'path' },
 
   async run(args, context) {
     const input = args as {

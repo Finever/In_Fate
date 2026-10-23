@@ -15,6 +15,7 @@ import type { Event, NewEvent } from '../core/events.ts'
 import type { Metrics } from '../core/metrics.ts'
 import type { SessionWriter } from '../core/session-writer.ts'
 import type { EventStore } from '../core/store.ts'
+import type { WorkspaceLeaseManager } from '../core/workspace-lease.ts'
 import { agentStream } from '../core/streams.ts'
 import { chatOpenAI } from '../model/openai.ts'
 import { resolveModel, type ModelRegistry, type ResolvedModel } from '../model/registry.ts'
@@ -50,6 +51,8 @@ export interface SubagentRuntime {
   readonly modelRetry?: ModelRetryPolicy
   readonly sandbox?: PathSandbox
   readonly network?: NetworkGuard
+  readonly leases?: WorkspaceLeaseManager
+  readonly workspaceId?: string
   readonly metrics?: Metrics
 }
 
@@ -334,6 +337,8 @@ export async function runSubagent(
           signal,
           ...(runtime.sandbox ? { sandbox: runtime.sandbox } : {}),
           ...(runtime.network ? { network: runtime.network } : {}),
+          ...(runtime.leases ? { leases: runtime.leases } : {}),
+          ...(runtime.workspaceId ? { workspaceId: runtime.workspaceId } : {}),
           ...(runtime.metrics ? { metrics: runtime.metrics } : {}),
           hooks: {
             guard: name => {

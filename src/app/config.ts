@@ -39,6 +39,18 @@ export interface RuntimePatch {
     readonly maxTotal?: number
     readonly maxPerCreator?: number
   }
+  readonly workspace?: {
+    /** 不配就用 App 的 cwd */
+    readonly id?: string
+    readonly lease?: {
+      readonly enabled?: boolean
+      readonly pathTtlMs?: number
+      readonly workspaceTtlMs?: number
+      readonly waitMs?: number
+      readonly renewMs?: number
+      readonly maxQueue?: number
+    }
+  }
 }
 
 export interface PatchConfig {

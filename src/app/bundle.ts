@@ -30,6 +30,7 @@ import { FsPolicy } from '../core/fs-policy.ts'
 import { Metrics, type MetricsSnapshot } from '../core/metrics.ts'
 import { NetworkPolicy } from '../core/network-policy.ts'
 import { registerCoreEvents } from '../core/registry.ts'
+import { WorkspaceLeaseManager } from '../core/workspace-lease.ts'
 import { SessionWriter } from '../core/session-writer.ts'
 import { EventStore } from '../core/store.ts'
 import { agentStream, sessionStream } from '../core/streams.ts'
@@ -251,6 +252,25 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         : {}),
     })
 
+  const workspaceConfig = config.patch?.runtime?.workspace
+  const leaseConfig = workspaceConfig?.lease
+  const leases = leaseConfig?.enabled === false
+    ? undefined
+    : new WorkspaceLeaseManager({
+      ...(leaseConfig?.pathTtlMs !== undefined ? { pathTtlMs: leaseConfig.pathTtlMs } : {}),
+      ...(leaseConfig?.workspaceTtlMs !== undefined
+        ? { workspaceTtlMs: leaseConfig.workspaceTtlMs }
+        : {}),
+      ...(leaseConfig?.waitMs !== undefined ? { waitMs: leaseConfig.waitMs } : {}),
+      ...(leaseConfig?.renewMs !== undefined ? { renewMs: leaseConfig.renewMs } : {}),
+      ...(leaseConfig?.maxQueue !== undefined ? { maxQueue: leaseConfig.maxQueue } : {}),
+    })
+  const workspaceId = workspaceConfig?.id ?? cwd
+  if (leases) {
+    container.register('workspaceLeases', leases)
+    container.onDispose('workspaceLeases', () => leases.dispose())
+  }
+
   const sessionsRoot = join(config.profile.dataRoot, 'sessions')
   mkdirSync(sessionsRoot, { recursive: true })
 
@@ -448,6 +468,8 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       modelRetry,
       ...(fsPolicy ? { sandbox: fsPolicy } : {}),
       ...(networkPolicy ? { network: networkPolicy } : {}),
+      ...(leases ? { leases } : {}),
+      workspaceId,
       ...(metrics ? { metrics } : {}),
     }),
     // 终态回送来源会话；正文自带分类标记，模型能认出这不是用户说的。
@@ -524,6 +546,8 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       ...(skipStartEvent ? { skipStartEvent: true } : {}),
       ...(fsPolicy ? { sandbox: fsPolicy } : {}),
       ...(networkPolicy ? { network: networkPolicy } : {}),
+      ...(leases ? { leases } : {}),
+      workspaceId,
       ...(metrics ? { metrics } : {}),
       ...(maxBytes !== undefined ? { maxBytes } : {}),
       ...(input.signal ? { signal: input.signal } : {}),

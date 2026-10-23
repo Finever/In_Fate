@@ -87,6 +87,16 @@
         "allowPrivateNetwork": false,
         "maxRedirects": 5
       },
+      "workspace": {
+        "lease": {
+          "enabled": true,
+          "pathTtlMs": 30000,
+          "workspaceTtlMs": 300000,
+          "waitMs": 30000,
+          "renewMs": 5000,
+          "maxQueue": 20
+        }
+      },
       "sessions": {
         "maxTotal": 64,
         "maxPerCreator": 16

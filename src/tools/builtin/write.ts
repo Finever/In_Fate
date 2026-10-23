@@ -21,7 +21,7 @@ export const writeTool: ToolDefinition = {
     required: ['file_path', 'content'],
     additionalProperties: false,
   },
-  meta: { dangerous: true },
+  meta: { dangerous: true, writeScope: 'path' },
 
   async run(args, context) {
     const input = args as { file_path: string; content: string; encoding?: string }

@@ -8,6 +8,11 @@
  */
 
 import type { Metrics } from '../core/metrics.ts'
+import type {
+  WorkspaceLeaseHandle,
+  WorkspaceLeaseManager,
+} from '../core/workspace-lease.ts'
+import { resolve } from 'node:path'
 import { validateValue } from './schema.ts'
 import type { ToolRegistry } from './registry.ts'
 import type {
@@ -39,6 +44,8 @@ export interface ExecuteOptions {
   readonly approvalTimeoutMs?: number
   readonly sandbox?: PathSandbox
   readonly network?: NetworkGuard
+  readonly leases?: WorkspaceLeaseManager
+  readonly workspaceId?: string
   readonly metrics?: Metrics
   readonly hooks?: PipelineHooks
 }
@@ -118,6 +125,9 @@ async function executeToolInner(
     ...(options.network ? { network: options.network } : {}),
   }
 
+  let lease: WorkspaceLeaseHandle | undefined
+  let leaseRenew: NodeJS.Timeout | undefined
+
   try {
     let args = rawArgs
 
@@ -136,6 +146,41 @@ async function executeToolInner(
       const decision = await requestApproval(name, args, options, context)
       if (!decision.approved) return errorResult(decision.reason ?? 'denied')
       if (decision.updatedInput) args = decision.updatedInput
+    }
+
+    // 写租约：审批之后才拿，避免用户看审批卡时把 workspace 堵住。
+    const writeScope = tool.meta?.writeScope
+    if (writeScope && options.leases) {
+      let target: string | undefined
+      if (writeScope === 'path') {
+        const raw = typeof args === 'object' && args !== null
+          ? (args as { file_path?: unknown }).file_path
+          : undefined
+        if (typeof raw !== 'string' || raw.length === 0) {
+          return errorResult('path lease needs file_path')
+        }
+        target = options.sandbox
+          ? options.sandbox.resolveWrite(raw, options.cwd)
+          : resolve(options.cwd, raw)
+      }
+      const started = Date.now()
+      try {
+        lease = await options.leases.acquire({
+          workspaceId: options.workspaceId ?? options.cwd,
+          scope: writeScope,
+          ...(target ? { target } : {}),
+          sessionId: options.sessionId,
+          toolCallId: options.callId,
+          signal: context.signal,
+        })
+      } catch (error) {
+        return errorResult(error instanceof Error ? error.message : String(error))
+      }
+      options.metrics?.observe('workspace.lease_wait_ms', Date.now() - started, {
+        scope: writeScope,
+      })
+      leaseRenew = setInterval(() => lease?.renew(), options.leases.renewMs)
+      leaseRenew.unref?.()
     }
 
     const run = async (): Promise<ToolResult> => tool.run(args, context)
@@ -158,6 +203,8 @@ async function executeToolInner(
   } catch (error) {
     return errorResult(error instanceof Error ? error.message : String(error))
   } finally {
+    if (leaseRenew) clearInterval(leaseRenew)
+    lease?.release()
     clearTimeout(timer)
     external?.removeEventListener('abort', onAbort)
   }

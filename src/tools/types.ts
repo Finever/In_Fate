@@ -71,6 +71,8 @@ export interface ToolDefinition {
     readonly readOnly?: boolean
     readonly dangerous?: boolean
     readonly timeoutMs?: number
+    /** 执行前需要 workspace 写租约；readOnly 工具不要设置 */
+    readonly writeScope?: 'path' | 'workspace'
   }
   run(args: unknown, context: ToolContext): Promise<ToolResult>
   /** 纯函数：待执行卡片的展示投影 */

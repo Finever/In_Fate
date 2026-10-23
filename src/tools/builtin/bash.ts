@@ -254,7 +254,7 @@ export const bashTool: ToolDefinition = {
     required: ['command'],
     additionalProperties: false,
   },
-  meta: { dangerous: true },
+  meta: { dangerous: true, writeScope: 'workspace' },
 
   async run(args, context) {
     const input = args as { command: string; cwd?: string; encoding?: string }
