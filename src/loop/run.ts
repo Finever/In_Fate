@@ -15,17 +15,24 @@ import { compactIfNeeded } from '../compaction/fold.ts'
 import type { CompactionConfig, Summarizer } from '../compaction/types.ts'
 import type { SpillPolicy } from '../tools/spill.ts'
 import type { Event, NewEvent } from '../core/events.ts'
+import type { Metrics } from '../core/metrics.ts'
 import type { SessionWriter } from '../core/session-writer.ts'
 import type { EventStore } from '../core/store.ts'
 import { sessionStream } from '../core/streams.ts'
 import { chatOpenAI, type ChatRequest } from '../model/openai.ts'
 import type { ResolvedModel } from '../model/registry.ts'
+import type { ModelRetryPolicy } from '../model/retry.ts'
 import type { ModelEvent } from '../model/types.ts'
 import { projectHistory } from '../projections/history.ts'
-import type { ApprovalRegistry, ToolResult } from '../tools/types.ts'
+import type {
+  ApprovalRegistry,
+  NetworkGuard,
+  PathSandbox,
+  ToolResult,
+} from '../tools/types.ts'
 import { executeTool } from '../tools/executor.ts'
 import type { OffloadPolicy } from '../tools/offload.ts'
-import { toolResultPayload } from '../tools/result-payload.ts'
+import { recordToolResultOnce, toolCallIdsWithResults } from '../tools/persist.ts'
 import type { ToolRegistry } from '../tools/registry.ts'
 
 export interface RunLoopOptions {
@@ -45,6 +52,11 @@ export interface RunLoopOptions {
   readonly maxBytes?: number
   /** 工具结果写时卸载；不传就全内联 */
   readonly offload?: OffloadPolicy
+  /** 模型重试/超时；不传由适配器用默认策略 */
+  readonly modelRetry?: ModelRetryPolicy
+  readonly sandbox?: PathSandbox
+  readonly network?: NetworkGuard
+  readonly metrics?: Metrics
   readonly signal?: AbortSignal
   /** 注入时间，保持可复现；默认读系统时间 */
   readonly now?: () => Date
@@ -85,6 +97,8 @@ function parseArguments(text: string): unknown {
 }
 
 export async function runTurn(userText: string, options: RunLoopOptions): Promise<RunResult> {
+  const startedAt = Date.now()
+  options.metrics?.inc('turn.started')
   const now = options.now ?? ((): Date => new Date())
   const stream = sessionStream(options.sessionId)
   const userId = options.profile.principals.user?.id ?? 'user'
@@ -105,6 +119,14 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
     type: 'message.user',
     payload: { text: userText },
   })
+
+  // 本轮已产生结果的调用 id；重放时不再执行第二次副作用。
+  const turnEvents = options.store.read()
+  let turnStart = 0
+  turnEvents.forEach((event, index) => {
+    if (event.type === 'turn.completed') turnStart = index + 1
+  })
+  const answered = toolCallIdsWithResults(turnEvents.slice(turnStart))
 
   // 轮开始前做一次压缩检查；失败要落痕，但不能阻塞这一轮。
   const currentTurn = options.store.read().filter(event => event.type === 'turn.completed').length + 1
@@ -187,12 +209,20 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
       messages: rendered.messages,
       tools: options.tools.toModelSpecs(),
       signal: options.signal,
+      ...(options.modelRetry ? { retry: options.modelRetry } : {}),
+      onAttempt: () => options.metrics?.inc('model.attempts'),
+      onRetry: info => {
+        options.metrics?.inc('model.retries')
+        options.metrics?.observe('model.retry_delay_ms', info.delayMs,
+          info.status !== undefined ? { status: info.status } : {})
+      },
     }
 
     const text: string[] = []
     const reasoning: string[] = []
     const calls: { id: string; name: string; arguments: string }[] = []
     let stepInput = 0
+    const modelStarted = Date.now()
 
     try {
       for await (const event of chatOpenAI(request)) {
@@ -207,11 +237,15 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
           stepInput += event.input ?? 0
         }
       }
+      options.metrics?.inc('model.ok')
     } catch (error) {
+      options.metrics?.inc('model.errors')
       // 用户中断不算失败；其它错误落痕后结束这一轮，不把异常漏给调用方。
       if (options.signal?.aborted) break
       failure = error instanceof Error ? error.message : String(error)
       break
+    } finally {
+      options.metrics?.observe('model.duration_ms', Date.now() - modelStarted)
     }
 
     // 用真实 usage 校准估算器；没有 usage 的提供方保持原系数。
@@ -245,7 +279,14 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
     steps += 1
     if (calls.length === 0) break
 
-    for (const call of calls) {
+    const pending = calls.filter((call, index) =>
+      !answered.has(call.id) && calls.findIndex(item => item.id === call.id) === index,
+    )
+    if (pending.length < calls.length) {
+      options.metrics?.inc('tool.skipped_duplicate', calls.length - pending.length)
+    }
+
+    for (const call of pending) {
       append({
         stream,
         actor: 'agent',
@@ -257,7 +298,7 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
     // 工具正文执行前落盘：外部副作用发生后崩溃，调用意图仍在。
     flush()
 
-    for (const call of calls) {
+    for (const call of pending) {
       let result: ToolResult
       try {
         result = await executeTool(call.name, parseArguments(call.arguments), {
@@ -266,20 +307,17 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
           callId: call.id,
           sessionId: options.sessionId,
           cwd,
-          signal: options.signal,
+          ...(options.signal ? { signal: options.signal } : {}),
+          ...(options.sandbox ? { sandbox: options.sandbox } : {}),
+          ...(options.network ? { network: options.network } : {}),
+          ...(options.metrics ? { metrics: options.metrics } : {}),
         })
       } catch (error) {
         result = { text: error instanceof Error ? error.message : String(error), isError: true }
       }
 
       const finalResult = options.offload ? options.offload.apply(result) : result
-      append({
-        stream,
-        actor: 'tool',
-        type: 'tool.result',
-        refs: { toolCall: call.id },
-        payload: toolResultPayload(call.id, finalResult),
-      })
+      recordToolResultOnce({ append, stream, callId: call.id, result: finalResult, seen: answered })
     }
   }
 
@@ -300,6 +338,10 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
   })
 
   flush()
+
+  options.metrics?.inc('turn.steps', steps)
+  options.metrics?.observe('turn.duration_ms', Date.now() - startedAt)
+  options.metrics?.inc(failure ? 'turn.failed' : aborted ? 'turn.aborted' : 'turn.completed')
 
   return {
     steps,

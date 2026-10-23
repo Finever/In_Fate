@@ -25,6 +25,9 @@ import type { CompactionConfig, CompactionPayload } from '../compaction/types.ts
 import { staticSection, memorySection, timeSection } from '../context/sections.ts'
 import type { ContextSection } from '../context/types.ts'
 import { BlobStore } from '../core/blobs.ts'
+import { FsPolicy } from '../core/fs-policy.ts'
+import { Metrics, type MetricsSnapshot } from '../core/metrics.ts'
+import { NetworkPolicy } from '../core/network-policy.ts'
 import { registerCoreEvents } from '../core/registry.ts'
 import { SessionWriter } from '../core/session-writer.ts'
 import { EventStore } from '../core/store.ts'
@@ -32,6 +35,7 @@ import { agentStream, sessionStream } from '../core/streams.ts'
 import { defaultSources } from '../memory/sources.ts'
 import type { ModelRegistry, ResolvedModel } from '../model/registry.ts'
 import { ModelRegistry as Registry } from '../model/registry.ts'
+import { resolveRetryPolicy } from '../model/retry.ts'
 import { projectHistory, type HistoryMessage } from '../projections/history.ts'
 import { renderContext } from '../context/pipeline.ts'
 import { runTurn, type RunResult } from '../loop/run.ts'
@@ -143,6 +147,8 @@ export interface App {
   agentInterrupt(id: string): boolean
   /** 等子 agent 到终态；超时返回仍在跑/排队的数量。 */
   waitForAgents(timeoutMs?: number): Promise<{ active: number; queued: number }>
+  /** 进程内指标快照；关闭指标时返回空快照。 */
+  metrics(): MetricsSnapshot
 
   dispose(): Promise<void>
 }
@@ -158,6 +164,34 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   const config = applyPatches(rawConfig)
   const cwd = options.cwd ?? process.cwd()
   const now = options.now ?? ((): Date => new Date())
+
+  // 运行时策略：默认开；配置可以关，但关的是检查，不是事件记录。
+  const metrics = config.patch?.runtime?.metrics === false ? undefined : new Metrics()
+  const modelRetry = resolveRetryPolicy(config.patch?.runtime?.model?.retry)
+
+  const fsPatch = config.patch?.runtime?.fs
+  const defaultFsRoots = [cwd, config.profile.memoryLogRoot, config.profile.agentDir]
+    .filter((root): root is string => typeof root === 'string' && root.length > 0)
+  const fsPolicy = fsPatch?.enforce === false
+    ? undefined
+    : new FsPolicy({
+      readRoots: fsPatch?.readRoots ?? defaultFsRoots,
+      ...(fsPatch?.writeRoots ? { writeRoots: fsPatch.writeRoots } : {}),
+    })
+
+  const networkPatch = config.patch?.runtime?.network
+  const networkPolicy = networkPatch?.enforce === false
+    ? undefined
+    : new NetworkPolicy({
+      ...(networkPatch?.allowPrivateNetwork !== undefined
+        ? { allowPrivateNetwork: networkPatch.allowPrivateNetwork }
+        : {}),
+      ...(networkPatch?.allowHosts ? { allowHosts: networkPatch.allowHosts } : {}),
+      ...(networkPatch?.denyHosts ? { denyHosts: networkPatch.denyHosts } : {}),
+      ...(networkPatch?.maxRedirects !== undefined
+        ? { maxRedirects: networkPatch.maxRedirects }
+        : {}),
+    })
 
   const sessionsRoot = join(config.profile.dataRoot, 'sessions')
   mkdirSync(sessionsRoot, { recursive: true })
@@ -328,6 +362,10 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       offload,
       estimator,
       models,
+      modelRetry,
+      ...(fsPolicy ? { sandbox: fsPolicy } : {}),
+      ...(networkPolicy ? { network: networkPolicy } : {}),
+      ...(metrics ? { metrics } : {}),
     }),
     // 终态回送来源会话；正文自带分类标记，模型能认出这不是用户说的。
     deliver: (result, request) => {
@@ -406,6 +444,10 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         cwd,
         now,
         offload,
+        modelRetry,
+        ...(fsPolicy ? { sandbox: fsPolicy } : {}),
+        ...(networkPolicy ? { network: networkPolicy } : {}),
+        ...(metrics ? { metrics } : {}),
         ...(maxBytes !== undefined ? { maxBytes } : {}),
         ...(input.signal ? { signal: input.signal } : {}),
         ...(input.onModelEvent ? { onModelEvent: input.onModelEvent } : {}),
@@ -676,6 +718,15 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         await new Promise(resolve => setTimeout(resolve, 50))
       }
       return { active: agents.activeCount(), queued: agents.queueLength() }
+    },
+
+    metrics() {
+      return metrics?.snapshot() ?? {
+        startedAt: now().toISOString(),
+        counters: [],
+        histograms: [],
+        gauges: [],
+      }
     },
 
     async dispose() {

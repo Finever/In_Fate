@@ -9,8 +9,32 @@
 import type { AgentPoolConfig, AgentPreset } from '../agents/types.ts'
 import type { CompactionConfig } from '../compaction/types.ts'
 import type { Profile } from '../config/profile.ts'
+import type { ModelRetryPolicy } from '../model/retry.ts'
 import type { ProviderConfig } from '../model/types.ts'
 import type { OffloadConfig } from '../tools/offload.ts'
+
+export interface RuntimePatch {
+  readonly model?: {
+    readonly retry?: ModelRetryPolicy
+  }
+  readonly fs?: {
+    /** false = 不注入沙箱（默认 true） */
+    readonly enforce?: boolean
+    /** 不配就用 cwd + memoryLogRoot + agentDir */
+    readonly readRoots?: readonly string[]
+    readonly writeRoots?: readonly string[]
+  }
+  readonly network?: {
+    /** false = 不注入网络策略（默认 true） */
+    readonly enforce?: boolean
+    readonly allowPrivateNetwork?: boolean
+    readonly allowHosts?: readonly string[]
+    readonly denyHosts?: readonly string[]
+    readonly maxRedirects?: number
+  }
+  /** false = 不记录进程内指标（默认 true） */
+  readonly metrics?: boolean
+}
 
 export interface PatchConfig {
   readonly tools?: {
@@ -24,6 +48,8 @@ export interface PatchConfig {
   readonly offload?: Partial<OffloadConfig>
   /** 按 id 覆盖预设；null 表示删掉这个可选字段 */
   readonly presets?: Readonly<Record<string, Partial<AgentPreset> | null>>
+  /** 运行时策略：重试、文件/网络沙箱、指标 */
+  readonly runtime?: RuntimePatch
 }
 
 export interface AppConfig {
@@ -78,6 +104,9 @@ export function validateConfig(raw: unknown): AppConfig {
 
   if (raw.patch !== undefined && !isRecord(raw.patch)) {
     throw new ConfigError('patch', 'must be an object')
+  }
+  if (isRecord(raw.patch) && raw.patch.runtime !== undefined && !isRecord(raw.patch.runtime)) {
+    throw new ConfigError('patch.runtime', 'must be an object')
   }
 
   return raw as unknown as AppConfig

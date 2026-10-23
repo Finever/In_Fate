@@ -105,6 +105,11 @@ async function handle(app: App, req: IncomingMessage, res: ServerResponse, token
     return
   }
 
+  if (req.method === 'GET' && parts[1] === 'metrics' && parts.length === 2) {
+    json(res, 200, app.metrics())
+    return
+  }
+
   if (req.method === 'GET' && parts[1] === 'sessions' && parts.length === 2) {
     json(res, 200, { sessions: app.sessions() })
     return

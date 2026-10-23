@@ -13,6 +13,18 @@ import type { ToolSpec } from '../model/types.ts'
 export type ToolSource = 'builtin' | 'plugin' | 'mcp' | 'client'
 export type ApprovalMode = 'auto' | 'required'
 
+/** 文件访问策略；由 App 注入，工具本身不写死根目录。 */
+export interface PathSandbox {
+  resolveRead(target: string, cwd?: string): string
+  resolveWrite(target: string, cwd?: string): string
+}
+
+/** 网络出口策略；fetch 每次请求前调用。 */
+export interface NetworkGuard {
+  readonly maxRedirects: number
+  check(url: string, options?: { resolve?: boolean }): Promise<URL>
+}
+
 /** 结果 envelope。编码、字节、mime 都是一等字段。 */
 export interface ToolResult {
   readonly text?: string
@@ -42,6 +54,10 @@ export interface ToolContext {
   readonly signal: AbortSignal
   readonly approvals?: ApprovalRegistry
   readonly profile?: unknown
+  /** 不传就不做文件沙箱（单测/独立 demo 兼容） */
+  readonly sandbox?: PathSandbox
+  /** 不传就不做网络策略（单测/独立 demo 兼容） */
+  readonly network?: NetworkGuard
 }
 
 export interface ToolDefinition {

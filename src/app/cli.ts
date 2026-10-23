@@ -28,6 +28,7 @@ const HELP = `IF — In_Fate
   if tail [会话] [--limit N]        查看最近几轮（show 的别名）
   if payload <ref|事件id> [-s 会话] 取全文切片（--offset / --limit）
   if stats [会话]                   会话统计
+  if metrics                        进程内指标
   if approvals [-s 会话]            待审批队列
   if serve [--port 8787] [--token]  启动本地 UI API（仅 127.0.0.1）
   if tools                          列出工具
@@ -230,6 +231,8 @@ export async function runCli(argv: string[]): Promise<void> {
         ? JSON.stringify(stats, null, 2) + '\n'
         : `${stats.sessionId}\t${stats.events} 事件\t${stats.turns} 轮\t`
           + `${stats.compacted} 次压缩\t${stats.fileBytes} bytes\t${stats.segments} 段\n`)
+    } else if (command === 'metrics') {
+      stdout.write(JSON.stringify(app.metrics(), null, 2) + '\n')
     } else if (command === 'approvals') {
       const items = app.uiApprovals(typeof values.session === 'string' ? values.session : undefined)
       if (items.length === 0) stdout.write('（没有待审批）\n')

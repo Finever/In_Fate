@@ -12,18 +12,25 @@ import { renderContext } from '../context/pipeline.ts'
 import { staticSection, timeSection } from '../context/sections.ts'
 import { TokenEstimator } from '../compaction/estimate.ts'
 import type { Event, NewEvent } from '../core/events.ts'
+import type { Metrics } from '../core/metrics.ts'
 import type { SessionWriter } from '../core/session-writer.ts'
 import type { EventStore } from '../core/store.ts'
 import { agentStream } from '../core/streams.ts'
 import { chatOpenAI } from '../model/openai.ts'
 import { resolveModel, type ModelRegistry, type ResolvedModel } from '../model/registry.ts'
+import type { ModelRetryPolicy } from '../model/retry.ts'
 import type { ModelEvent, ToolSpec } from '../model/types.ts'
 import { projectHistory } from '../projections/history.ts'
 import { executeTool } from '../tools/executor.ts'
 import type { ToolRegistry } from '../tools/registry.ts'
-import type { ApprovalRegistry, ToolResult } from '../tools/types.ts'
+import type {
+  ApprovalRegistry,
+  NetworkGuard,
+  PathSandbox,
+  ToolResult,
+} from '../tools/types.ts'
 import type { OffloadPolicy } from '../tools/offload.ts'
-import { toolResultPayload } from '../tools/result-payload.ts'
+import { recordToolResultOnce } from '../tools/persist.ts'
 import { trimHistoryForContext } from './context.ts'
 import type { AgentPreset, AgentRequest, AgentResult, AgentUsage } from './types.ts'
 
@@ -40,6 +47,10 @@ export interface SubagentRuntime {
   readonly estimator?: TokenEstimator
   /** 传了就用实例注册表；不传退回模块级默认实例（旧 demo 兼容） */
   readonly models?: ModelRegistry
+  readonly modelRetry?: ModelRetryPolicy
+  readonly sandbox?: PathSandbox
+  readonly network?: NetworkGuard
+  readonly metrics?: Metrics
 }
 
 interface Collected {
@@ -55,13 +66,27 @@ async function collectModel(
   messages: Parameters<typeof chatOpenAI>[0]['messages'],
   tools: readonly ToolSpec[],
   signal: AbortSignal,
+  retry?: ModelRetryPolicy,
+  metrics?: Metrics,
 ): Promise<Collected> {
   const text: string[] = []
   const reasoning: string[] = []
   const calls: { id: string; name: string; arguments: string }[] = []
   const usage: AgentUsage = { input: 0, output: 0, cacheRead: 0 }
 
-  for await (const event of chatOpenAI({ resolved: model, system, messages, tools, signal })) {
+  for await (const event of chatOpenAI({
+    resolved: model,
+    system,
+    messages,
+    tools,
+    signal,
+    ...(retry ? { retry } : {}),
+    onAttempt: () => metrics?.inc('model.attempts', 1, { source: 'agent' }),
+    onRetry: info => {
+      metrics?.inc('model.retries', 1, { source: 'agent' })
+      metrics?.observe('model.retry_delay_ms', info.delayMs, { source: 'agent' })
+    },
+  })) {
     if (event.type === 'text') text.push(event.text)
     else if (event.type === 'reasoning') reasoning.push(event.text)
     else if (event.type === 'tool_call') calls.push(event)
@@ -196,7 +221,15 @@ export async function runSubagent(
       if (signal.aborted) break
       try {
         const model = resolve(choice.provider, choice.model)
-        collected = await collectModel(model, rendered.system, messages, tools, signal)
+        collected = await collectModel(
+          model,
+          rendered.system,
+          messages,
+          tools,
+          signal,
+          runtime.modelRetry,
+          runtime.metrics,
+        )
         break
       } catch (error) {
         lastError = error
@@ -263,7 +296,14 @@ export async function runSubagent(
       break
     }
 
-    for (const call of collected.calls) {
+    // 同一模型响应里重复的 id 只执行一次；每个 step 的重复不回查历史，
+    // 因为子 agent 可能在不同 step 里合法地复用同一个工具调用 id。
+    const pending = collected.calls.filter((call, index) =>
+      collected.calls.findIndex(item => item.id === call.id) === index,
+    )
+    const answered = new Set<string>()
+
+    for (const call of pending) {
       append({
         stream,
         actor: 'agent',
@@ -273,7 +313,7 @@ export async function runSubagent(
     }
     flush()
 
-    for (const call of collected.calls) {
+    for (const call of pending) {
       const args = parseArguments(call.arguments)
       let result: ToolResult
       if (!allowed.has(call.name)) {
@@ -286,6 +326,9 @@ export async function runSubagent(
           sessionId: request.id,
           cwd: runtime.cwd,
           signal,
+          ...(runtime.sandbox ? { sandbox: runtime.sandbox } : {}),
+          ...(runtime.network ? { network: runtime.network } : {}),
+          ...(runtime.metrics ? { metrics: runtime.metrics } : {}),
           hooks: {
             guard: name => {
               const policy = runtime.tools.policy(name)
@@ -307,13 +350,7 @@ export async function runSubagent(
       }
 
       const finalResult = runtime.offload ? runtime.offload.apply(result) : result
-      append({
-        stream,
-        actor: 'tool',
-        type: 'tool.result',
-        refs: { toolCall: call.id },
-        payload: toolResultPayload(call.id, finalResult),
-      })
+      recordToolResultOnce({ append, stream, callId: call.id, result: finalResult, seen: answered })
     }
 
     append({

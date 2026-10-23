@@ -4,12 +4,24 @@
  * 只依赖来源配置里的 baseUrl 与密钥，不认识任何具体厂商。
  * 内部消息 → OpenAI 消息在这里转换；tool_calls 的增量参数在这里拼完整。
  *
+ * 重试只在“还没吐过任何事件”时发生：流一旦开始，重放会造成重复内容。
+ *
  * @module if/model/openai
  */
 
 import type { HistoryMessage } from '../projections/history.ts'
 import { resolveApiKey, type ResolvedModel } from './registry.ts'
 import type { ModelEvent, ToolSpec } from './types.ts'
+import {
+  ModelHttpError,
+  ModelTimeoutError,
+  isRetryableModelError,
+  parseRetryAfter,
+  resolveRetryPolicy,
+  retryDelayMs,
+  type ModelRetryInfo,
+  type ModelRetryPolicy,
+} from './retry.ts'
 
 export interface ChatRequest {
   readonly resolved: ResolvedModel
@@ -21,6 +33,12 @@ export interface ChatRequest {
   readonly signal?: AbortSignal
   /** system 角色的消息是否转成 user（部分来源不认 system）。默认 false。 */
   readonly systemAsUser?: boolean
+  /** 重试、超时、退避；不传用默认策略 */
+  readonly retry?: ModelRetryPolicy
+  /** 每次尝试前回调，给指标用 */
+  readonly onAttempt?: (attempt: number) => void
+  /** 即将重试前回调 */
+  readonly onRetry?: (info: ModelRetryInfo) => void
 }
 
 function textOf(message: HistoryMessage): string {
@@ -83,132 +101,202 @@ function toOpenAITools(tools: readonly ToolSpec[]): Record<string, unknown>[] {
   }))
 }
 
-/** 流式对话。产出统一的 ModelEvent，不把厂商格式漏给上层。 */
-export async function* chatOpenAI(request: ChatRequest): AsyncGenerator<ModelEvent> {
+function requestBody(request: ChatRequest): Record<string, unknown> {
   const { resolved } = request
-  const key = resolveApiKey(resolved.provider)
-  const url = `${resolved.endpoint.baseUrl.replace(/\/+$/, '')}/chat/completions`
-
-  const headers: Record<string, string> = {
-    'content-type': 'application/json',
-    ...(key ? { authorization: `Bearer ${key}` } : {}),
-    ...(resolved.endpoint.headers ?? {}),
-  }
-
-  const body: Record<string, unknown> = {
+  return {
     model: resolved.apiModelId,
     stream: true,
     stream_options: { include_usage: true },
-    messages: [{ role: 'system', content: request.system }, ...toOpenAIMessages(request.messages, request.systemAsUser ?? false)],
+    messages: [
+      { role: 'system', content: request.system },
+      ...toOpenAIMessages(request.messages, request.systemAsUser ?? false),
+    ],
     ...(request.tools?.length ? { tools: toOpenAITools(request.tools) } : {}),
     ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
     ...(request.maxTokens !== undefined ? { max_tokens: request.maxTokens } : {}),
   }
+}
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-    signal: request.signal,
-  })
-
-  if (!response.ok) {
-    const text = await response.text()
-    throw new Error(`model http ${response.status}: ${text.slice(0, 500)}`)
+function requestHeaders(resolved: ResolvedModel): Record<string, string> {
+  const key = resolveApiKey(resolved.provider)
+  return {
+    'content-type': 'application/json',
+    ...(key ? { authorization: `Bearer ${key}` } : {}),
+    ...(resolved.endpoint.headers ?? {}),
   }
-  if (!response.body) throw new Error('model response has no body')
+}
 
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  const toolCalls = new Map<number, { id: string; name: string; arguments: string }>()
-  let done = false
+/** 单次尝试：负责超时控制与 SSE 解析。 */
+async function* chatAttempt(
+  request: ChatRequest,
+  timeoutMs: number,
+): AsyncGenerator<ModelEvent> {
+  const { resolved } = request
+  const url = `${resolved.endpoint.baseUrl.replace(/\/+$/, '')}/chat/completions`
+  const controller = new AbortController()
+  let timedOut = false
 
-  while (!done) {
-    const chunk = await reader.read()
-    if (chunk.done) break
-    buffer += decoder.decode(chunk.value, { stream: true })
+  const onAbort = (): void => controller.abort(request.signal?.reason)
+  request.signal?.addEventListener('abort', onAbort, { once: true })
+  if (request.signal?.aborted) controller.abort(request.signal.reason)
 
-    let boundary = buffer.indexOf('\n\n')
-    while (boundary >= 0) {
-      const block = buffer.slice(0, boundary)
-      buffer = buffer.slice(boundary + 2)
+  const timer = setTimeout(() => {
+    timedOut = true
+    controller.abort(new ModelTimeoutError(timeoutMs))
+  }, timeoutMs)
+  timer.unref?.()
 
-      for (const line of block.split('\n')) {
-        const trimmed = line.trim()
-        if (!trimmed.startsWith('data:')) continue
-        const data = trimmed.slice(5).trim()
-        if (data === '[DONE]') {
-          done = true
-          break
-        }
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: requestHeaders(resolved),
+      body: JSON.stringify(requestBody(request)),
+      signal: controller.signal,
+    })
 
-        const json = JSON.parse(data) as {
-          choices?: {
-            delta?: {
-              content?: string
-              reasoning_content?: string
-              reasoning?: string
-              tool_calls?: {
-                index: number
-                id?: string
-                function?: { name?: string; arguments?: string }
-              }[]
-            }
-            finish_reason?: string | null
-          }[]
-          usage?: {
-            prompt_tokens?: number
-            completion_tokens?: number
-            prompt_tokens_details?: { cached_tokens?: number }
-            prompt_cache_hit_tokens?: number
-            cache_read_input_tokens?: number
+    if (!response.ok) {
+      const text = await response.text()
+      const retryAfterMs = parseRetryAfter(response.headers.get('retry-after'))
+      throw new ModelHttpError(response.status, text, retryAfterMs)
+    }
+    if (!response.body) throw new Error('model response has no body')
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    const toolCalls = new Map<number, { id: string; name: string; arguments: string }>()
+    let done = false
+
+    while (!done) {
+      const chunk = await reader.read()
+      if (chunk.done) break
+      buffer += decoder.decode(chunk.value, { stream: true })
+
+      let boundary = buffer.indexOf('\n\n')
+      while (boundary >= 0) {
+        const block = buffer.slice(0, boundary)
+        buffer = buffer.slice(boundary + 2)
+
+        for (const line of block.split('\n')) {
+          const trimmed = line.trim()
+          if (!trimmed.startsWith('data:')) continue
+          const data = trimmed.slice(5).trim()
+          if (data === '[DONE]') {
+            done = true
+            break
           }
-        }
 
-        const choice = json.choices?.[0]
-        const delta = choice?.delta
+          const json = JSON.parse(data) as {
+            choices?: {
+              delta?: {
+                content?: string
+                reasoning_content?: string
+                reasoning?: string
+                tool_calls?: {
+                  index: number
+                  id?: string
+                  function?: { name?: string; arguments?: string }
+                }[]
+              }
+              finish_reason?: string | null
+            }[]
+            usage?: {
+              prompt_tokens?: number
+              completion_tokens?: number
+              prompt_tokens_details?: { cached_tokens?: number }
+              prompt_cache_hit_tokens?: number
+              cache_read_input_tokens?: number
+            }
+          }
 
-        if (delta?.content) yield { type: 'text', text: String(delta.content) }
-        const reasoning = delta?.reasoning_content ?? delta?.reasoning
-        if (reasoning) yield { type: 'reasoning', text: String(reasoning) }
+          const choice = json.choices?.[0]
+          const delta = choice?.delta
 
-        for (const call of delta?.tool_calls ?? []) {
-          const entry = toolCalls.get(call.index) ?? { id: '', name: '', arguments: '' }
-          if (call.id) entry.id = String(call.id)
-          if (call.function?.name) entry.name = String(call.function.name)
-          if (call.function?.arguments) entry.arguments += String(call.function.arguments)
-          toolCalls.set(call.index, entry)
-        }
+          if (delta?.content) yield { type: 'text', text: String(delta.content) }
+          const reasoning = delta?.reasoning_content ?? delta?.reasoning
+          if (reasoning) yield { type: 'reasoning', text: String(reasoning) }
 
-        if (choice?.finish_reason) {
-          for (const [index, entry] of toolCalls) {
+          for (const call of delta?.tool_calls ?? []) {
+            const entry = toolCalls.get(call.index) ?? { id: '', name: '', arguments: '' }
+            if (call.id) entry.id = String(call.id)
+            if (call.function?.name) entry.name = String(call.function.name)
+            if (call.function?.arguments) entry.arguments += String(call.function.arguments)
+            toolCalls.set(call.index, entry)
+          }
+
+          if (choice?.finish_reason) {
+            for (const [index, entry] of toolCalls) {
+              yield {
+                type: 'tool_call',
+                id: entry.id || `call-${index}`,
+                name: entry.name,
+                arguments: entry.arguments,
+              }
+            }
+            toolCalls.clear()
+          }
+
+          if (json.usage) {
             yield {
-              type: 'tool_call',
-              id: entry.id || `call-${index}`,
-              name: entry.name,
-              arguments: entry.arguments,
+              type: 'usage',
+              input: json.usage.prompt_tokens,
+              output: json.usage.completion_tokens,
+              cacheRead: json.usage.prompt_tokens_details?.cached_tokens
+                ?? json.usage.prompt_cache_hit_tokens
+                ?? json.usage.cache_read_input_tokens,
             }
           }
-          toolCalls.clear()
         }
 
-        if (json.usage) {
-          yield {
-            type: 'usage',
-            input: json.usage.prompt_tokens,
-            output: json.usage.completion_tokens,
-            cacheRead: json.usage.prompt_tokens_details?.cached_tokens
-              ?? json.usage.prompt_cache_hit_tokens
-              ?? json.usage.cache_read_input_tokens,
-          }
-        }
+        if (done) break
+        boundary = buffer.indexOf('\n\n')
+      }
+    }
+
+    yield { type: 'done' }
+  } catch (error) {
+    if (timedOut) throw new ModelTimeoutError(timeoutMs)
+    throw error
+  } finally {
+    clearTimeout(timer)
+    request.signal?.removeEventListener('abort', onAbort)
+  }
+}
+
+/** 流式对话。产出统一的 ModelEvent，不把厂商格式漏给上层。 */
+export async function* chatOpenAI(request: ChatRequest): AsyncGenerator<ModelEvent> {
+  const policy = resolveRetryPolicy(request.retry)
+  let attempt = 0
+
+  while (true) {
+    attempt += 1
+    request.onAttempt?.(attempt)
+    let emitted = 0
+
+    try {
+      for await (const event of chatAttempt(request, policy.timeoutMs)) {
+        emitted += 1
+        yield event
+      }
+      return
+    } catch (error) {
+      // 用户中断永远不重试；超时由策略决定。
+      if (request.signal?.aborted) throw error
+      if (emitted > 0 || attempt >= policy.maxAttempts || !isRetryableModelError(error, policy)) {
+        throw error
       }
 
-      if (done) break
-      boundary = buffer.indexOf('\n\n')
+      const status = error instanceof ModelHttpError ? error.status : undefined
+      const retryAfterMs = error instanceof ModelHttpError ? error.retryAfterMs : undefined
+      const delayMs = retryDelayMs(attempt, policy, retryAfterMs)
+      request.onRetry?.({
+        attempt,
+        maxAttempts: policy.maxAttempts,
+        delayMs,
+        error: error instanceof Error ? error.message : String(error),
+        ...(status !== undefined ? { status } : {}),
+      })
+      await policy.sleep(delayMs, request.signal)
     }
   }
-
-  yield { type: 'done' }
 }

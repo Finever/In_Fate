@@ -12,6 +12,25 @@ function absolute(base: string, path: string): string {
   return isAbsolute(path) ? path : resolve(base, path)
 }
 
+function normalizeRuntime(
+  patch: AppConfig['patch'],
+  baseDir: string,
+): AppConfig['patch'] {
+  if (!patch?.runtime?.fs) return patch
+  const fs = patch.runtime.fs
+  return {
+    ...patch,
+    runtime: {
+      ...patch.runtime,
+      fs: {
+        ...fs,
+        ...(fs.readRoots ? { readRoots: fs.readRoots.map(root => absolute(baseDir, root)) } : {}),
+        ...(fs.writeRoots ? { writeRoots: fs.writeRoots.map(root => absolute(baseDir, root)) } : {}),
+      },
+    },
+  }
+}
+
 export function normalizePaths(config: AppConfig, baseDir: string): AppConfig {
   return {
     ...config,
@@ -25,6 +44,7 @@ export function normalizePaths(config: AppConfig, baseDir: string): AppConfig {
         ? { agentDir: absolute(baseDir, config.profile.agentDir) }
         : {}),
     },
+    ...(config.patch ? { patch: normalizeRuntime(config.patch, baseDir) } : {}),
   }
 }
 

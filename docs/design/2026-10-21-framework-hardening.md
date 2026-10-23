@@ -1,7 +1,7 @@
 # IF 框架加固设计
 
-> 状态：设计稿，未落代码。
-> 日期：2026-10-21
+> 状态：P0 Phase 1–7 与 Batch D/E 已落代码；设计稿保留作回滚依据。
+> 日期：2026-10-21（2026-10-23 更新）
 > 范围：长会话成本、定量卸载、读时取出、UI 契约、P0 可靠性。
 > 原则：能借的借形状，借不了的反复优化；先不变量，后功能；每阶段有回滚点。
 
@@ -354,6 +354,14 @@ UI 行为：
 - `doctor --deep`：blob 完整性、孤儿 agent、stale lock、磁盘、schema 版本。
 - 基准回归门槛；失败注入纳入 CI。
 
+已落（Batch E）：
+
+- `Metrics`：`turn.*`、`model.attempts/retries/errors/duration`、`tool.calls/errors/duration`；`if metrics` 与 `GET /api/metrics` 可读。
+- 模型重试：单次超时、指数退避 + 抖动、`Retry-After`、仅 5xx/429/网络错误重试；**已经吐过流的事件绝不重试**。
+- 工具幂等：同一轮 `toolCallId` 已有 `tool.result` 就不再执行，重放不会二次产生副作用。
+- bash 进程树：Windows `taskkill /T /F`，POSIX 独立进程组 `SIGTERM → SIGKILL`；中断、超时、输出超限共用。
+- 策略层：`FsPolicy` 根目录 + realpath（防链接逃逸）；`NetworkPolicy` 私网/回环/链路本地/云元数据、DNS 逐地址、重定向逐跳复验；`patch.runtime` 可开关。
+
 ---
 
 ## 6. 待定决策
@@ -429,6 +437,11 @@ UI 行为：
 | 工具结果裁剪 | `src/compaction/prune.ts` |
 | 历史投影 | `src/projections/history.ts` |
 | token 估算 | `src/compaction/estimate.ts` |
+| 模型重试/超时 | `src/model/retry.ts`、`src/model/openai.ts` |
+| 文件沙箱 | `src/core/fs-policy.ts` |
+| 网络策略 | `src/core/network-policy.ts` |
+| 进程内指标 | `src/core/metrics.ts` |
+| 工具结果幂等 | `src/tools/persist.ts` |
 | spill | `src/tools/spill.ts` |
 | recall | `src/tools/builtin/recall.ts` |
 | 记忆地址解析 | `src/memory/quote.ts` |

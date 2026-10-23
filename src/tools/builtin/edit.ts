@@ -5,6 +5,7 @@
  */
 
 import { readFileSync, writeFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import type { ToolDefinition } from '../types.ts'
 
 export const editTool: ToolDefinition = {
@@ -23,7 +24,7 @@ export const editTool: ToolDefinition = {
   },
   meta: { dangerous: true },
 
-  async run(args) {
+  async run(args, context) {
     const input = args as {
       file_path: string
       old_string: string
@@ -31,7 +32,10 @@ export const editTool: ToolDefinition = {
       replace_all?: boolean
     }
 
-    const original = readFileSync(input.file_path, 'utf8')
+    const file = context.sandbox
+      ? context.sandbox.resolveWrite(input.file_path, context.cwd)
+      : resolve(context.cwd, input.file_path)
+    const original = readFileSync(file, 'utf8')
     const count = original.split(input.old_string).length - 1
 
     if (count === 0) throw new Error('old_string not found')
@@ -43,7 +47,7 @@ export const editTool: ToolDefinition = {
       ? original.split(input.old_string).join(input.new_string)
       : original.replace(input.old_string, input.new_string)
 
-    writeFileSync(input.file_path, next, 'utf8')
+    writeFileSync(file, next, 'utf8')
     return {
       text: `replaced ${input.replace_all ? count : 1} occurrence(s)`,
       bytes: Buffer.byteLength(next, 'utf8'),

@@ -5,7 +5,7 @@
  */
 
 import { readFileSync } from 'node:fs'
-import { extname } from 'node:path'
+import { extname, resolve } from 'node:path'
 import type { ToolDefinition } from '../types.ts'
 
 const MIME: Record<string, string> = {
@@ -39,17 +39,20 @@ export const readTool: ToolDefinition = {
   },
   meta: { readOnly: true },
 
-  async run(args) {
+  async run(args, context) {
     const input = args as {
       file_path: string
       encoding?: string
       offset?: number
       limit?: number
     }
-    const buffer = readFileSync(input.file_path)
+    const file = context.sandbox
+      ? context.sandbox.resolveRead(input.file_path, context.cwd)
+      : resolve(context.cwd, input.file_path)
+    const buffer = readFileSync(file)
     const encoding = input.encoding ?? 'utf-8'
     const full = new TextDecoder(encoding).decode(buffer)
-    const mime = MIME[extname(input.file_path).toLowerCase()] ?? 'application/octet-stream'
+    const mime = MIME[extname(file).toLowerCase()] ?? 'application/octet-stream'
 
     if (input.offset === undefined && input.limit === undefined) {
       return { text: full, bytes: buffer.length, encoding, mime }

@@ -71,6 +71,23 @@
       "maxStructuredBytes": 32768,
       "previewHeadChars": 1200,
       "previewTailChars": 400
+    },
+    "runtime": {
+      "model": {
+        "retry": {
+          "maxAttempts": 3,
+          "baseDelayMs": 500,
+          "maxDelayMs": 8000,
+          "timeoutMs": 180000
+        }
+      },
+      "fs": { "enforce": true },
+      "network": {
+        "enforce": true,
+        "allowPrivateNetwork": false,
+        "maxRedirects": 5
+      },
+      "metrics": true
     }
   }
 }

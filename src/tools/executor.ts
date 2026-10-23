@@ -7,11 +7,14 @@
  * @module if/tools/executor
  */
 
+import type { Metrics } from '../core/metrics.ts'
 import { validateValue } from './schema.ts'
 import type { ToolRegistry } from './registry.ts'
 import type {
   ApprovalRegistry,
   DispatchDecision,
+  NetworkGuard,
+  PathSandbox,
   ToolContext,
   ToolResult,
 } from './types.ts'
@@ -34,6 +37,9 @@ export interface ExecuteOptions {
   readonly timeoutMs?: number
   /** 审批无人应答时的超时，默认 60 秒后按拒绝处理 */
   readonly approvalTimeoutMs?: number
+  readonly sandbox?: PathSandbox
+  readonly network?: NetworkGuard
+  readonly metrics?: Metrics
   readonly hooks?: PipelineHooks
 }
 
@@ -78,7 +84,7 @@ function requestApproval(
   })
 }
 
-export async function executeTool(
+async function executeToolInner(
   name: string,
   rawArgs: unknown,
   options: ExecuteOptions,
@@ -108,6 +114,8 @@ export async function executeTool(
     cwd: options.cwd,
     signal: controller.signal,
     approvals: options.approvals,
+    ...(options.sandbox ? { sandbox: options.sandbox } : {}),
+    ...(options.network ? { network: options.network } : {}),
   }
 
   try {
@@ -153,4 +161,24 @@ export async function executeTool(
     clearTimeout(timer)
     external?.removeEventListener('abort', onAbort)
   }
+}
+
+export async function executeTool(
+  name: string,
+  rawArgs: unknown,
+  options: ExecuteOptions,
+): Promise<ToolResult> {
+  const started = Date.now()
+  options.metrics?.inc('tool.calls', 1, { tool: name })
+  let result: ToolResult
+
+  try {
+    result = await executeToolInner(name, rawArgs, options)
+  } catch (error) {
+    result = errorResult(error instanceof Error ? error.message : String(error))
+  }
+
+  options.metrics?.observe('tool.duration_ms', Date.now() - started, { tool: name })
+  if (result.isError) options.metrics?.inc('tool.errors', 1, { tool: name })
+  return result
 }

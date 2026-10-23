@@ -5,6 +5,7 @@
  */
 
 import { writeFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import type { ToolDefinition } from '../types.ts'
 
 export const writeTool: ToolDefinition = {
@@ -22,14 +23,17 @@ export const writeTool: ToolDefinition = {
   },
   meta: { dangerous: true },
 
-  async run(args) {
+  async run(args, context) {
     const input = args as { file_path: string; content: string; encoding?: string }
     const encoding = (input.encoding ?? 'utf-8').toLowerCase()
     if (encoding !== 'utf-8' && encoding !== 'utf8') {
       throw new Error(`write currently supports utf-8 only, got ${encoding}`)
     }
+    const file = context.sandbox
+      ? context.sandbox.resolveWrite(input.file_path, context.cwd)
+      : resolve(context.cwd, input.file_path)
     const bytes = Buffer.byteLength(input.content, 'utf8')
-    writeFileSync(input.file_path, input.content, 'utf8')
+    writeFileSync(file, input.content, 'utf8')
     return { text: `wrote ${bytes} bytes`, bytes, encoding: 'utf-8' }
   },
 }
