@@ -24,6 +24,7 @@ import {
 import { basename, dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { ENVELOPE_VERSION, type Event, type NewEvent } from './events.ts'
+import { assertWithin } from './safe-path.ts'
 import { withFileLock } from './lock.ts'
 import { getEventSpec } from './registry.ts'
 
@@ -52,6 +53,14 @@ export class IfCorruptionError extends IfStorageError {
 export interface EventStoreOptions {
   /** 单段字节上限；不设就不分段 */
   readonly segmentMaxBytes?: number
+  /** 段缓存上限；默认 64 段 */
+  readonly cacheMaxSegments?: number
+}
+
+interface SegmentCacheEntry {
+  readonly mtimeMs: number
+  readonly size: number
+  readonly events: readonly Event[]
 }
 
 export class EventStore {
@@ -59,10 +68,13 @@ export class EventStore {
   readonly segmentMaxBytes?: number
   private nextSeqCache?: number
   private dirty = false
+  private readonly cache = new Map<string, SegmentCacheEntry>()
+  private readonly cacheMaxSegments: number
 
   constructor(file: string, options: EventStoreOptions = {}) {
     this.file = file
     this.segmentMaxBytes = options.segmentMaxBytes
+    this.cacheMaxSegments = options.cacheMaxSegments ?? 64
   }
 
   /** 多进程临界区：加锁后追加。 */
@@ -79,7 +91,7 @@ export class EventStore {
     // 崩溃可能留下没有换行的半条尾行；只丢这半条，不动任何完整事件。
     this.repairTail()
 
-    const isEmpty = input.type === 'session.created' && this.lineCount() === 0
+    const isEmpty = input.type === 'session.created' && !this.hasAnyEvents()
     const seq = isEmpty ? 0 : this.nextSeq()
     if (isEmpty) this.nextSeqCache = 1
 
@@ -96,6 +108,7 @@ export class EventStore {
     try {
       appendFileSync(this.file, JSON.stringify(event) + '\n', { encoding: 'utf8' })
       this.dirty = true
+      this.cache.delete(this.file)
     } catch (error) {
       throw new IfStorageError(`append failed: ${this.file}`, error)
     }
@@ -117,37 +130,50 @@ export class EventStore {
     }
   }
 
-  /** 读全部事件（所有段，按段号顺序）。只容忍最后一段的半条尾行。 */
+  /** 读活跃段（归档段默认跳过）。只容忍最后一段的半条尾行。 */
   read(): readonly Event[] {
     const segments = this.segments()
     const out: Event[] = []
     segments.forEach((segment, index) => {
-      out.push(...this.readSegment(segment, 0, index === segments.length - 1))
+      out.push(...this.readSegmentCached(segment, index === segments.length - 1))
     })
     return out
   }
 
+  /** 读全部段，包括已归档段；显式审计/recall 用。 */
+  readAll(): readonly Event[] {
+    const segments = this.allSegments()
+    const out: Event[] = []
+    segments.forEach((segment, index) => {
+      out.push(...this.readSegmentCached(segment, index === segments.length - 1))
+    })
+    return out
+  }
+
+  /** 是否还有任何事件（含归档段）；别用 read().length 判断。 */
+  hasAnyEvents(): boolean {
+    return this.allSegments().some(segment => this.readSegmentCached(segment, true).length > 0)
+  }
+
   /** 从某条事件之后读；跨段查找，找不到就报错。 */
   readSince(eventId: string): readonly Event[] {
-    const marker = `"id":"${eventId}"`
-    const segments = this.segments()
+    const segments = this.allSegments()
     const out: Event[] = []
     let found = false
 
     for (let index = 0; index < segments.length; index += 1) {
       const segment = segments[index]!
-      if (!existsSync(segment)) continue
-      const lines = readFileSync(segment, 'utf8').split('\n')
+      const events = this.readSegmentCached(segment, index === segments.length - 1)
       let start = 0
 
       if (!found) {
-        const markerIndex = lines.findIndex(line => line.includes(marker))
+        const markerIndex = events.findIndex(event => event.id === eventId)
         if (markerIndex < 0) continue
         start = markerIndex + 1
         found = true
       }
 
-      out.push(...this.readSegment(segment, start, index === segments.length - 1))
+      out.push(...events.slice(start))
     }
 
     if (!found) throw new IfStorageError(`event not found: ${eventId}`)
@@ -156,14 +182,14 @@ export class EventStore {
 
   /** 当前段从第 line 行开始读；分段后行号不可靠，只作旧状态兼容。 */
   readFrom(line: number): readonly Event[] {
-    return this.readSegment(this.file, line, true)
+    return this.readSegmentCached(this.file, true).slice(line)
   }
 
-  /** 所有段的行数总和。 */
+  /** 活跃段的行数总和。 */
   lineCount(): number {
     const segments = this.segments()
     return segments.reduce(
-      (sum, segment, index) => sum + this.readSegment(segment, 0, index === segments.length - 1).length,
+      (sum, segment, index) => sum + this.readSegmentCached(segment, index === segments.length - 1).length,
       0,
     )
   }
@@ -180,12 +206,77 @@ export class EventStore {
       return Number.isFinite(suffix) ? suffix : -1
     }
 
-    const names = readdirSync(dir)
+    const raw = readdirSync(dir)
+    const archived = new Set(
+      raw
+        .filter(name => name.endsWith('.archived'))
+        .map(name => name.slice(0, -'.archived'.length)),
+    )
+    const names = raw
       .filter(name => name === base || name.startsWith(`${base}.`))
       .filter(name => rank(name) >= 0 && !name.endsWith('.lock'))
+      .filter(name => !archived.has(name))
       .sort((a, b) => rank(a) - rank(b))
 
     return names.length > 0 ? names.map(name => join(dir, name)) : [this.file]
+  }
+
+  /** 全部段，含已归档段；readAll/readSince/审计用。 */
+  allSegments(): string[] {
+    const dir = dirname(this.file)
+    const base = basename(this.file)
+    if (!existsSync(dir)) return [this.file]
+
+    const rank = (name: string): number => {
+      if (name === base) return Number.MAX_SAFE_INTEGER
+      const suffix = Number(name.slice(base.length + 1))
+      return Number.isFinite(suffix) ? suffix : -1
+    }
+
+    const names = new Set<string>()
+    for (const raw of readdirSync(dir)) {
+      if (raw !== base && !raw.startsWith(`${base}.`)) continue
+      if (raw.endsWith('.lock')) continue
+      const name = raw.endsWith('.archived') ? raw.slice(0, -'.archived'.length) : raw
+      if (rank(name) >= 0) names.add(name)
+    }
+
+    return names.size > 0
+      ? [...names].sort((a, b) => rank(a) - rank(b)).map(name => join(dir, name))
+      : [this.file]
+  }
+
+  /** 给非当前段打归档标记；不删除原文件。 */
+  archiveSegment(segment: string): void {
+    const target = assertWithin(dirname(this.file), segment, 'segment')
+    if (target === this.file) throw new IfStorageError(`cannot archive current segment: ${target}`)
+    if (!existsSync(target)) throw new IfStorageError(`segment not found: ${target}`)
+    writeFileSync(`${target}.archived`, '', { encoding: 'utf8' })
+  }
+
+  /** 读单个段（缓存），供归档判定/诊断；不影响活跃段列表。 */
+  eventsOfSegment(segment: string): readonly Event[] {
+    return this.readSegmentCached(segment, true)
+  }
+
+  private readSegmentCached(file: string, allowTruncatedTail = false): readonly Event[] {
+    if (!existsSync(file)) return []
+    const stat = statSync(file)
+    const cached = this.cache.get(file)
+    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+      this.cache.delete(file)
+      this.cache.set(file, cached)
+      return cached.events
+    }
+
+    const events = this.readSegment(file, 0, allowTruncatedTail)
+    this.cache.set(file, { mtimeMs: stat.mtimeMs, size: stat.size, events })
+    while (this.cache.size > this.cacheMaxSegments) {
+      const oldest = this.cache.keys().next().value
+      if (oldest === undefined || oldest === this.file) break
+      this.cache.delete(oldest)
+    }
+    return events
   }
 
   private readSegment(file: string, startLine = 0, allowTruncatedTail = false): Event[] {
@@ -217,9 +308,9 @@ export class EventStore {
   }
 
   private lastSeq(): number {
-    const segments = this.segments()
+    const segments = this.allSegments()
     for (let index = segments.length - 1; index >= 0; index -= 1) {
-      const events = this.readSegment(segments[index]!, 0, true)
+      const events = this.readSegmentCached(segments[index]!, true)
       if (events.length === 0) continue
       const last = events[events.length - 1]!
       return typeof last.seq === 'number' ? last.seq : events.length - 1
@@ -230,6 +321,7 @@ export class EventStore {
   /** 追加前修掉没有换行的半条尾行；完整的坏行不修，留给读取报错。 */
   private repairTail(): void {
     if (!existsSync(this.file)) return
+    this.cache.delete(this.file)
     const raw = readFileSync(this.file, 'utf8')
     if (raw.length === 0 || raw.endsWith('\n')) return
 
@@ -263,5 +355,6 @@ export class EventStore {
       .filter(Number.isFinite)
     const next = existing.length > 0 ? Math.max(...existing) + 1 : 1
     renameSync(this.file, join(dir, `${base}.${next}`))
+    this.cache.delete(this.file)
   }
 }

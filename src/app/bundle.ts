@@ -19,6 +19,7 @@ import { repairAgentStream } from '../agents/recovery.ts'
 import { runSubagent } from '../agents/run.ts'
 import type { AgentPreset, AgentRequest, AgentResult } from '../agents/types.ts'
 import { TokenEstimator } from '../compaction/estimate.ts'
+import { archiveCompactedSegments } from '../compaction/archive.ts'
 import { compactIfNeeded } from '../compaction/fold.ts'
 import type { CompactionConfig, CompactionPayload } from '../compaction/types.ts'
 import { staticSection, memorySection, timeSection } from '../context/sections.ts'
@@ -207,7 +208,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   const repaired = new Set<string>()
   const ensureSession = (sessionId: string): EventStore => {
     const store = storeFor(sessionId)
-    if (store.lineCount() === 0) {
+    if (!store.hasAnyEvents()) {
       writerFor(sessionId).append({
         stream: sessionStream(sessionId),
         actor: 'system',
@@ -601,7 +602,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       })
       const currentTurn = store.read().filter(event => event.type === 'turn.completed').length + 1
 
-      return compactIfNeeded({
+      const result = await compactIfNeeded({
         store,
         writer,
         stream: sessionStream(sessionId),
@@ -618,6 +619,12 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         projectMessages: () => projectHistory(store.read()),
         spill,
       })
+      try {
+        archiveCompactedSegments(store)
+      } catch {
+        // 归档失败不阻塞手动压缩
+      }
+      return result
     },
 
     createSession() {

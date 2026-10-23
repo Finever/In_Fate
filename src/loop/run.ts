@@ -10,6 +10,7 @@
 import type { Profile } from '../config/profile.ts'
 import { renderContext, type RenderOptions } from '../context/pipeline.ts'
 import type { TokenEstimator } from '../compaction/estimate.ts'
+import { archiveCompactedSegments } from '../compaction/archive.ts'
 import { compactIfNeeded } from '../compaction/fold.ts'
 import type { CompactionConfig, Summarizer } from '../compaction/types.ts'
 import type { SpillPolicy } from '../tools/spill.ts'
@@ -146,6 +147,13 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
           turn: currentTurn,
         },
       })
+    }
+
+    // 压缩链已覆盖的旧段可以退出活跃读取；失败只影响性能，不影响这一轮。
+    try {
+      archiveCompactedSegments(options.store)
+    } catch {
+      // 归档是优化，不是正确性前置条件
     }
   }
 

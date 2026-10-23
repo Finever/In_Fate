@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { EventStore } from '../src/core/store.ts'
-import { UiIndex } from '../src/ui/index.ts'
+import { UiIndex, UiIndexStaleError } from '../src/ui/index.ts'
 
 function temp(): { dir: string; store: EventStore; db: string } {
   const dir = mkdtempSync(join(tmpdir(), 'if-ui-index-'))
@@ -71,6 +71,28 @@ test('SQLite 索引按轮分页并配对工具结果', () => {
     assert.equal(stats.events, 9)
     assert.equal(stats.turns, 2)
     assert.equal(stats.lastSeq, 8)
+    assert.equal(stats.asOfSeq, 8)
+    assert.equal(latest.asOfSeq, 8)
+    assert.ok((latest.generation ?? 0) >= 1)
+
+    const firstGeneration = latest.generation!
+    store.append({
+      stream: 'session:s', actor: 'user', type: 'message.user', payload: { text: '问题三' },
+    })
+    store.append({
+      stream: 'session:s', actor: 'agent', type: 'message.assistant', payload: { text: '回答三' },
+    })
+    store.append({
+      stream: 'session:s', actor: 'system', type: 'turn.completed',
+      payload: { steps: 1, usage: { input: 1, output: 1, cacheRead: 0 }, aborted: false, hitLimit: false },
+    })
+    index.sync(store)
+    const nextPage = index.page('s', { limit: 1 })
+    assert.ok((nextPage.generation ?? 0) > firstGeneration)
+    assert.throws(
+      () => index.page('s', { limit: 1, generation: firstGeneration }),
+      UiIndexStaleError,
+    )
     index.close()
   } finally {
     rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })

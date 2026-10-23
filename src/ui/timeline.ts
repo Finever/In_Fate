@@ -71,6 +71,8 @@ export interface UiTimelineOptions {
   /** 只返回 startSeq 大于它的轮（向下翻页） */
   readonly after?: number
   readonly limit?: number
+  /** 分页游标绑定的索引代际；不一致说明语料变了 */
+  readonly generation?: number
 }
 
 export interface UiTimelinePage {
@@ -81,6 +83,10 @@ export interface UiTimelinePage {
   readonly hasMoreAfter: boolean
   readonly nextBefore?: number
   readonly nextAfter?: number
+  /** 这页数据对应的最后一条事件 seq */
+  readonly asOfSeq?: number
+  /** 索引代际；每次新增/重建都递增 */
+  readonly generation?: number
 }
 
 interface IndexedEvent {

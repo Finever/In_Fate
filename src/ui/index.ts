@@ -26,6 +26,18 @@ import {
 const SCHEMA_VERSION = '1'
 const DEFAULT_LIMIT = 20
 
+export class UiIndexStaleError extends Error {
+  readonly expected: number
+  readonly actual: number
+
+  constructor(expected: number, actual: number) {
+    super(`ui index generation changed: ${expected} -> ${actual}`)
+    this.name = 'UiIndexStaleError'
+    this.expected = expected
+    this.actual = actual
+  }
+}
+
 export interface UiTurnMeta {
   readonly turn: number
   readonly startSeq: number
@@ -55,6 +67,7 @@ export class UiIndex {
   private currentTurn = 0
   private eventCount = 0
   private prunedCount = 0
+  private generation = 0
   private closedFlag = false
   private readonly pruned = new Map<string, PruneItem>()
 
@@ -94,6 +107,7 @@ export class UiIndex {
     this.currentTurn = Number(this.meta('current_turn') ?? '0')
     this.eventCount = Number(this.meta('event_count') ?? '0')
     this.prunedCount = Number(this.meta('pruned_count') ?? '0')
+    this.generation = Number(this.meta('generation') ?? '0')
   }
 
   static open(file: string): UiIndex {
@@ -133,12 +147,16 @@ export class UiIndex {
     }
 
     if (rebuild) {
+      this.generation = Number(this.meta('generation') ?? String(this.generation)) + 1
       this.resetTables()
       this.setMeta('schema_version', SCHEMA_VERSION)
+      this.setMeta('generation', String(this.generation))
       this.pruned.clear()
       this.currentTurn = 0
       this.eventCount = 0
       this.prunedCount = 0
+    } else if (events.length > 0) {
+      this.generation += 1
     }
 
     let seqCursor = Number(this.meta('last_seq') ?? '-1') + 1
@@ -160,6 +178,7 @@ export class UiIndex {
     this.setMeta('current_turn', String(this.currentTurn))
     this.setMeta('event_count', String(this.eventCount))
     this.setMeta('pruned_count', String(this.prunedCount))
+    this.setMeta('generation', String(this.generation))
     if (last) {
       this.setMeta('last_event_id', last.id)
       this.setMeta('last_seq', String(seqCursor - 1))
@@ -171,6 +190,10 @@ export class UiIndex {
 
   page(sessionId: string, options: UiTimelineOptions = {}): UiTimelinePage {
     if (this.closedFlag) throw new Error('ui index closed')
+    const generation = Number(this.meta('generation') ?? String(this.generation))
+    if (options.generation !== undefined && options.generation !== generation) {
+      throw new UiIndexStaleError(options.generation, generation)
+    }
     const limit = clampLimit(options.limit)
 
     let rows: TurnRow[]
@@ -214,6 +237,8 @@ export class UiIndex {
       hasMoreAfter,
       ...(first ? { nextBefore: first.start_seq } : {}),
       ...(last ? { nextAfter: last.end_seq } : {}),
+      asOfSeq: Number(this.meta('last_seq') ?? '-1'),
+      generation,
     }
   }
 
@@ -272,6 +297,7 @@ export class UiIndex {
       compacted: Number(compactedRow.n),
       pruned: this.prunedCount,
       lastSeq: Number(this.meta('last_seq') ?? '-1'),
+      asOfSeq: Number(this.meta('last_seq') ?? '-1'),
       fileBytes,
       segments: segments.length,
     }

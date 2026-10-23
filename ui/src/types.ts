@@ -47,6 +47,18 @@ export interface UiTimelineItem {
   }
 }
 
+export interface UiTimelinePage {
+  sessionId: string
+  items: UiTimelineItem[]
+  turns: number
+  hasMoreBefore: boolean
+  hasMoreAfter: boolean
+  nextBefore?: number
+  nextAfter?: number
+  asOfSeq?: number
+  generation?: number
+}
+
 export interface UiTurnMeta {
   turn: number
   startSeq: number
@@ -61,6 +73,7 @@ export interface UiSessionStats {
   compacted: number
   pruned: number
   lastSeq: number
+  asOfSeq?: number
   fileBytes: number
   segments: number
 }

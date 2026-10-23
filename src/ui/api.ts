@@ -34,6 +34,7 @@ export interface UiSessionStats {
   readonly compacted: number
   readonly pruned: number
   readonly lastSeq: number
+  readonly asOfSeq?: number
   readonly fileBytes: number
   readonly segments: number
 }
