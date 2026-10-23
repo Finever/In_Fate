@@ -31,6 +31,8 @@ export const readTool: ToolDefinition = {
     properties: {
       file_path: { type: 'string' },
       encoding: { type: 'string', description: '默认 utf-8' },
+      offset: { type: 'number', minimum: 0, description: '起始行，0 基；不传从头读' },
+      limit: { type: 'number', minimum: 1, description: '最多读多少行；不传读到尾' },
     },
     required: ['file_path'],
     additionalProperties: false,
@@ -38,15 +40,39 @@ export const readTool: ToolDefinition = {
   meta: { readOnly: true },
 
   async run(args) {
-    const input = args as { file_path: string; encoding?: string }
+    const input = args as {
+      file_path: string
+      encoding?: string
+      offset?: number
+      limit?: number
+    }
     const buffer = readFileSync(input.file_path)
     const encoding = input.encoding ?? 'utf-8'
-    const text = new TextDecoder(encoding).decode(buffer)
+    const full = new TextDecoder(encoding).decode(buffer)
+    const mime = MIME[extname(input.file_path).toLowerCase()] ?? 'application/octet-stream'
+
+    if (input.offset === undefined && input.limit === undefined) {
+      return { text: full, bytes: buffer.length, encoding, mime }
+    }
+
+    const lines = full.split('\n')
+    const start = Math.max(0, Math.min(lines.length, Math.floor(input.offset ?? 0)))
+    const count = input.limit === undefined
+      ? lines.length - start
+      : Math.max(0, Math.floor(input.limit))
+    const slice = lines.slice(start, start + count)
+    const text = slice.join('\n')
     return {
       text,
-      bytes: buffer.length,
+      structured: {
+        offset: start,
+        lines: slice.length,
+        totalLines: lines.length,
+        eof: start + slice.length >= lines.length,
+      },
+      bytes: Buffer.byteLength(text, 'utf8'),
       encoding,
-      mime: MIME[extname(input.file_path).toLowerCase()] ?? 'application/octet-stream',
+      mime,
     }
   },
 }

@@ -22,6 +22,7 @@ import { compactIfNeeded } from '../compaction/fold.ts'
 import type { CompactionConfig, CompactionPayload } from '../compaction/types.ts'
 import { staticSection, memorySection, timeSection } from '../context/sections.ts'
 import type { ContextSection } from '../context/types.ts'
+import { BlobStore } from '../core/blobs.ts'
 import { registerCoreEvents } from '../core/registry.ts'
 import { SessionWriter } from '../core/session-writer.ts'
 import { EventStore } from '../core/store.ts'
@@ -42,6 +43,7 @@ import { createRecallTool } from '../tools/builtin/recall.ts'
 import { createRequestAgentTool } from '../tools/builtin/request-agent.ts'
 import { websearchTool } from '../tools/builtin/websearch.ts'
 import { writeTool } from '../tools/builtin/write.ts'
+import { OffloadPolicy } from '../tools/offload.ts'
 import { FileSpillStore, SpillPolicy } from '../tools/spill.ts'
 import { ToolRegistry } from '../tools/registry.ts'
 import {
@@ -60,7 +62,7 @@ import {
 import type { UiTurnMeta } from '../ui/index.ts'
 import type { AppConfig } from './config.ts'
 import type { Container } from './container.ts'
-import { applyPatches, mergeCompaction, mergePool } from './patch.ts'
+import { applyPatches, mergeCompaction, mergeOffload, mergePool } from './patch.ts'
 import { repairInterruptedSession } from './repair.ts'
 import {
   listAgentRuns,
@@ -237,11 +239,20 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     throw new Error(`defaultModel: ${error instanceof Error ? error.message : String(error)}`)
   }
 
+  // 全文库与写时卸载：工具结果落事件前经过它。
+  const blobs = new BlobStore(join(config.profile.dataRoot, 'blobs'))
+  container.register('blobs', blobs)
+  const fileSpill = new FileSpillStore(join(config.profile.dataRoot, 'spill'))
+  const spill = new SpillPolicy(fileSpill)
+  const offload = new OffloadPolicy(blobs, mergeOffload(config.patch?.offload))
+
   // 工具：只读默认开，危险工具看名单。
   const tools = new ToolRegistry()
   for (const tool of SAFE_TOOLS) tools.register(tool, 'builtin')
   tools.register(createRecallTool(storeFor, {
     ...(config.profile.memoryLogRoot ? { memoryLogRoot: config.profile.memoryLogRoot } : {}),
+    blobs,
+    spill: fileSpill,
   }), 'builtin')
 
   const dangerousEnabled = new Set(config.patch?.tools?.enabled ?? [])
@@ -296,7 +307,6 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   const pool = mergePool(config.patch?.agents)
   const compaction = mergeCompaction(config.patch?.compaction)
   const estimator = new TokenEstimator()
-  const spill = new SpillPolicy(new FileSpillStore(join(config.profile.dataRoot, 'spill')))
 
   const agents = new AgentManager({
     storeFactory: storeFor,
@@ -308,6 +318,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       profile: config.profile,
       cwd,
       ...(writer ? { writer } : {}),
+      offload,
       models,
     }),
     // 终态回送来源会话；正文自带分类标记，模型能认出这不是用户说的。
@@ -379,6 +390,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         sections,
         cwd,
         now,
+        offload,
         ...(maxBytes !== undefined ? { maxBytes } : {}),
         ...(input.signal ? { signal: input.signal } : {}),
         ...(input.onModelEvent ? { onModelEvent: input.onModelEvent } : {}),
@@ -446,15 +458,35 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
 
     payload(sessionId, input) {
       const store = storeFor(sessionId)
-      let text: string | undefined
-      let mime: string | undefined
-      let encoding: string | undefined
+      const offset = Math.max(0, Math.floor(input.offset ?? 0))
+      const limit = Math.max(1, Math.floor(input.limit ?? 20_000))
+
+      const fromRef = (ref: string, mime?: string, encoding?: string) => {
+        if (ref.startsWith('blob:')) {
+          const slice = blobs.readText(ref, { offset, limit, encoding: encoding ?? 'utf-8' })
+          return {
+            data: slice.text,
+            offset: slice.offset,
+            totalChars: slice.totalChars,
+            eof: slice.eof,
+            bytes: slice.bytes,
+            ...(mime ? { mime } : {}),
+            ...(encoding ? { encoding } : {}),
+          }
+        }
+        const text = spill.store.get(ref)
+        return slicePayload(text, offset, limit, {
+          ...(mime ? { mime } : {}),
+          // spill 文件同样是 UTF-8 文本
+          encoding: 'utf-8',
+        })
+      }
 
       if (input.ref) {
-        text = spill.store.get(input.ref)
-        mime = 'text/plain'
-        encoding = 'utf-8'
-      } else if (input.eventId) {
+        return fromRef(input.ref, 'text/plain', 'utf-8')
+      }
+
+      if (input.eventId) {
         const event = store.read().find(item => item.id === input.eventId)
         if (!event) throw new Error(`event not found: ${input.eventId}`)
         const payload = event.payload as {
@@ -462,29 +494,39 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
           ref?: unknown
           mime?: unknown
           encoding?: unknown
-          contentRef?: { ref?: unknown } | undefined
+          contentRef?: { ref?: unknown; encoding?: unknown } | undefined
+          structuredRef?: { ref?: unknown; encoding?: unknown } | undefined
         }
-        const ref = typeof payload.ref === 'string'
-          ? payload.ref
-          : typeof payload.contentRef?.ref === 'string'
-            ? payload.contentRef.ref
-            : undefined
-        text = ref ? spill.store.get(ref) : String(payload.text ?? '')
-        mime = typeof payload.mime === 'string' ? payload.mime : undefined
-        encoding = typeof payload.encoding === 'string' ? payload.encoding : 'utf-8'
-      } else {
-        throw new Error('payload needs ref or eventId')
+        const field = input.field ?? 'text'
+        const ref = field === 'structured'
+          ? (typeof payload.structuredRef?.ref === 'string' ? payload.structuredRef.ref : undefined)
+          : (typeof payload.contentRef?.ref === 'string'
+              ? payload.contentRef.ref
+              : typeof payload.ref === 'string' ? payload.ref : undefined)
+        if (ref) {
+          const contentRef = payload.contentRef
+          return fromRef(
+            ref,
+            field === 'structured' ? 'application/json' : (typeof payload.mime === 'string' ? payload.mime : 'text/plain'),
+            field === 'structured'
+              ? 'utf-8'
+              : (typeof contentRef?.encoding === 'string'
+                  ? contentRef.encoding
+                  : 'utf-8'),
+          )
+        }
+        return slicePayload(
+          String(payload.text ?? ''),
+          offset,
+          limit,
+          {
+            ...(typeof payload.mime === 'string' ? { mime: payload.mime } : {}),
+            ...(typeof payload.encoding === 'string' ? { encoding: payload.encoding } : {}),
+          },
+        )
       }
 
-      return slicePayload(
-        text,
-        input.offset ?? 0,
-        input.limit ?? 20_000,
-        {
-          ...(mime ? { mime } : {}),
-          ...(encoding ? { encoding } : {}),
-        },
-      )
+      throw new Error('payload needs ref or eventId')
     },
 
     uiStats(sessionId) {

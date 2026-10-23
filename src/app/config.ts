@@ -10,6 +10,7 @@ import type { AgentPoolConfig, AgentPreset } from '../agents/types.ts'
 import type { CompactionConfig } from '../compaction/types.ts'
 import type { Profile } from '../config/profile.ts'
 import type { ProviderConfig } from '../model/types.ts'
+import type { OffloadConfig } from '../tools/offload.ts'
 
 export interface PatchConfig {
   readonly tools?: {
@@ -19,6 +20,8 @@ export interface PatchConfig {
   readonly agents?: Partial<AgentPoolConfig>
   readonly compaction?: Partial<CompactionConfig>
   readonly context?: { readonly maxBytes?: number }
+  /** 工具结果写时卸载；阈值全在这里，不写死在代码里 */
+  readonly offload?: Partial<OffloadConfig>
   /** 按 id 覆盖预设；null 表示删掉这个可选字段 */
   readonly presets?: Readonly<Record<string, Partial<AgentPreset> | null>>
 }

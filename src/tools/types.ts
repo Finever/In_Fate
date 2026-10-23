@@ -7,6 +7,7 @@
  * @module if/tools/types
  */
 
+import type { ContentRef } from '../core/blobs.ts'
 import type { ToolSpec } from '../model/types.ts'
 
 export type ToolSource = 'builtin' | 'plugin' | 'mcp' | 'client'
@@ -23,6 +24,12 @@ export interface ToolResult {
   readonly mime?: string
   /** 大输出溢出到 spill 后留下的引用 */
   readonly ref?: string
+  /** 写时卸载的正文引用 */
+  readonly contentRef?: ContentRef
+  /** 写时卸载的结构化数据引用 */
+  readonly structuredRef?: ContentRef
+  /** 卸载失败时保留的错误说明；正文仍在原字段 */
+  readonly offloadError?: string
   readonly isError?: boolean
   /** presentResult 的产物，给 UI；模型看不到 */
   readonly presentation?: unknown

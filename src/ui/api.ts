@@ -11,6 +11,8 @@ export interface UiPayloadInput {
   readonly ref?: string
   /** 或直接取某条事件里的全文 */
   readonly eventId?: string
+  /** 事件同时有 text/structured ref 时选哪个 */
+  readonly field?: 'text' | 'structured'
   readonly offset?: number
   readonly limit?: number
 }

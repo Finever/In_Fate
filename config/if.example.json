@@ -64,6 +64,13 @@
       "targetAt": 0.4,
       "keepRecentTurns": 12
     },
-    "context": { "maxBytes": 131072 }
+    "context": { "maxBytes": 131072 },
+    "offload": {
+      "enabled": true,
+      "maxInlineBytes": 32768,
+      "maxStructuredBytes": 32768,
+      "previewHeadChars": 1200,
+      "previewTailChars": 400
+    }
   }
 }

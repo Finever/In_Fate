@@ -23,6 +23,7 @@ import type { ModelEvent } from '../model/types.ts'
 import { projectHistory } from '../projections/history.ts'
 import type { ApprovalRegistry, ToolResult } from '../tools/types.ts'
 import { executeTool } from '../tools/executor.ts'
+import type { OffloadPolicy } from '../tools/offload.ts'
 import { toolResultPayload } from '../tools/result-payload.ts'
 import type { ToolRegistry } from '../tools/registry.ts'
 
@@ -41,6 +42,8 @@ export interface RunLoopOptions {
   readonly maxSteps?: number
   /** 上下文总字节预算；不传用管线默认值 */
   readonly maxBytes?: number
+  /** 工具结果写时卸载；不传就全内联 */
+  readonly offload?: OffloadPolicy
   readonly signal?: AbortSignal
   /** 注入时间，保持可复现；默认读系统时间 */
   readonly now?: () => Date
@@ -261,12 +264,13 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
         result = { text: error instanceof Error ? error.message : String(error), isError: true }
       }
 
+      const finalResult = options.offload ? options.offload.apply(result) : result
       append({
         stream,
         actor: 'tool',
         type: 'tool.result',
         refs: { toolCall: call.id },
-        payload: toolResultPayload(call.id, result),
+        payload: toolResultPayload(call.id, finalResult),
       })
     }
   }

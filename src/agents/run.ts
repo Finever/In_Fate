@@ -21,6 +21,7 @@ import { projectHistory } from '../projections/history.ts'
 import { executeTool } from '../tools/executor.ts'
 import type { ToolRegistry } from '../tools/registry.ts'
 import type { ApprovalRegistry, ToolResult } from '../tools/types.ts'
+import type { OffloadPolicy } from '../tools/offload.ts'
 import { toolResultPayload } from '../tools/result-payload.ts'
 import type { AgentPreset, AgentRequest, AgentResult, AgentUsage } from './types.ts'
 
@@ -31,6 +32,8 @@ export interface SubagentRuntime {
   readonly cwd: string
   /** 子 agent 自己的会话写者；不传则直接写 store */
   readonly writer?: SessionWriter
+  /** 工具结果写时卸载 */
+  readonly offload?: OffloadPolicy
   /** 传了就用实例注册表；不传退回模块级默认实例（旧 demo 兼容） */
   readonly models?: ModelRegistry
 }
@@ -267,12 +270,13 @@ export async function runSubagent(
         if (typeof path === 'string') artifacts.add(path)
       }
 
+      const finalResult = runtime.offload ? runtime.offload.apply(result) : result
       append({
         stream,
         actor: 'tool',
         type: 'tool.result',
         refs: { toolCall: call.id },
-        payload: toolResultPayload(call.id, result),
+        payload: toolResultPayload(call.id, finalResult),
       })
     }
 

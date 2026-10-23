@@ -10,22 +10,29 @@
 
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import type { BlobStore } from '../../core/blobs.ts'
 import { assertWithin } from '../../core/safe-path.ts'
 import type { EventStore } from '../../core/store.ts'
 import { readLog } from '../../memory/log.ts'
 import { parseAddress } from '../../memory/quote.ts'
+import type { FileSpillStore } from '../spill.ts'
 import type { ToolDefinition, ToolResult } from '../types.ts'
 
 export interface RecallInput {
   readonly fromEventId?: string
   readonly toEventId?: string
   readonly logAddr?: string
-  readonly query?: string
+  readonly ref?: string
+  readonly field?: 'text' | 'structured'
+  readonly offset?: number
   readonly limit?: number
+  readonly query?: string
 }
 
 export interface RecallOptions {
   readonly memoryLogRoot?: string
+  readonly blobs?: BlobStore
+  readonly spill?: FileSpillStore
 }
 
 /** 允许按会话取 store：App 里每个会话一份事件文件。 */
@@ -37,15 +44,18 @@ export function createRecallTool(store: RecallStore, options: RecallOptions = {}
 
   return {
     name: 'recall',
-    description: '按压缩锚点回查原文。给 logAddr，或给 fromEventId + toEventId。',
+    description: '按压缩锚点或 blob/spill ref 回查原文。给 ref 取卸载全文；或给 logAddr、fromEventId + toEventId。',
     inputSchema: {
       type: 'object',
       properties: {
         fromEventId: { type: 'string' },
         toEventId: { type: 'string' },
         logAddr: { type: 'string', description: '记忆库流水地址：年-月-日-会话id-n' },
+        ref: { type: 'string', description: 'blob:<sha256> 或 spill:<sha1>' },
+        field: { type: 'string', enum: ['text', 'structured'], description: '默认 text' },
+        offset: { type: 'number', minimum: 0, description: '字符偏移（blob/spill）' },
+        limit: { type: 'number', minimum: 1, maximum: 200000 },
         query: { type: 'string', description: '只返回包含该词的片段' },
-        limit: { type: 'number', minimum: 1, maximum: 200 },
       },
       additionalProperties: false,
     },
@@ -54,6 +64,56 @@ export function createRecallTool(store: RecallStore, options: RecallOptions = {}
     async run(args, context): Promise<ToolResult> {
       const input = args as RecallInput
       const limit = input.limit ?? 50
+
+      if (input.ref) {
+        const offset = Math.max(0, Math.floor(input.offset ?? 0))
+        const size = Math.max(1, Math.floor(input.limit ?? 20_000))
+        const field = input.field ?? 'text'
+
+        if (input.ref.startsWith('blob:')) {
+          if (!options.blobs) return { text: 'blob store is not configured', isError: true }
+          const slice = options.blobs.readText(input.ref, {
+            offset,
+            limit: size,
+            encoding: 'utf-8',
+          })
+          return {
+            text: slice.text,
+            structured: {
+              source: 'blob',
+              ref: input.ref,
+              field,
+              offset: slice.offset,
+              totalChars: slice.totalChars,
+              eof: slice.eof,
+            },
+            bytes: slice.bytes,
+            encoding: 'utf-8',
+          }
+        }
+
+        if (input.ref.startsWith('spill:')) {
+          if (!options.spill) return { text: 'spill store is not configured', isError: true }
+          const full = options.spill.get(input.ref)
+          const start = Math.min(full.length, offset)
+          const text = full.slice(start, start + size)
+          return {
+            text,
+            structured: {
+              source: 'spill',
+              ref: input.ref,
+              field,
+              offset: start,
+              totalChars: full.length,
+              eof: start + text.length >= full.length,
+            },
+            bytes: Buffer.byteLength(text, 'utf8'),
+            encoding: 'utf-8',
+          }
+        }
+
+        return { text: `unsupported ref: ${input.ref}`, isError: true }
+      }
 
       if (input.logAddr) {
         if (!options.memoryLogRoot) {
@@ -105,7 +165,7 @@ export function createRecallTool(store: RecallStore, options: RecallOptions = {}
 
       const total = slice.length
       const text = slice
-        .slice(0, limit)
+        .slice(0, Math.min(limit, 200))
         .map(event => `[${event.type}] ${JSON.stringify(event.payload)}`)
         .join('\n')
 
