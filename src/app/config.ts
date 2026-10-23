@@ -34,6 +34,11 @@ export interface RuntimePatch {
   }
   /** false = 不记录进程内指标（默认 true） */
   readonly metrics?: boolean
+  /** agent 主动创建会话的配额；不配用默认值 */
+  readonly sessions?: {
+    readonly maxTotal?: number
+    readonly maxPerCreator?: number
+  }
 }
 
 export interface PatchConfig {

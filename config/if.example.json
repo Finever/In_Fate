@@ -87,6 +87,10 @@
         "allowPrivateNetwork": false,
         "maxRedirects": 5
       },
+      "sessions": {
+        "maxTotal": 64,
+        "maxPerCreator": 16
+      },
       "metrics": true
     }
   }

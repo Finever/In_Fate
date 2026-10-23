@@ -92,7 +92,9 @@ function readOrigin(file: string, name: string): SessionOriginInfo {
       ...(createdBy ? { createdBy } : {}),
       ...(createdFrom ? { createdFrom } : {}),
       ...(typeof payload.reason === 'string' ? { reason: payload.reason } : {}),
-      kind: createdBy?.startsWith('agent:') || name.startsWith('agent-') ? 'agent' : 'user',
+      kind: createdBy === 'agent' || createdBy?.startsWith('agent:') || name.startsWith('agent-')
+        ? 'agent'
+        : 'user',
     }
   } catch {
     return fallback

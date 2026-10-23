@@ -67,6 +67,8 @@ import { InMemoryApprovalRegistry } from '../tools/approval.ts'
 import { createAgentControlTools } from '../tools/builtin/agent-control.ts'
 import { bashTool } from '../tools/builtin/bash.ts'
 import { createSessionJoinTool } from '../tools/builtin/session-join.ts'
+import { createSessionCreateTool, type SpawnedSession } from '../tools/builtin/session-create.ts'
+import { createSessionMessageTool } from '../tools/builtin/session-message.ts'
 import { editTool } from '../tools/builtin/edit.ts'
 import { fetchTool } from '../tools/builtin/fetch.ts'
 import { readTool } from '../tools/builtin/read.ts'
@@ -169,6 +171,8 @@ export interface App {
 
   /** 往另一个已连接会话投递消息；目标空闲时按 wake 策略开一轮。 */
   sendMessage(input: SendSessionMessageInput): SessionMessageDelivery
+  /** agent 主动创建用户所有的会话，自动 peer 连接并发送第一条任务。 */
+  spawnSession(input: { creator: string; text: string; reason?: string }): SpawnedSession
   /** 手动唤醒一个会话；text 会作为 system 注入写入它的流。 */
   wake(sessionId: string, text?: string): Promise<RunResult>
   /** 等待一组已连接会话；不阻塞模型。 */
@@ -538,6 +542,114 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     return result
   }
 
+  const sendSessionMessage = (input: SendSessionMessageInput): SessionMessageDelivery => {
+    const kind = input.kind ?? 'note'
+    const wake = input.wake ?? kind !== 'note'
+    const link = input.linkId
+      ? sessionGraph.get(input.linkId)
+      : sessionGraph.links(input.from, { includeClosed: false }).find(item =>
+        (item.from === input.from && item.to === input.to)
+        || (item.to === input.from && item.from === input.to))
+    if (!link || link.status !== 'active') {
+      throw new Error(`no active link: ${input.from} -> ${input.to}`)
+    }
+    if (!sessionGraph.canMessage(input.from, input.to)) {
+      throw new Error(`link does not allow messages: ${input.from} -> ${input.to}`)
+    }
+
+    const text = input.text.trim()
+    if (text.length === 0) throw new Error('session message text is empty')
+    ensureSession(input.to)
+    const messageId = `msg-${randomUUID()}`
+    const event = writerFor(input.to).append({
+      stream: sessionStream(input.to),
+      actor: 'system',
+      type: 'session.message',
+      refs: {
+        fromSession: input.from,
+        link: link.linkId,
+        ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+      },
+      payload: {
+        messageId,
+        fromSession: input.from,
+        linkId: link.linkId,
+        kind,
+        text,
+        hop: Math.max(1, Math.floor(input.hop ?? 1)),
+        ...(wake ? { wake: true } : {}),
+      },
+    })
+    writerFor(input.to).flush()
+
+    const messageSeq = typeof event.seq === 'number'
+      ? event.seq
+      : storeFor(input.to).read().length - 1
+    const seenByLastTurn = (): boolean => {
+      const events = storeFor(input.to).read()
+      const lastTurn = [...events].reverse().find(item => item.type === 'turn.completed')
+      const seen = lastTurn?.payload.lastSeenSeq
+      return typeof seen === 'number' && messageSeq <= seen
+    }
+
+    if (wake) {
+      // 目标正在跑时也排队：当前 turn 若在后续 step 已经看到这条消息，
+      // 队列任务会直接跳过；只有它没看到，才补一轮。
+      void sessionHost.run(input.to, async () => {
+        if (seenByLastTurn()) return
+        await runSessionTurn({ sessionId: input.to, text }, true)
+      }).catch(() => {
+        // runTurn 自己会落 turn.completed；这里只兜底存储层异常，避免未处理拒绝。
+      })
+    }
+
+    return { messageId, eventId: event.id, linkId: link.linkId, woke: wake }
+  }
+
+  const spawnSession = (input: {
+    creator: string
+    text: string
+    reason?: string
+  }): SpawnedSession => {
+    const text = input.text.trim()
+    if (text.length === 0) throw new Error('spawn text is empty')
+    const limits = config.patch?.runtime?.sessions
+    const maxTotal = limits?.maxTotal ?? 64
+    const maxPerCreator = limits?.maxPerCreator ?? 16
+    const sessions = listSessions(config.profile.dataRoot)
+    if (sessions.length >= maxTotal) {
+      throw new Error(`session quota exceeded: ${sessions.length}/${maxTotal}`)
+    }
+    const created = sessions.filter(session =>
+      session.createdBy === 'agent' && session.createdFrom?.sessionId === input.creator).length
+    if (created >= maxPerCreator) {
+      throw new Error(`agent session quota exceeded: ${created}/${maxPerCreator}`)
+    }
+
+    const sessionId = newSessionId(now(), config.profile.timeZone)
+    pendingProvenance.set(sessionId, {
+      createdBy: 'agent',
+      createdFrom: { sessionId: input.creator },
+      reason: input.reason ?? 'agent spawned session',
+    })
+    ensureSession(sessionId)
+    const link = sessionGraph.create({
+      from: input.creator,
+      to: sessionId,
+      relation: 'peer',
+      createdBy: 'agent',
+      reason: 'spawned session',
+    })
+    const delivery = sendSessionMessage({
+      from: input.creator,
+      to: sessionId,
+      text,
+      kind: 'question',
+      wake: true,
+    })
+    return { sessionId, linkId: link.linkId, messageId: delivery.messageId }
+  }
+
   joinScheduler = new SessionJoinScheduler({
     storeFor,
     writerFor,
@@ -561,6 +673,8 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   container.register('sessionJoins', joinScheduler)
   container.onDispose('sessionJoins', () => joinScheduler?.dispose())
   tools.register(createSessionJoinTool({ joins: joinScheduler }), 'builtin')
+  tools.register(createSessionCreateTool({ spawn: spawnSession }), 'builtin')
+  tools.register(createSessionMessageTool({ send: sendSessionMessage }), 'builtin')
 
   const app: App = {
     config,
@@ -820,70 +934,8 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       return sessionGraph.close(linkId, 'user', reason)
     },
 
-    sendMessage(input) {
-      const kind = input.kind ?? 'note'
-      const wake = input.wake ?? kind !== 'note'
-      const link = input.linkId
-        ? sessionGraph.get(input.linkId)
-        : sessionGraph.links(input.from, { includeClosed: false }).find(item =>
-          (item.from === input.from && item.to === input.to)
-          || (item.to === input.from && item.from === input.to))
-      if (!link || link.status !== 'active') {
-        throw new Error(`no active link: ${input.from} -> ${input.to}`)
-      }
-      if (!sessionGraph.canMessage(input.from, input.to)) {
-        throw new Error(`link does not allow messages: ${input.from} -> ${input.to}`)
-      }
-
-      const text = input.text.trim()
-      if (text.length === 0) throw new Error('session message text is empty')
-      ensureSession(input.to)
-      const messageId = `msg-${randomUUID()}`
-      const event = writerFor(input.to).append({
-        stream: sessionStream(input.to),
-        actor: 'system',
-        type: 'session.message',
-        refs: {
-          fromSession: input.from,
-          link: link.linkId,
-          ...(input.replyTo ? { replyTo: input.replyTo } : {}),
-        },
-        payload: {
-          messageId,
-          fromSession: input.from,
-          linkId: link.linkId,
-          kind,
-          text,
-          hop: Math.max(1, Math.floor(input.hop ?? 1)),
-          ...(wake ? { wake: true } : {}),
-        },
-      })
-      writerFor(input.to).flush()
-
-      const messageSeq = typeof event.seq === 'number'
-        ? event.seq
-        : storeFor(input.to).read().length - 1
-      const seenByLastTurn = (): boolean => {
-        const events = storeFor(input.to).read()
-        const lastTurn = [...events].reverse().find(item => item.type === 'turn.completed')
-        const seen = lastTurn?.payload.lastSeenSeq
-        return typeof seen === 'number' && messageSeq <= seen
-      }
-
-      const woke = wake
-      if (wake) {
-        // 目标正在跑时也排队：当前 turn 若在后续 step 已经看到这条消息，
-        // 队列任务会直接跳过；只有它没看到，才补一轮。
-        void sessionHost.run(input.to, async () => {
-          if (seenByLastTurn()) return
-          await runSessionTurn({ sessionId: input.to, text }, true)
-        }).catch(() => {
-          // runTurn 自己会落 turn.completed；这里只兜底存储层异常，避免未处理拒绝。
-        })
-      }
-
-      return { messageId, eventId: event.id, linkId: link.linkId, woke }
-    },
+    sendMessage: sendSessionMessage,
+    spawnSession,
 
     async wake(sessionId, text) {
       ensureSession(sessionId)
