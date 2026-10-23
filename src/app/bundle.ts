@@ -15,6 +15,7 @@ import { join } from 'node:path'
 import type { AgentManager as AgentManagerType } from '../agents/manager.ts'
 import { AgentManager } from '../agents/manager.ts'
 import { PresetRegistry } from '../agents/presets.ts'
+import { repairAgentStream } from '../agents/recovery.ts'
 import { runSubagent } from '../agents/run.ts'
 import type { AgentPreset, AgentRequest, AgentResult } from '../agents/types.ts'
 import { TokenEstimator } from '../compaction/estimate.ts'
@@ -26,7 +27,7 @@ import { BlobStore } from '../core/blobs.ts'
 import { registerCoreEvents } from '../core/registry.ts'
 import { SessionWriter } from '../core/session-writer.ts'
 import { EventStore } from '../core/store.ts'
-import { sessionStream } from '../core/streams.ts'
+import { agentStream, sessionStream } from '../core/streams.ts'
 import { defaultSources } from '../memory/sources.ts'
 import type { ModelRegistry, ResolvedModel } from '../model/registry.ts'
 import { ModelRegistry as Registry } from '../model/registry.ts'
@@ -63,7 +64,7 @@ import type { UiTurnMeta } from '../ui/index.ts'
 import type { AppConfig } from './config.ts'
 import type { Container } from './container.ts'
 import { applyPatches, mergeCompaction, mergeOffload, mergePool } from './patch.ts'
-import { repairInterruptedSession } from './repair.ts'
+import { repairInterruptedSession, settleInterruptedApprovals } from './repair.ts'
 import {
   listAgentRuns,
   listSessions,
@@ -74,6 +75,8 @@ import {
   type SessionInfo,
 } from './session.ts'
 import { UiIndex } from '../ui/index.ts'
+
+const TERMINAL_AGENT_STATUS = new Set(['completed', 'failed', 'cancelled', 'interrupted'])
 
 /** 永远可用的只读工具。 */
 const SAFE_TOOLS = [readTool, fetchTool, websearchTool] as const
@@ -222,7 +225,9 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     // 第一次真正打开这个会话时修崩溃尾巴；之后同一进程不再重复扫。
     if (!repaired.has(sessionId)) {
       repaired.add(sessionId)
-      repairInterruptedSession(store, writerFor(sessionId))
+      const writer = writerFor(sessionId)
+      repairInterruptedSession(store, writer)
+      settleInterruptedApprovals(store, writer)
     }
     return store
   }
@@ -253,6 +258,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     ...(config.profile.memoryLogRoot ? { memoryLogRoot: config.profile.memoryLogRoot } : {}),
     blobs,
     spill: fileSpill,
+    agentStore: storeFor,
   }), 'builtin')
 
   const dangerousEnabled = new Set(config.patch?.tools?.enabled ?? [])
@@ -319,6 +325,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       cwd,
       ...(writer ? { writer } : {}),
       offload,
+      estimator,
       models,
     }),
     // 终态回送来源会话；正文自带分类标记，模型能认出这不是用户说的。
@@ -341,6 +348,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
           text: lines.join('\n'),
           mark: 'injection',
           requestId: result.id,
+          stream: agentStream(result.id),
         },
       })
     },
@@ -348,6 +356,12 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   container.register('agents', agents)
   // 先停调度器：它还会往 store 写终态。
   container.onDispose('agents', () => agents.dispose())
+
+  // 启动时把上次崩溃留下的孤儿 agent 流标成 interrupted，不自动重放。
+  for (const run of listAgentRuns(config.profile.dataRoot)) {
+    if (TERMINAL_AGENT_STATUS.has(run.status)) continue
+    repairAgentStream(storeFor(run.id), writerFor(run.id))
+  }
 
   // 派活与控制面放在 manager 之后注册：工具创建时要用到它。
   tools.register(createRequestAgentTool({ manager: agents, presets }), 'builtin')

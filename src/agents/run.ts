@@ -10,6 +10,7 @@
 import type { Profile } from '../config/profile.ts'
 import { renderContext } from '../context/pipeline.ts'
 import { staticSection, timeSection } from '../context/sections.ts'
+import { TokenEstimator } from '../compaction/estimate.ts'
 import type { Event, NewEvent } from '../core/events.ts'
 import type { SessionWriter } from '../core/session-writer.ts'
 import type { EventStore } from '../core/store.ts'
@@ -23,6 +24,7 @@ import type { ToolRegistry } from '../tools/registry.ts'
 import type { ApprovalRegistry, ToolResult } from '../tools/types.ts'
 import type { OffloadPolicy } from '../tools/offload.ts'
 import { toolResultPayload } from '../tools/result-payload.ts'
+import { trimHistoryForContext } from './context.ts'
 import type { AgentPreset, AgentRequest, AgentResult, AgentUsage } from './types.ts'
 
 export interface SubagentRuntime {
@@ -34,6 +36,8 @@ export interface SubagentRuntime {
   readonly writer?: SessionWriter
   /** 工具结果写时卸载 */
   readonly offload?: OffloadPolicy
+  /** 与主 agent 共享的校准估算器；不传就新建 */
+  readonly estimator?: TokenEstimator
   /** 传了就用实例注册表；不传退回模块级默认实例（旧 demo 兼容） */
   readonly models?: ModelRegistry
 }
@@ -114,6 +118,7 @@ export async function runSubagent(
 ): Promise<AgentResult> {
   const preset = request.snapshot
   const allowed = new Set(allowedToolNames(preset, runtime.tools))
+  const estimator = runtime.estimator ?? new TokenEstimator()
   const append = (input: NewEvent): Event =>
     runtime.writer ? runtime.writer.append(input) : store.append(input)
   const flush = (): void => {
@@ -166,6 +171,23 @@ export async function runSubagent(
     })
 
     const tools = runtime.tools.toModelSpecs().filter(spec => allowed.has(spec.name))
+    let messages = rendered.messages
+    if (preset.budget?.maxContextTokens) {
+      const trimmed = trimHistoryForContext(
+        messages,
+        rendered.system,
+        tools,
+        preset.budget.maxContextTokens,
+        estimator,
+      )
+      messages = trimmed.messages
+      if (trimmed.over) {
+        status = 'failed'
+        errorText = `context_budget_exceeded: ${trimmed.estimated} > ${preset.budget.maxContextTokens}`
+        break
+      }
+    }
+
     let collected: Collected | undefined
     let lastError: unknown
 
@@ -174,7 +196,7 @@ export async function runSubagent(
       if (signal.aborted) break
       try {
         const model = resolve(choice.provider, choice.model)
-        collected = await collectModel(model, rendered.system, rendered.messages, tools, signal)
+        collected = await collectModel(model, rendered.system, messages, tools, signal)
         break
       } catch (error) {
         lastError = error
@@ -213,6 +235,20 @@ export async function runSubagent(
         type: 'message.assistant',
         payload: { text: collected.text },
       })
+    }
+
+    const budget = preset.budget
+    const totalTokens = usage.input + usage.output
+    const exceeded = budget && (
+      (budget.maxInputTokens !== undefined && usage.input > budget.maxInputTokens)
+      || (budget.maxOutputTokens !== undefined && usage.output > budget.maxOutputTokens)
+      || (budget.maxTotalTokens !== undefined && totalTokens > budget.maxTotalTokens)
+    )
+    if (exceeded) {
+      status = 'failed'
+      errorText = `budget_exceeded: input=${usage.input} output=${usage.output}`
+      steps += 1
+      break
     }
 
     steps += 1

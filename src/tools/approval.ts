@@ -13,7 +13,7 @@ import type {
   PendingApproval,
 } from './types.ts'
 
-export type ApprovalDecisionSource = 'user' | 'timeout' | 'abort' | 'cancel' | 'handler-failed'
+export type ApprovalDecisionSource = 'user' | 'timeout' | 'abort' | 'cancel' | 'handler-failed' | 'restart'
 
 export interface ApprovalAudit {
   asked?(entry: PendingApproval): void

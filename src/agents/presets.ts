@@ -23,6 +23,13 @@ export function validatePreset(preset: AgentPreset): void {
   if (!Number.isFinite(preset.timeoutMs) || preset.timeoutMs <= 0) {
     throw new Error(`preset ${preset.id} needs a positive timeoutMs`)
   }
+  if (preset.budget) {
+    for (const [key, value] of Object.entries(preset.budget)) {
+      if (value !== undefined && (!Number.isFinite(value) || value <= 0)) {
+        throw new Error(`preset ${preset.id} budget.${key} must be positive`)
+      }
+    }
+  }
 }
 
 export class PresetRegistry {

@@ -19,6 +19,10 @@ export interface RepairResult {
   readonly unknownResults: number
 }
 
+export interface ApprovalRepairResult {
+  readonly cancelled: number
+}
+
 const UNKNOWN_TOOL_TEXT = '工具结果未知：进程在工具执行期间中断，无法确认该调用是否完成。'
   + '不要自动重试有副作用的调用；只读或幂等操作可以重新执行。'
 
@@ -89,4 +93,51 @@ export function repairInterruptedSession(
   else store.flush()
 
   return { closedTurn: true, unknownResults: pending.size }
+}
+
+/**
+ * 重启后不恢复待审批：阻塞中的工具调用已经无法继续。
+ * 给每个 asked 无 decided 的审批补一条 restart 拒绝，避免幽灵审批。
+ */
+export function settleInterruptedApprovals(
+  store: EventStore,
+  writer?: SessionWriter,
+): ApprovalRepairResult {
+  const events = store.read()
+  const open = new Map<string, { stream: string; payload: Record<string, unknown> }>()
+
+  for (const event of events) {
+    const approvalId = String(event.payload.approvalId ?? '')
+    if (!approvalId) continue
+    if (event.type === 'approval.asked') {
+      open.set(approvalId, { stream: event.stream, payload: event.payload })
+      continue
+    }
+    if (event.type === 'approval.decided') open.delete(approvalId)
+  }
+
+  if (open.size === 0) return { cancelled: 0 }
+
+  const append = (input: NewEvent): Event =>
+    writer ? writer.append(input) : store.append(input)
+
+  for (const [approvalId, entry] of open) {
+    append({
+      stream: entry.stream,
+      actor: 'system',
+      type: 'approval.decided',
+      payload: {
+        approvalId,
+        approved: false,
+        reason: 'process restarted',
+        source: 'restart',
+        resolvedAt: new Date().toISOString(),
+      },
+    })
+  }
+
+  if (writer) writer.flush()
+  else store.flush()
+
+  return { cancelled: open.size }
 }

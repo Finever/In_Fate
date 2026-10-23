@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { repairInterruptedSession } from '../src/app/repair.ts'
+import { repairInterruptedSession, settleInterruptedApprovals } from '../src/app/repair.ts'
 import { EventStore } from '../src/core/store.ts'
 
 function tempStore(): { dir: string; store: EventStore } {
@@ -54,6 +54,27 @@ test('已完成的轮不重复修', () => {
     const result = repairInterruptedSession(store)
     assert.deepEqual(result, { closedTurn: false, unknownResults: 0 })
     assert.equal(store.read().length, before)
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+  }
+})
+
+test('重启后未决审批补 restart 拒绝，且不重复', () => {
+  const { dir, store } = tempStore()
+  try {
+    append(store, 'session.created', { formatVersion: 2 }, 'system')
+    append(store, 'approval.asked', {
+      approvalId: 'a1',
+      toolCallId: 'c1',
+      toolName: 'bash',
+      input: { command: 'ls' },
+    }, 'system')
+
+    assert.deepEqual(settleInterruptedApprovals(store), { cancelled: 1 })
+    const decided = store.read().find(event => event.type === 'approval.decided')
+    assert.equal(decided?.payload.approvalId, 'a1')
+    assert.equal(decided?.payload.source, 'restart')
+    assert.deepEqual(settleInterruptedApprovals(store), { cancelled: 0 })
   } finally {
     rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   }

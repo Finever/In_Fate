@@ -12,6 +12,14 @@ export interface ModelChoice {
   readonly model: string
 }
 
+export interface AgentBudget {
+  readonly maxInputTokens?: number
+  readonly maxOutputTokens?: number
+  readonly maxTotalTokens?: number
+  /** 单次子 agent 请求的输入上下文上限；超过就裁旧工具结果或失败 */
+  readonly maxContextTokens?: number
+}
+
 export interface AgentPreset {
   readonly id: string
   /** 给模型看：什么时候选它 */
@@ -26,6 +34,7 @@ export interface AgentPreset {
   readonly readOnly: boolean
   /** 非只读预设是否允许危险工具；默认 false，必须显式信任 */
   readonly allowDangerousTools?: boolean
+  readonly budget?: AgentBudget
   readonly outputSchema?: unknown
 }
 

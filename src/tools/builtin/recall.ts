@@ -24,6 +24,7 @@ export interface RecallInput {
   readonly logAddr?: string
   readonly ref?: string
   readonly field?: 'text' | 'structured'
+  readonly agentRequestId?: string
   readonly offset?: number
   readonly limit?: number
   readonly query?: string
@@ -33,6 +34,8 @@ export interface RecallOptions {
   readonly memoryLogRoot?: string
   readonly blobs?: BlobStore
   readonly spill?: FileSpillStore
+  /** 读子 agent 自己的流；由 App 注入 */
+  readonly agentStore?: (requestId: string) => EventStore
 }
 
 /** 允许按会话取 store：App 里每个会话一份事件文件。 */
@@ -53,6 +56,7 @@ export function createRecallTool(store: RecallStore, options: RecallOptions = {}
         logAddr: { type: 'string', description: '记忆库流水地址：年-月-日-会话id-n' },
         ref: { type: 'string', description: 'blob:<sha256> 或 spill:<sha1>' },
         field: { type: 'string', enum: ['text', 'structured'], description: '默认 text' },
+        agentRequestId: { type: 'string', description: '子 agent 请求 id；读它自己的事件流' },
         offset: { type: 'number', minimum: 0, description: '字符偏移（blob/spill）' },
         limit: { type: 'number', minimum: 1, maximum: 200000 },
         query: { type: 'string', description: '只返回包含该词的片段' },
@@ -64,6 +68,27 @@ export function createRecallTool(store: RecallStore, options: RecallOptions = {}
     async run(args, context): Promise<ToolResult> {
       const input = args as RecallInput
       const limit = input.limit ?? 50
+
+      if (input.agentRequestId) {
+        if (!options.agentStore) return { text: 'agent store is not configured', isError: true }
+        const events = options.agentStore(input.agentRequestId).read()
+        const size = Math.min(Math.max(1, Math.floor(input.limit ?? 100)), 200)
+        const text = events
+          .slice(0, size)
+          .map(event => `[${event.type}] ${JSON.stringify(event.payload)}`)
+          .join('\n')
+        return {
+          text: text || '（子 agent 流为空）',
+          structured: {
+            source: 'agent',
+            requestId: input.agentRequestId,
+            total: events.length,
+            returned: Math.min(events.length, size),
+          },
+          bytes: Buffer.byteLength(text, 'utf8'),
+          encoding: 'utf-8',
+        }
+      }
 
       if (input.ref) {
         const offset = Math.max(0, Math.floor(input.offset ?? 0))
