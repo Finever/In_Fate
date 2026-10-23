@@ -36,6 +36,12 @@ import { defaultSources } from '../memory/sources.ts'
 import type { ModelRegistry, ResolvedModel } from '../model/registry.ts'
 import { ModelRegistry as Registry } from '../model/registry.ts'
 import { resolveRetryPolicy } from '../model/retry.ts'
+import {
+  SessionGraph,
+  type CreateLinkInput,
+  type LinkQuery,
+  type SessionLink,
+} from '../graph/links.ts'
 import { projectHistory, type HistoryMessage } from '../projections/history.ts'
 import { renderContext } from '../context/pipeline.ts'
 import { runTurn, type RunResult } from '../loop/run.ts'
@@ -99,6 +105,12 @@ export interface ChatOptions {
   readonly signal?: AbortSignal
 }
 
+export interface CreateSessionInput {
+  readonly createdBy?: string
+  readonly createdFrom?: { readonly sessionId: string; readonly eventId?: string }
+  readonly reason?: string
+}
+
 export interface App {
   readonly config: AppConfig
   readonly models: ModelRegistry
@@ -127,9 +139,16 @@ export interface App {
   /** 手动压缩；返回本次压缩载荷，没有可压的返回 null。 */
   compact(sessionId: string): Promise<CompactionPayload | null>
   /** 新建会话 id（不落盘，首次 chat 时创建）。 */
-  createSession(): string
-  /** 列举已有会话。 */
+  createSession(input?: CreateSessionInput): string
+  /** 列举已有会话；扁平列表，不用父子树。 */
   sessions(): SessionInfo[]
+
+  /** 会话连接图。不传 sessionId 就返回全图。 */
+  links(sessionId?: string, options?: LinkQuery): SessionLink[]
+  /** 建立连接；createdBy 默认 user，只做溯源。 */
+  link(input: CreateLinkInput): SessionLink
+  /** 关闭连接；不删除历史，只追加 closed 事件。 */
+  unlink(linkId: string, reason?: string): SessionLink | undefined
 
   requestAgent(input: {
     preset: string
@@ -196,6 +215,15 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   const sessionsRoot = join(config.profile.dataRoot, 'sessions')
   mkdirSync(sessionsRoot, { recursive: true })
 
+  // 连接图是独立 workspace 事件流：不属于任何一个会话，也不进父子树。
+  const graphStore = new EventStore(join(config.profile.dataRoot, 'workspace.jsonl'), {
+    segmentMaxBytes: 4 * 1024 * 1024,
+  })
+  const graphWriter = SessionWriter.open(graphStore)
+  const sessionGraph = new SessionGraph(graphStore, graphWriter)
+  container.register('sessionGraph', sessionGraph)
+  container.onDispose('sessionGraph', () => graphWriter.close())
+
   // 每个会话一个 store；同一进程里共用实例，避免重复打开。
   const stores = new Map<string, EventStore>()
   const storeFor = (sessionId: string): EventStore => {
@@ -209,6 +237,9 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     return store
   }
   container.register('sessionStore', storeFor)
+
+  // createSession 与首次落盘之间暂存溯源，避免为了写一行元数据提前建文件。
+  const pendingProvenance = new Map<string, CreateSessionInput>()
 
   // 每会话一个长写者；同一时刻只允许一个进程/实例持锁。
   const writers = new Map<string, SessionWriter>()
@@ -243,6 +274,8 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   const ensureSession = (sessionId: string): EventStore => {
     const store = storeFor(sessionId)
     if (!store.hasAnyEvents()) {
+      const provenance = pendingProvenance.get(sessionId)
+      pendingProvenance.delete(sessionId)
       writerFor(sessionId).append({
         stream: sessionStream(sessionId),
         actor: 'system',
@@ -252,6 +285,9 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
           createdAt: now().toISOString(),
           formatVersion: 2,
           seqBase: 0,
+          createdBy: provenance?.createdBy ?? 'user',
+          ...(provenance?.createdFrom ? { createdFrom: provenance.createdFrom } : {}),
+          ...(provenance?.reason ? { reason: provenance.reason } : {}),
         },
       })
       return store
@@ -669,12 +705,26 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       return result
     },
 
-    createSession() {
-      return newSessionId(now(), config.profile.timeZone)
+    createSession(input) {
+      const sessionId = newSessionId(now(), config.profile.timeZone)
+      if (input) pendingProvenance.set(sessionId, input)
+      return sessionId
     },
 
     sessions() {
       return listSessions(config.profile.dataRoot)
+    },
+
+    links(sessionId, options) {
+      return sessionGraph.links(sessionId, options)
+    },
+
+    link(input) {
+      return sessionGraph.create({ ...input, createdBy: input.createdBy ?? 'user' })
+    },
+
+    unlink(linkId, reason) {
+      return sessionGraph.close(linkId, 'user', reason)
     },
 
     requestAgent(input) {

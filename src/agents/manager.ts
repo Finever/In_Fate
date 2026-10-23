@@ -74,6 +74,23 @@ export class AgentManager {
     }
 
     this.requests.set(request.id, request)
+    // 会话归用户所有；agent 只是创建者，createdBy 仅做溯源。
+    if (!this.options.storeFactory(request.id).hasAnyEvents()) {
+      this.append(request.id, {
+        stream: agentStream(request.id),
+        actor: 'system',
+        type: 'session.created',
+        payload: {
+          sessionId: request.id,
+          createdAt: request.createdAt,
+          formatVersion: 2,
+          seqBase: 0,
+          createdBy: `agent:${request.preset}`,
+          createdFrom: { sessionId: request.source.session },
+          reason: 'agent request',
+        },
+      })
+    }
     this.append(request.id, {
       stream: agentStream(request.id),
       actor: 'user',

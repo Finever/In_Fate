@@ -29,6 +29,9 @@ const HELP = `IF — In_Fate
   if payload <ref|事件id> [-s 会话] 取全文切片（--offset / --limit）
   if stats [会话]                   会话统计
   if metrics                        进程内指标
+  if links [会话]                   查看会话连接
+  if link <from> <to>               建立连接（--relation peer|handoff|reference）
+  if unlink <link-id>               关闭连接
   if approvals [-s 会话]            待审批队列
   if serve [--port 8787] [--token]  启动本地 UI API（仅 127.0.0.1）
   if tools                          列出工具
@@ -136,6 +139,8 @@ export async function runCli(argv: string[]): Promise<void> {
       port: { type: 'string' },
       token: { type: 'string' },
       host: { type: 'string' },
+      relation: { type: 'string' },
+      reason: { type: 'string' },
       help: { type: 'boolean', short: 'h' },
     },
   })
@@ -233,6 +238,49 @@ export async function runCli(argv: string[]): Promise<void> {
           + `${stats.compacted} 次压缩\t${stats.fileBytes} bytes\t${stats.segments} 段\n`)
     } else if (command === 'metrics') {
       stdout.write(JSON.stringify(app.metrics(), null, 2) + '\n')
+    } else if (command === 'links') {
+      const sessionId = typeof values.session === 'string' ? values.session : (rest[0] ?? undefined)
+      const links = app.links(sessionId)
+      if (values.json) {
+        stdout.write(JSON.stringify({ links }, null, 2) + '\n')
+        return
+      }
+      if (links.length === 0) stdout.write('（没有连接）\n')
+      for (const link of links) {
+        stdout.write(
+          `${link.linkId}\t${link.status}\t${link.from} -> ${link.to}\t${link.relation}\t${link.createdBy}\n`,
+        )
+      }
+    } else if (command === 'link') {
+      const from = rest[0]
+      const to = rest[1]
+      if (!from || !to) {
+        process.stderr.write('link: 需要 <from> <to>\n')
+        process.exitCode = 1
+        return
+      }
+      const relation = typeof values.relation === 'string' ? values.relation : 'peer'
+      if (relation !== 'peer' && relation !== 'handoff' && relation !== 'reference') {
+        process.stderr.write(`link: 未知 relation ${relation}\n`)
+        process.exitCode = 1
+        return
+      }
+      const link = app.link({
+        from,
+        to,
+        relation,
+        ...(typeof values.reason === 'string' ? { reason: values.reason } : {}),
+      })
+      stdout.write(JSON.stringify(link, null, 2) + '\n')
+    } else if (command === 'unlink') {
+      const linkId = rest[0]
+      if (!linkId) {
+        process.stderr.write('unlink: 需要 <link-id>\n')
+        process.exitCode = 1
+        return
+      }
+      const link = app.unlink(linkId, typeof values.reason === 'string' ? values.reason : undefined)
+      stdout.write(link ? JSON.stringify(link, null, 2) + '\n' : '（没有这个连接）\n')
     } else if (command === 'approvals') {
       const items = app.uiApprovals(typeof values.session === 'string' ? values.session : undefined)
       if (items.length === 0) stdout.write('（没有待审批）\n')
@@ -289,7 +337,9 @@ export async function runCli(argv: string[]): Promise<void> {
       const sessions = app.sessions()
       if (sessions.length === 0) stdout.write('（没有会话）\n')
       for (const session of sessions) {
-        stdout.write(`${session.id}\t${session.bytes} bytes\t${session.updatedAt}\n`)
+        stdout.write(
+          `${session.id}\t${session.bytes} bytes\t${session.updatedAt}\t${session.createdBy ?? 'user'}\n`,
+        )
       }
     } else if (command === 'config') {
       const redacted = JSON.stringify(app.config, (key, value) => key === 'apiKey' ? '***' : value, 2)

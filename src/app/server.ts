@@ -110,6 +110,50 @@ async function handle(app: App, req: IncomingMessage, res: ServerResponse, token
     return
   }
 
+  if (req.method === 'GET' && parts[1] === 'links' && parts.length === 2) {
+    const sessionId = url.searchParams.get('sessionId') ?? undefined
+    json(res, 200, { links: app.links(sessionId) })
+    return
+  }
+
+  if (req.method === 'POST' && parts[1] === 'links' && parts.length === 2) {
+    const body = JSON.parse(await readBody(req)) as {
+      from?: unknown
+      to?: unknown
+      relation?: unknown
+      permissions?: unknown
+      snapshotSeq?: unknown
+      reason?: unknown
+    }
+    if (typeof body.from !== 'string' || typeof body.to !== 'string') {
+      json(res, 400, { error: 'from and to are required' })
+      return
+    }
+    if (body.relation !== undefined && typeof body.relation !== 'string') {
+      json(res, 400, { error: 'relation must be a string' })
+      return
+    }
+    const link = app.link({
+      from: body.from,
+      to: body.to,
+      ...(typeof body.relation === 'string' ? { relation: body.relation as 'peer' | 'handoff' | 'reference' } : {}),
+      ...(body.permissions && typeof body.permissions === 'object'
+        ? { permissions: body.permissions as never }
+        : {}),
+      ...(typeof body.snapshotSeq === 'number' ? { snapshotSeq: body.snapshotSeq } : {}),
+      ...(typeof body.reason === 'string' ? { reason: body.reason } : {}),
+    })
+    json(res, 200, { link })
+    return
+  }
+
+  if (req.method === 'POST' && parts[1] === 'links' && parts[2] && parts[3] === 'close') {
+    const body = JSON.parse(await readBody(req)) as { reason?: unknown }
+    const link = app.unlink(parts[2], typeof body.reason === 'string' ? body.reason : undefined)
+    json(res, link ? 200 : 404, link ? { link } : { error: 'link not found' })
+    return
+  }
+
   if (req.method === 'GET' && parts[1] === 'sessions' && parts.length === 2) {
     json(res, 200, { sessions: app.sessions() })
     return
