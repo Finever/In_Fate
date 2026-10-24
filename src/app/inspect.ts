@@ -10,7 +10,7 @@ import type { Event } from '../core/events.ts'
 import type { SessionLink } from '../graph/links.ts'
 import type { SessionJoinSnapshot } from '../session/joins.ts'
 import type { SessionLifecycleState } from '../session/lifecycle.ts'
-import type { SessionInfo } from './session.ts'
+import { sessionStateOf, type SessionInfo } from './session.ts'
 
 export interface SessionEventView {
   readonly seq: number
@@ -160,10 +160,18 @@ export function tailSession(
   }
 }
 
+export interface InspectEventsOptions {
+  /** 事件总数；尾读时用 lastSeq + 1，不拿尾段长度冒充全量 */
+  readonly totalEvents?: number
+  /** 只读了文件尾部；没有 turn.completed 时按最后一条事件判断状态 */
+  readonly truncated?: boolean
+}
+
 export function inspectEvents(
   sessionId: string,
   events: readonly Event[],
   info?: SessionInfo,
+  options: InspectEventsOptions = {},
 ): SessionInspection {
   let lastTurnIndex = -1
   let lastStartIndex = -1
@@ -186,13 +194,17 @@ export function inspectEvents(
   const waiting = lastTurn?.payload.status === 'waiting'
     && lastTurnIndex >= lastStartIndex
 
+  const lastEvent = events.at(-1)
   const state: SessionInspection['state'] = events.length === 0
     ? 'unknown'
-    : agentTerminal
-      ? 'done'
-      : waiting
-        ? 'waiting'
-        : lastStartIndex > lastTurnIndex ? 'running' : 'idle'
+    : options.truncated === true
+      // 尾段可能从一轮中间开始：索引判断不可靠，按最后一条事件判断。
+      ? sessionStateOf(lastEvent)
+      : agentTerminal
+        ? 'done'
+        : waiting
+          ? 'waiting'
+          : lastStartIndex > lastTurnIndex ? 'running' : 'idle'
 
   const pending = new Map<string, PendingToolCall>()
   for (let index = lastTurnIndex + 1; index < events.length; index += 1) {
@@ -206,7 +218,7 @@ export function inspectEvents(
     }
   }
 
-  const last = events.at(-1)
+  const last = lastEvent
   return {
     sessionId,
     ...(info?.createdBy ? { createdBy: info.createdBy } : {}),
@@ -215,8 +227,12 @@ export function inspectEvents(
     ...(info?.kind ? { kind: info.kind } : {}),
     lifecycle: info?.lifecycle ?? 'active',
     state,
-    events: events.length,
-    lastSeq: last ? seqOf(last, events.length - 1) : -1,
+    events: options.totalEvents ?? events.length,
+    lastSeq: last
+      ? (typeof last.seq === 'number'
+          ? last.seq
+          : (options.totalEvents !== undefined ? options.totalEvents - 1 : events.length - 1))
+      : -1,
     ...(last ? { lastType: last.type, lastTs: last.ts } : {}),
     ...(lastTurnIndex >= 0
       ? { lastTurnSeq: seqOf(events[lastTurnIndex]!, lastTurnIndex) }

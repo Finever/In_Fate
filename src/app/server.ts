@@ -8,8 +8,10 @@
  */
 
 import { randomBytes } from 'node:crypto'
+import { createReadStream, existsSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
+import { extname, join, resolve, sep } from 'node:path'
 import type { MemoryRole } from '../memory/access.ts'
 import type { App } from './bundle.ts'
 
@@ -17,6 +19,8 @@ export interface ServeOptions {
   readonly host?: string
   readonly port?: number
   readonly token?: string
+  /** 生产 UI 目录；默认不托管静态文件 */
+  readonly uiDir?: string
 }
 
 export interface ServeHandle {
@@ -82,6 +86,103 @@ async function readBody(req: IncomingMessage): Promise<string> {
   })
 }
 
+const MIME: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.map': 'application/json; charset=utf-8',
+}
+
+function insideRoot(root: string, target: string): boolean {
+  return target === root || target.startsWith(`${root}${sep}`)
+}
+
+/**
+ * 托管生产 UI。API 仍然只认 Bearer token；静态资源本身不含密钥，
+ * 但 index.html 需要能先加载出来，token 才能从 URL/输入框进来。
+ */
+async function serveStatic(
+  req: IncomingMessage,
+  res: ServerResponse,
+  uiDir: string | undefined,
+  pathname: string,
+): Promise<boolean> {
+  if (!uiDir) return false
+  if (req.method !== 'GET' && req.method !== 'HEAD') return false
+  if (pathname === '/api' || pathname.startsWith('/api/')) return false
+
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(pathname)
+  } catch {
+    json(res, 400, { error: 'invalid path' })
+    return true
+  }
+
+  const root = resolve(uiDir)
+  const index = join(root, 'index.html')
+  const relative = decoded === '/' ? 'index.html' : decoded.replace(/^\/+/, '')
+  let target = resolve(root, relative)
+  if (!insideRoot(root, target)) {
+    json(res, 403, { error: 'forbidden' })
+    return true
+  }
+
+  let stat = existsSync(target) ? statSync(target) : undefined
+  if (stat?.isDirectory()) {
+    target = join(target, 'index.html')
+    stat = existsSync(target) ? statSync(target) : undefined
+  }
+
+  // 没有扩展名的路径按 SPA 路由回退；缺失的 .js/.css 必须 404，
+  // 否则构建产物缺失会伪装成 index.html，排查很痛苦。
+  if (!stat?.isFile()) {
+    if (extname(decoded)) {
+      json(res, 404, { error: 'not found' })
+      return true
+    }
+    target = index
+    stat = existsSync(target) ? statSync(target) : undefined
+  }
+
+  if (!stat?.isFile()) {
+    res.writeHead(503, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' })
+    res.end('UI 未构建：cd ui && npm run build\n')
+    return true
+  }
+
+  const type = MIME[extname(target).toLowerCase()] ?? 'application/octet-stream'
+  res.writeHead(200, {
+    'content-type': type,
+    'content-length': stat.size,
+    'cache-control': target === index
+      ? 'no-cache'
+      : 'public, max-age=31536000, immutable',
+  })
+  if (req.method === 'HEAD') {
+    res.end()
+    return true
+  }
+  await new Promise<void>((done, fail) => {
+    const stream = createReadStream(target)
+    stream.on('error', fail)
+    res.on('finish', done)
+    res.on('close', done)
+    stream.pipe(res)
+  })
+  return true
+}
+
 function numberParam(url: URL, name: string): number | undefined {
   const raw = url.searchParams.get(name)
   if (!raw) return undefined
@@ -89,13 +190,27 @@ function numberParam(url: URL, name: string): number | undefined {
   return Number.isFinite(value) ? Math.floor(value) : undefined
 }
 
-async function handle(app: App, req: IncomingMessage, res: ServerResponse, token: string): Promise<void> {
+async function handle(
+  app: App,
+  req: IncomingMessage,
+  res: ServerResponse,
+  token: string,
+  uiDir?: string,
+): Promise<void> {
   const url = new URL(req.url ?? '/', 'http://127.0.0.1')
   cors(req, res)
 
   if (req.method === 'OPTIONS') {
     res.writeHead(204)
     res.end()
+    return
+  }
+
+  // 静态 UI 必须在 token 之前：浏览器加载 index.html 和 /assets/* 时
+  // 不会带 Bearer；API 仍然只认 token。
+  if (url.pathname !== '/api'
+    && !url.pathname.startsWith('/api/')
+    && await serveStatic(req, res, uiDir, url.pathname)) {
     return
   }
 
@@ -217,6 +332,17 @@ async function handle(app: App, req: IncomingMessage, res: ServerResponse, token
     const includeDeleted = url.searchParams.get('includeDeleted') === '1'
       || url.searchParams.get('includeDeleted') === 'true'
     json(res, 200, { sessions: app.sessions({ includeArchived, includeDeleted }) })
+    return
+  }
+
+  if (req.method === 'POST' && parts[1] === 'sessions' && parts.length === 2) {
+    const body = await readOptionalJson(req)
+    const sessionId = app.createSession({
+      createdBy: typeof body.createdBy === 'string' ? body.createdBy : 'user',
+      ...(typeof body.reason === 'string' ? { reason: body.reason } : { reason: 'ui' }),
+      materialize: true,
+    })
+    json(res, 200, { sessionId })
     return
   }
 
@@ -452,8 +578,10 @@ export function startServer(app: App, options: ServeOptions = {}): Promise<Serve
   const token = options.token ?? process.env.IF_UI_TOKEN ?? randomBytes(16).toString('hex')
 
   const server = createServer((req, res) => {
-    void handle(app, req, res, token).catch(error => {
-      json(res, 500, { error: error instanceof Error ? error.message : String(error) })
+    void handle(app, req, res, token, options.uiDir).catch(error => {
+      const code = (error as { code?: unknown } | null)?.code
+      const status = code === 'ESESSIONBUSY' ? 409 : 500
+      json(res, status, { error: error instanceof Error ? error.message : String(error) })
     })
   })
 

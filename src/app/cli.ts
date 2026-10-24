@@ -8,6 +8,7 @@
  */
 
 import { accessSync, constants, existsSync, mkdirSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { createInterface } from 'node:readline/promises'
 import { stdin, stdout } from 'node:process'
 import { parseArgs } from 'node:util'
@@ -49,7 +50,7 @@ const HELP = `IF — In_Fate
   if unarchive <会话>               恢复归档
   if delete <会话> [--reason]       软删除（--force 运行中也允许）
   if approvals [-s 会话]            待审批队列
-  if serve [--port 8787] [--token]  启动本地 UI API（仅 127.0.0.1）
+  if serve [--port 8787] [--token]  启动本地 UI + API（--ui-dir ui/dist）
   if tools                          列出工具
   if agents [--all]                 列出子 agent（--all 含归档/软删除）
   if compact [-s 会话]              手动压缩
@@ -157,6 +158,7 @@ export async function runCli(argv: string[]): Promise<void> {
       port: { type: 'string' },
       token: { type: 'string' },
       host: { type: 'string' },
+      'ui-dir': { type: 'string' },
       relation: { type: 'string' },
       reason: { type: 'string' },
       from: { type: 'string' },
@@ -506,8 +508,12 @@ export async function runCli(argv: string[]): Promise<void> {
         ...(typeof values.port === 'string' ? { port: numberArg(values.port) ?? 8787 } : {}),
         ...(typeof values.token === 'string' ? { token: values.token } : {}),
         ...(typeof values.host === 'string' ? { host: values.host } : {}),
+        uiDir: typeof values['ui-dir'] === 'string'
+          ? resolve(values['ui-dir'])
+          : resolve(process.cwd(), 'ui', 'dist'),
       })
       stdout.write(`IF UI API: ${handle.url}\n`)
+      stdout.write(`UI: ${handle.url}/?token=${handle.token}\n`)
       stdout.write(`Token: ${handle.token}\n`)
       stdout.write('Ctrl-C 停止。\n')
       await new Promise<void>(resolve => {

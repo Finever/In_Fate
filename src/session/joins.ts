@@ -81,6 +81,8 @@ export class SessionJoinScheduler {
   private readonly deps: JoinSchedulerDeps
   private readonly records = new Map<string, SessionJoinRecord>()
   private readonly timers = new Map<string, NodeJS.Timeout>()
+  /** 每个会话只从事件流恢复一次；之后的新 join 由 create 直接登记。 */
+  private readonly restored = new Set<string>()
 
   constructor(deps: JoinSchedulerDeps) {
     this.deps = deps
@@ -194,6 +196,8 @@ export class SessionJoinScheduler {
    * 从会话流恢复未完成的 join。目标在重载后可能已经完成，直接按当前状态重算。
    */
   restore(sessionId: string): void {
+    if (this.restored.has(sessionId)) return
+    this.restored.add(sessionId)
     const events = this.deps.storeFor(sessionId).read()
     const terminal = new Set<string>()
     for (const event of events) {
@@ -259,6 +263,7 @@ export class SessionJoinScheduler {
     for (const timer of this.timers.values()) clearTimeout(timer)
     this.timers.clear()
     this.records.clear()
+    this.restored.clear()
   }
 
   private maybeComplete(record: SessionJoinRecord, wake = true): void {

@@ -30,6 +30,18 @@ export interface SessionLifecycleRecord {
   readonly reason?: string
 }
 
+/** 会话正在跑，归档/删除需要等待或 force。 */
+export class SessionBusyError extends Error {
+  readonly code = 'ESESSIONBUSY'
+  readonly sessionId: string
+
+  constructor(sessionId: string) {
+    super(`session is running: ${sessionId}; wait for the turn to finish or pass force`)
+    this.name = 'SessionBusyError'
+    this.sessionId = sessionId
+  }
+}
+
 export interface SessionLifecycleSnapshot {
   /** 只有显式写过 lifecycle 事件的记录；默认 active 的会话不在这里计数。 */
   readonly archived: number

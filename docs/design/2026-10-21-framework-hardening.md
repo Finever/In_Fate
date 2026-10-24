@@ -538,3 +538,47 @@ UI 行为：
 - 删除后默认列表隐藏，link 关闭，等待被取消；直接 chat 被拒绝。
 - 正在跑时归档/删除默认报错；`force` 下当前轮能收尾，之后不再唤醒。
 - 旧 agent 流的终态列表也认生命周期。
+
+---
+
+## 13. 默认 UI 的 P0 支撑（2026-10-24）
+
+这一轮没有动 UI，只补默认 UI 必须先有的后端能力。
+
+### 13.1 `if serve` 托管 UI
+
+- `if serve` 现在同时托管 `ui/dist`：`/` 回退 `index.html`，`/assets/*` 带长期缓存。
+- 静态文件在 token 校验之前；API 仍然只认 Bearer。否则浏览器加载 `index.html` 和 JS 时会被 401 挡住。
+- 缺失的 `.js/.css` 返回 404，不伪装成 SPA；无扩展名路径才回退 `index.html`。
+- `uiDir` 默认 `ui/dist`，可用 `--ui-dir` 覆盖；未构建时返回 503 并提示 `cd ui && npm run build`。
+
+### 13.2 轻量列表状态
+
+- `SessionInfo` 增加可选的 `state` / `lastActivity`。
+- 只读会话文件最后 32KB 取最后一条完整事件，不解析全量；按 `mtime + size` 缓存，列表轮询只 stat。
+- `state` 口径：`turn.completed(waiting)` → waiting；`turn.completed` → idle；agent 终态 → done；`session.created` → idle；其余进度事件 → running。
+- `App.sessions()` 默认带 `withState`；`sessionInfo()` 单查仍只读文件头。
+
+### 13.3 inspect 尾读
+
+- `inspectSession` 不再 `store.read()` 全量；改为读当前段最后 256KB。
+- `events` 总数用 `lastSeq + 1`，不拿尾段条数冒充全量。
+- 尾段落在大事件中间时向前扩，最多 8MB；当前段为空时退回上一段尾部。
+- 尾读时状态按最后一条事件判断，避免尾部从一轮中间开始时误判 idle。
+- `joinScheduler.restore` 每个会话每进程只做一次，避免每次 inspect 全量读。
+
+### 13.4 其他
+
+- `listAgentRuns` 按 `mtime + size` 缓存解析结果，轮询不再反复读完整 agent 流。
+- `POST /api/sessions` 直接写 `session.created`，不再返回一个刷新就丢的草稿 id。
+- 运行中归档/删除抛 `SessionBusyError`（code `ESESSIONBUSY`），HTTP 层返回 409，UI 可以区分“忙”和“真失败”。
+
+### 13.5 验收
+
+- `if serve` 打开 `/` 能加载 UI；`/assets/*` 不要求 token；`/api/*` 仍然 401。
+- 列表带 state/lastActivity；长会话 inspect 只读尾部。
+- `POST /api/sessions` 后 GET 列表能看到新会话。
+- 运行中归档/删除返回 409。
+- 全量 **132/132** 通过。
+
+插件框架、窗口管理器、终端/code-server 都还没动；默认 UI 的第一版仍按“单窗口聚焦 + dock + 星图背景”推进。

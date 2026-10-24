@@ -140,7 +140,10 @@ test('生命周期：正在跑的会话默认拒绝归档/删除，force 只挡�
   const app = buildBundle(configFor(dir, port), new Container())
   try {
     const turn = app.chat({ sessionId: 's1', text: 'go' })
-    assert.throws(() => app.deleteSession('s1'), /running/)
+    assert.throws(() => app.deleteSession('s1'), (error: unknown) => {
+      assert.equal((error as { code?: string }).code, 'ESESSIONBUSY')
+      return true
+    })
     assert.throws(() => app.archiveSession('s1'), /running/)
 
     const deleted = app.deleteSession('s1', { force: true, reason: '强制下线' })

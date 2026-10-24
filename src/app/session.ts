@@ -8,6 +8,7 @@
 
 import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs'
 import { basename, join } from 'node:path'
+import type { Event } from '../core/events.ts'
 import { assertSafeSessionId } from '../core/safe-path.ts'
 import type { SessionLifecycleState } from '../session/lifecycle.ts'
 
@@ -15,6 +16,8 @@ export interface SessionOrigin {
   readonly sessionId: string
   readonly eventId?: string
 }
+
+export type SessionState = 'idle' | 'running' | 'waiting' | 'done' | 'unknown'
 
 export interface SessionInfo {
   readonly id: string
@@ -28,6 +31,9 @@ export interface SessionInfo {
   readonly kind?: 'user' | 'agent'
   /** 生命周期投影；没有 lifecycle 事件时是 active */
   readonly lifecycle: SessionLifecycleState
+  /** 只在 withState 时计算；尾读最后一条，不解析全量 */
+  readonly state?: SessionState
+  readonly lastActivity?: string
 }
 
 export function sessionsDir(dataRoot: string): string {
@@ -104,6 +110,129 @@ function readOrigin(file: string, name: string): SessionOriginInfo {
   }
 }
 
+interface TailEvent {
+  readonly type: string
+  readonly ts?: string
+  readonly payload?: Record<string, unknown>
+}
+
+const TERMINAL_AGENT_EVENTS = new Set([
+  'agent.completed',
+  'agent.failed',
+  'agent.cancelled',
+  'agent.interrupted',
+])
+
+export interface SessionTailRead {
+  readonly events: Event[]
+  /** 新日志有 seq：lastSeq + 1；旧日志只能退回尾段条数 */
+  readonly total: number
+  readonly truncated: boolean
+}
+
+function readSlice(file: string, start: number, length: number): string {
+  const fd = openSync(file, 'r')
+  try {
+    const buffer = Buffer.alloc(length)
+    const read = readSync(fd, buffer, 0, buffer.length, start)
+    return buffer.subarray(0, read).toString('utf8')
+  } finally {
+    closeSync(fd)
+  }
+}
+
+/**
+ * 只读最后一段字节，返回可解析的完整事件。给 inspect 用，避免每次轮询
+ * 重新解析整个活跃段（活跃段可能有几 MB）。如果尾段恰好落在一行大事件
+ * 中间，就向前扩，直到拿到至少一条完整事件。
+ */
+export function readSessionTail(file: string, maxBytes = 256 * 1024): SessionTailRead {
+  if (!existsSync(file)) return { events: [], total: 0, truncated: false }
+  const stat = statSync(file)
+  if (stat.size === 0) return { events: [], total: 0, truncated: false }
+
+  let budget = Math.max(1024, maxBytes)
+  let start = 0
+  let text = ''
+  let events: Event[] = []
+
+  for (;;) {
+    start = Math.max(0, stat.size - budget)
+    text = readSlice(file, start, stat.size - start)
+    if (start > 0) {
+      const newline = text.indexOf('\n')
+      text = newline >= 0 ? text.slice(newline + 1) : ''
+    }
+    events = []
+    for (const line of text.split('\n')) {
+      const trimmed = line.trim()
+      if (!trimmed) continue
+      try {
+        const parsed = JSON.parse(trimmed) as Event
+        if (typeof parsed.type === 'string') events.push(parsed)
+      } catch {
+        // 最后半行可能是正在写的；保留之前的完整事件
+      }
+    }
+    if (events.length > 0 || start === 0 || budget >= 8 * 1024 * 1024) break
+    budget = Math.min(8 * 1024 * 1024, budget * 2)
+  }
+
+  const last = events.at(-1)
+  const total = last && typeof last.seq === 'number' ? last.seq + 1 : events.length
+  return { events, total, truncated: start > 0 }
+}
+
+export function sessionStateOf(event: TailEvent | undefined): SessionState {
+  if (!event) return 'unknown'
+  if (event.type === 'turn.completed') {
+    return event.payload?.status === 'waiting' ? 'waiting' : 'idle'
+  }
+  if (TERMINAL_AGENT_EVENTS.has(event.type)) return 'done'
+  if (event.type === 'session.created') return 'idle'
+  return 'running'
+}
+
+interface SessionStateCacheEntry {
+  readonly mtimeMs: number
+  readonly size: number
+  readonly state: SessionState
+  readonly lastActivity?: string
+}
+
+/** 列表轮询用：文件没变就只 stat，不重复读尾部。 */
+const sessionStateCache = new Map<string, SessionStateCacheEntry>()
+
+export function tailSessionState(file: string): {
+  state: SessionState
+  lastActivity?: string
+} {
+  const stat = statSync(file)
+  const cached = sessionStateCache.get(file)
+  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+    return {
+      state: cached.state,
+      ...(cached.lastActivity ? { lastActivity: cached.lastActivity } : {}),
+    }
+  }
+
+  const last = readSessionTail(file, 32 * 1024).events.at(-1)
+  const state = sessionStateOf(last)
+  const result = {
+    state,
+    ...(last?.ts ? { lastActivity: last.ts } : {}),
+  }
+  sessionStateCache.set(file, { mtimeMs: stat.mtimeMs, size: stat.size, ...result })
+  if (sessionStateCache.size > 256) {
+    for (const key of sessionStateCache.keys()) {
+      if (key === file) continue
+      sessionStateCache.delete(key)
+      if (sessionStateCache.size <= 128) break
+    }
+  }
+  return result
+}
+
 export function sessionInfo(
   dataRoot: string,
   sessionId: string,
@@ -134,6 +263,8 @@ export interface ListSessionsOptions {
   readonly includeArchived?: boolean
   /** 默认不列软删除会话 */
   readonly includeDeleted?: boolean
+  /** true = 尾读每条会话的最后事件，补 state/lastActivity */
+  readonly withState?: boolean
 }
 
 export function listSessions(dataRoot: string, options: ListSessionsOptions = {}): SessionInfo[] {
@@ -157,6 +288,14 @@ export function listSessions(dataRoot: string, options: ListSessionsOptions = {}
     const lifecycle = options.lifecycle?.(id) ?? 'active'
     if (lifecycle === 'deleted' && options.includeDeleted !== true) continue
     if (lifecycle === 'archived' && options.includeArchived !== true) continue
+    let tail: { state: SessionState; lastActivity?: string } | undefined
+    if (options.withState) {
+      try {
+        tail = tailSessionState(file)
+      } catch {
+        // 文件在 readdir 之后被删/轮转：列表不因一条竞态失败
+      }
+    }
 
     sessions.push({
       id,
@@ -168,6 +307,8 @@ export function listSessions(dataRoot: string, options: ListSessionsOptions = {}
       ...(origin.reason ? { reason: origin.reason } : {}),
       kind: origin.kind,
       lifecycle,
+      ...(tail ? { state: tail.state } : {}),
+      ...(tail?.lastActivity ? { lastActivity: tail.lastActivity } : {}),
     })
   }
   return sessions.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
@@ -190,6 +331,66 @@ export interface ListAgentRunsOptions {
 
 const TERMINAL = new Set(['agent.completed', 'agent.failed', 'agent.cancelled', 'agent.interrupted'])
 
+interface AgentRunCacheEntry {
+  readonly mtimeMs: number
+  readonly size: number
+  readonly preset: string
+  readonly status: string
+  readonly summary: string
+  readonly updatedAt: string
+}
+
+/** agent 流可能很长；按 mtime/size 缓存解析结果，轮询时只 stat。 */
+const agentRunCache = new Map<string, AgentRunCacheEntry>()
+
+function parseAgentRun(file: string): Omit<AgentRunCacheEntry, 'mtimeMs' | 'size'> | undefined {
+  let preset = ''
+  let status = 'unknown'
+  let summary = ''
+  let updatedAt = ''
+  try {
+    for (const line of readFileSync(file, 'utf8').split('\n')) {
+      if (!line.trim()) continue
+      const event = JSON.parse(line) as {
+        ts?: string
+        type?: string
+        payload?: Record<string, unknown>
+      }
+      const type = event.type ?? ''
+      if (!type.startsWith('agent.')) continue
+      updatedAt = event.ts ?? updatedAt
+      if (type === 'agent.requested' && typeof event.payload?.preset === 'string') {
+        preset = event.payload.preset
+      }
+      if (TERMINAL.has(type)) {
+        status = type.slice('agent.'.length)
+        summary = typeof event.payload?.summary === 'string' ? event.payload.summary : ''
+      }
+    }
+  } catch {
+    return undefined
+  }
+  return { preset, status, summary, updatedAt }
+}
+
+function cachedAgentRun(file: string): AgentRunCacheEntry | undefined {
+  const stat = statSync(file)
+  const cached = agentRunCache.get(file)
+  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) return cached
+  const parsed = parseAgentRun(file)
+  if (!parsed) return undefined
+  const next: AgentRunCacheEntry = { ...parsed, mtimeMs: stat.mtimeMs, size: stat.size }
+  agentRunCache.set(file, next)
+  if (agentRunCache.size > 256) {
+    for (const key of agentRunCache.keys()) {
+      if (key === file) continue
+      agentRunCache.delete(key)
+      if (agentRunCache.size <= 128) break
+    }
+  }
+  return next
+}
+
 /** 从 agent 事件流读终态：磁盘是唯一的跨进程记录。 */
 export function listAgentRuns(
   dataRoot: string,
@@ -206,40 +407,21 @@ export function listAgentRuns(
     const lifecycle = options.lifecycle?.(id) ?? 'active'
     if (lifecycle === 'deleted' && options.includeDeleted !== true) continue
     if (lifecycle === 'archived' && options.includeArchived !== true) continue
-    let preset = ''
-    let status = 'unknown'
-    let summary = ''
-    let updatedAt = ''
-
+    let parsed: AgentRunCacheEntry | undefined
     try {
-      for (const line of readFileSync(file, 'utf8').split('\n')) {
-        if (!line.trim()) continue
-        const event = JSON.parse(line) as {
-          ts?: string
-          type?: string
-          payload?: Record<string, unknown>
-        }
-        const type = event.type ?? ''
-        if (!type.startsWith('agent.')) continue
-        updatedAt = event.ts ?? updatedAt
-        if (type === 'agent.requested' && typeof event.payload?.preset === 'string') {
-          preset = event.payload.preset
-        }
-        if (TERMINAL.has(type)) {
-          status = type.slice('agent.'.length)
-          summary = typeof event.payload?.summary === 'string' ? event.payload.summary : ''
-        }
-      }
+      parsed = cachedAgentRun(file)
     } catch {
+      // 文件在 readdir 之后被删/轮转
       continue
     }
+    if (!parsed) continue
 
     runs.push({
       id,
-      preset,
-      status,
-      summary,
-      updatedAt,
+      preset: parsed.preset,
+      status: parsed.status,
+      summary: parsed.summary,
+      updatedAt: parsed.updatedAt,
       lifecycle,
     })
   }

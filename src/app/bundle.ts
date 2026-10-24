@@ -62,6 +62,7 @@ import {
 import { SessionHost } from '../session/host.ts'
 import { pendingWakeMessages } from '../session/inbox.ts'
 import {
+  SessionBusyError,
   SessionLifecycle,
   type SessionLifecycleRecord,
   type SessionLifecycleState,
@@ -116,6 +117,7 @@ import {
   listAgentRuns,
   listSessions,
   newSessionId,
+  readSessionTail,
   sessionFile,
   sessionInfo,
   uiIndexFile,
@@ -147,6 +149,8 @@ export interface CreateSessionInput {
   readonly createdBy?: string
   readonly createdFrom?: { readonly sessionId: string; readonly eventId?: string }
   readonly reason?: string
+  /** true = 立即写 session.created；默认只在首次 chat 时落盘 */
+  readonly materialize?: boolean
 }
 
 export interface SessionListOptions {
@@ -881,7 +885,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     requireSession(sessionId)
     if (current === 'archived') return sessionLifecycle.recordOf(sessionId)!
     if (sessionHost.isActive(sessionId) && input.force !== true) {
-      throw new Error(`session is running: ${sessionId}; wait for the turn to finish or pass force`)
+      throw new SessionBusyError(sessionId)
     }
     const record = sessionLifecycle.archive(sessionId, input.by ?? 'user', input.reason)
     // 归档后不再有新的完成轮，涉及它的等待不该继续空等。
@@ -905,7 +909,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     if (current === 'deleted') return sessionLifecycle.recordOf(sessionId)!
     requireSession(sessionId)
     if (sessionHost.isActive(sessionId) && input.force !== true) {
-      throw new Error(`session is running: ${sessionId}; wait for the turn to finish or pass force`)
+      throw new SessionBusyError(sessionId)
     }
     const by = input.by ?? 'user'
     // 先落终态，后续清理即使失败也不会让会话重新可写。
@@ -1138,7 +1142,11 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
 
     createSession(input) {
       const sessionId = newSessionId(now(), config.profile.timeZone)
-      if (input) pendingProvenance.set(sessionId, input)
+      if (input) {
+        const { materialize: _materialize, ...provenance } = input
+        pendingProvenance.set(sessionId, provenance)
+        if (input.materialize === true) ensureSession(sessionId)
+      }
       return sessionId
     },
 
@@ -1147,6 +1155,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         lifecycle: id => sessionLifecycle.stateOf(id),
         includeArchived: options.includeArchived ?? false,
         includeDeleted: options.includeDeleted ?? false,
+        withState: true,
       })
     },
 
@@ -1182,8 +1191,24 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         sessionId,
         sessionLifecycle.stateOf(sessionId),
       )
+      const store = storeFor(sessionId)
+      let tail: ReturnType<typeof readSessionTail> = { events: [], total: 0, truncated: false }
+      try {
+        tail = readSessionTail(store.file)
+        if (tail.events.length === 0) {
+          // 刚轮转过、当前段还没写入：退回上一段尾部
+          const segments = store.segments()
+          const previous = segments.length > 1 ? segments[segments.length - 2] : undefined
+          if (previous) tail = readSessionTail(previous)
+        }
+      } catch {
+        // 文件在读取期间被归档/删除：按空尾处理
+      }
       return {
-        ...inspectEvents(sessionId, storeFor(sessionId).read(), info),
+        ...inspectEvents(sessionId, tail.events, info, {
+          totalEvents: tail.total,
+          truncated: tail.truncated,
+        }),
         links: sessionGraph.links(sessionId, { includeClosed: false }),
         joins: joinScheduler!.pending(sessionId).map(record => ({
           ...record,
