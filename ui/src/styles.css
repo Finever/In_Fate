@@ -198,11 +198,11 @@ kbd {
   background: var(--faint);
   flex: 0 0 auto;
 }
-.status-dot.idle { background: var(--mint); }
+.status-dot.idle { background: var(--faint); }
 .status-dot.running { background: var(--warn); box-shadow: 0 0 10px rgba(242, 180, 95, .8); animation: pulse 2s ease-in-out infinite; }
 .status-dot.waiting { background: var(--waiting); }
 .status-dot.done { background: var(--accent); }
-.status-dot.completed { background: var(--mint); }
+.status-dot.completed { background: var(--accent); }
 .status-dot.queued { background: var(--warn); }
 .status-dot.failed, .status-dot.cancelled, .status-dot.interrupted { background: var(--danger); }
 @keyframes pulse { 50% { opacity: .4; } }
@@ -502,9 +502,13 @@ kbd {
   font: 9px var(--mono);
   font-weight: 500;
 }
-.online-pill { margin-left: auto; padding-right: 6px; display: flex; align-items: center; }
-.online-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--faint); }
-.online-pill.on .online-dot { background: var(--mint); box-shadow: 0 0 9px rgba(95, 227, 192, .7); }
+.online-text {
+  margin-left: auto;
+  padding-right: 6px;
+  font-size: 9.5px;
+  color: var(--faint);
+}
+.online-text.on { color: var(--muted); }
 
 .filter-wrap { position: relative; }
 .filter-pop {

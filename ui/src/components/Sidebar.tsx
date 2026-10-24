@@ -31,6 +31,7 @@ function SessionRow({
   onDelete: (id: string) => void
 }) {
   const title = sessionDisplayTitle(session)
+  const showStateDot = session.state === 'running' || session.state === 'waiting'
   const meta = session.state && session.state !== 'unknown'
     ? STATE_LABEL[session.state] ?? session.state
     : session.lifecycle === 'archived'
@@ -55,7 +56,7 @@ function SessionRow({
         }
       }}
     >
-      <span className="session-state"><StatusDot state={session.state} /></span>
+      {showStateDot && <span className="session-state"><StatusDot state={session.state} /></span>}
       <span className="session-main">
         <span className="session-title" title={title}>{title}</span>
         <span className="session-meta">
@@ -302,8 +303,8 @@ export function Sidebar({
           <Icon name="search" size={15} />
           <span>命令</span>
         </button>
-        <span className={`online-pill${online ? ' on' : ''}`} title={online ? '已连接' : '离线'}>
-          <span className="online-dot" />
+        <span className={`online-text${online ? ' on' : ''}`} title={online ? '已连接' : '离线'}>
+          {online ? '在线' : '离线'}
         </span>
       </footer>
     </aside>

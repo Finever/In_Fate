@@ -18,7 +18,6 @@ import {
   IconButton,
   LifecycleBadge,
   SectionTitle,
-  StatusDot,
 } from './Ui'
 
 function Row({ label, value }: { label: string; value: string | number | undefined }) {
@@ -62,10 +61,7 @@ export function Inspector({
     <div className="inspector">
       <div className="inspector-status">
         <LifecycleBadge lifecycle={lifecycle} />
-        <span className="state-pill">
-          <StatusDot state={inspection?.state ?? session.state} />
-          {inspection?.state ?? session.state ?? 'unknown'}
-        </span>
+        <span className="state-pill">{inspection?.state ?? session.state ?? 'unknown'}</span>
         {inspection?.kind && <Badge tone="neutral">{inspection.kind}</Badge>}
       </div>
 

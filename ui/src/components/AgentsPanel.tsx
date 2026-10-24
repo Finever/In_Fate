@@ -2,8 +2,8 @@ import { formatDateTime, oneLine, shortId } from '../lib/format'
 import type { AgentRunInfo } from '../types'
 import { Badge, EmptyState, LifecycleBadge } from './Ui'
 
-function statusTone(status: string): 'mint' | 'warn' | 'danger' | 'muted' {
-  if (status === 'completed') return 'mint'
+function statusTone(status: string): 'accent' | 'warn' | 'danger' | 'muted' {
+  if (status === 'completed') return 'accent'
   if (status === 'running' || status === 'queued') return 'warn'
   if (status === 'failed' || status === 'cancelled' || status === 'interrupted') return 'danger'
   return 'muted'
@@ -25,7 +25,6 @@ export function AgentsPanel({ agents }: { agents: AgentRunInfo[] }) {
       {agents.map(agent => (
         <article key={agent.id} className={`agent-card lifecycle-${agent.lifecycle}`}>
           <header>
-            <span className={`status-dot ${agent.status}`} />
             <span className="agent-preset">{agent.preset || shortId(agent.id, 18)}</span>
             <Badge tone={statusTone(agent.status)}>{agent.status}</Badge>
             {agent.lifecycle !== 'active' && <LifecycleBadge lifecycle={agent.lifecycle} />}

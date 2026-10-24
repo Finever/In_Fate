@@ -4,7 +4,6 @@ import { modLabel } from '../lib/platform'
 import { sessionDisplayTitle, sessionSearchText } from '../lib/sessions'
 import type { SessionInfo } from '../types'
 import { Icon } from './Icon'
-import { StatusDot } from './Ui'
 
 interface Item {
   id: string
@@ -156,7 +155,6 @@ export function CommandPalette({
             >
               <span className="palette-group">{item.group}</span>
               <span className="palette-label">
-                {item.id.startsWith('session:') && <StatusDot state={sessions.find(s => `session:${s.id}` === item.id)?.state} />}
                 {item.label}
               </span>
               {item.hint && <span className="palette-hint">{item.hint}</span>}

@@ -58,7 +58,7 @@ export function Badge({
 
 export function LifecycleBadge({ lifecycle }: { lifecycle: SessionLifecycle }) {
   const map: Record<SessionLifecycle, { tone: Tone; label: string }> = {
-    active: { tone: 'mint', label: '活跃' },
+    active: { tone: 'accent', label: '活跃' },
     archived: { tone: 'muted', label: '归档' },
     deleted: { tone: 'danger', label: '已删除' },
   }
