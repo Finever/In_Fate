@@ -1,0 +1,14 @@
+{
+  "name": "if-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "main.mjs",
+  "scripts": {
+    "start": "node run.mjs",
+    "smoke": "node run.mjs --smoke"
+  },
+  "devDependencies": {
+    "electron": "^45.0.0"
+  }
+}

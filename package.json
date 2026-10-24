@@ -9,7 +9,9 @@
     "check": "tsc --noEmit",
     "test": "node --test tests/*.test.ts",
     "start": "node bin/if.ts",
-    "chat": "node bin/if.ts chat"
+    "chat": "node bin/if.ts chat",
+    "desktop": "npm --prefix desktop start",
+    "desktop:smoke": "npm --prefix desktop run smoke"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

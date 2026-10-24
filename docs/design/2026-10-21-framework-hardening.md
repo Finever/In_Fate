@@ -600,3 +600,19 @@ UI 行为：
 
 未做：插件加载、浮动/平铺多窗口、终端/code-server/文件管理器/浏览器、Electron。
 默认 UI 的组件边界按“窗口内容”拆开，后面接窗口管理器和插件时不需要重写时间线/详情。
+
+---
+
+## 15. 桌面壳 v1（2026-10-24）
+
+Electron 壳只做生命周期，不碰 UI 和窗口管理：
+
+- 用系统 `node` 拉起 `if serve`：随机端口、随机 token、指定 `--ui-dir`。
+- 轮询 `/api/health`，通过后加载 `http://127.0.0.1:<port>/?token=...`。
+- 单实例锁；第二个实例聚焦已有窗口。
+- F11 全屏，F12 开发工具；外部链接交给系统浏览器。
+- 退出/关窗时杀掉后端；窗口状态存 Electron `userData`。
+- `--smoke` 模式：加载成功后打印 `ready:`，1.5 秒后自动退出，用于无头式验收。
+- `run.mjs` 清掉 `ELECTRON_RUN_AS_NODE` / `ELECTRON_NO_ATTACH_CONSOLE`，否则某些终端里 Electron 会被当成 Node 跑。
+
+未做：`WebContentsView`、原生应用嵌入、终端、code-server、文件管理器、打包。下一步才是把窗口管理器和嵌入式窗口接进这个壳。
