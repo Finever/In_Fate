@@ -25,12 +25,14 @@ export class SessionWriter {
   readonly store: EventStore
   readonly lockPath: string
   private readonly fd: number
+  private readonly startedAt: string
   private closedFlag = false
 
-  private constructor(store: EventStore, lockPath: string, fd: number) {
+  private constructor(store: EventStore, lockPath: string, fd: number, startedAt: string) {
     this.store = store
     this.lockPath = lockPath
     this.fd = fd
+    this.startedAt = startedAt
   }
 
   static open(store: EventStore, options: SessionWriterOptions = {}): SessionWriter {
@@ -57,7 +59,7 @@ export class SessionWriter {
           }
           throw error
         }
-        return new SessionWriter(store, lockPath, fd)
+        return new SessionWriter(store, lockPath, fd, meta.startedAt)
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
 
@@ -106,7 +108,14 @@ export class SessionWriter {
       throw new IfStorageError(`session writer ownership lost: ${this.store.file}`)
     }
     const current = statSync(this.lockPath, { throwIfNoEntry: false })
-    if (!current || current.ino !== held.ino || current.dev !== held.dev) {
+    const meta = readLockMeta(this.lockPath)
+    if (
+      !current
+      || current.ino !== held.ino
+      || current.dev !== held.dev
+      || meta?.pid !== process.pid
+      || meta.startedAt !== this.startedAt
+    ) {
       throw new IfStorageError(`session writer ownership lost: ${this.store.file}`)
     }
   }
@@ -118,7 +127,14 @@ export class SessionWriter {
     try {
       const held = fstatSync(this.fd)
       const current = statSync(this.lockPath, { throwIfNoEntry: false })
-      owned = Boolean(current && current.ino === held.ino && current.dev === held.dev)
+      const meta = readLockMeta(this.lockPath)
+      owned = Boolean(
+        current
+        && current.ino === held.ino
+        && current.dev === held.dev
+        && meta?.pid === process.pid
+        && meta.startedAt === this.startedAt,
+      )
     } catch {
       // 查不到就当作已经不拥有，宁可留下锁文件也不误删别人的
     }
