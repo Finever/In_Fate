@@ -47,7 +47,27 @@ npm start
 npm run desktop
 ```
 
-启动后窗口标题是 `In_Fate`。日志在 Electron 的 `userData` 目录下：
+启动后窗口标题是 `In_Fate`。
+
+## 快捷启动
+
+安装桌面和开始菜单快捷方式：
+
+```bash
+npm run desktop:shortcut
+```
+
+安装器会创建 `In_Fate.lnk`（桌面 + 开始菜单）。快捷方式指向 `wscript.exe`，由 `launch.vbs` 隐藏窗口地执行 `node run.mjs`，所以双击不会弹出黑色控制台。
+
+移除：
+
+```bash
+npm run desktop:shortcut:remove
+```
+
+也可以直接双击 `desktop/launch.cmd` 在终端里启动；排查启动问题时用它能看到输出。
+
+日志在 Electron 的 `userData` 目录下：
 
 - Windows：`%APPDATA%/In_Fate/if-desktop.log`（实际以 Electron 的 `app.getPath('userData')` 为准）
 - 失败时会弹框并给出日志路径。

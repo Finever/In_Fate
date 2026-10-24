@@ -11,7 +11,9 @@
     "start": "node bin/if.ts",
     "chat": "node bin/if.ts chat",
     "desktop": "npm --prefix desktop start",
-    "desktop:smoke": "npm --prefix desktop run smoke"
+    "desktop:smoke": "npm --prefix desktop run smoke",
+    "desktop:shortcut": "node desktop/install-shortcut.mjs",
+    "desktop:shortcut:remove": "node desktop/install-shortcut.mjs --remove"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

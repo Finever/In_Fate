@@ -616,3 +616,18 @@ Electron 壳只做生命周期，不碰 UI 和窗口管理：
 - `run.mjs` 清掉 `ELECTRON_RUN_AS_NODE` / `ELECTRON_NO_ATTACH_CONSOLE`，否则某些终端里 Electron 会被当成 Node 跑。
 
 未做：`WebContentsView`、原生应用嵌入、终端、code-server、文件管理器、打包。下一步才是把窗口管理器和嵌入式窗口接进这个壳。
+
+---
+
+## 16. 快捷启动（2026-10-24）
+
+桌面壳已经能跑之后，补上“双击就能开”的入口：
+
+- `npm run desktop:shortcut` 调 `desktop/install-shortcut.mjs`，用绝对路径起 Windows PowerShell，执行 `install-shortcut.ps1`。
+- 在桌面和开始菜单各建一个 `In_Fate.lnk`；目标 `wscript.exe`，参数 `launch.vbs`，工作目录 `desktop/`，图标 `if.ico`。
+- `launch.vbs` 用隐藏窗口执行 `node run.mjs`，避免 Explorer 双击时闪一个控制台；`run.mjs` 再清掉 `ELECTRON_RUN_AS_NODE` / `ELECTRON_NO_ATTACH_CONSOLE` 后拉起 Electron。
+- `--remove` 删除两处快捷方式；`desktop/launch.cmd` 留给需要看输出的终端启动。
+- PowerShell 脚本只写 ASCII：Windows PowerShell 5.1 会把无 BOM 的 UTF-8 当 ANSI/GBK 读，中文注释会让解析直接失败。
+
+已验证：快捷方式创建、双击启动、后端随机端口拉起、窗口加载 UI；关窗后后端收到 SIGTERM 并退出。
+未做：开机自启、托盘、安装包、macOS/Linux 快捷方式。
