@@ -335,8 +335,10 @@ export async function runCli(argv: string[]): Promise<void> {
         process.exitCode = 1
         return
       }
-      const entry = await app.acceptMemoryProposal(proposalId)
-      stdout.write(`accepted ${entry.id}\n`)
+      const accepted = await app.acceptMemoryProposal(proposalId)
+      stdout.write(accepted.kind === 'detail'
+        ? `accepted ${accepted.entry.id}\n`
+        : `accepted identity:${accepted.result.file} backup=${accepted.result.backup}\n`)
     } else if (command === 'memory-reject') {
       const proposalId = rest[0]
       if (!proposalId) {

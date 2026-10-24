@@ -157,10 +157,67 @@ test('memory 工具：steward 直写，worker 只能提议，提议可接受', a
     assert.equal(pending.length, 1)
 
     const accepted = await proposals.accept(pending[0]!.proposalId, ctx.store)
-    assert.match(accepted.id, /^notes-/)
+    assert.equal(accepted.kind, 'detail')
+    if (accepted.kind === 'detail') assert.match(accepted.entry.id, /^notes-/)
     assert.equal(ctx.store.search('worker 提议').length, 1)
   } finally {
     rmSync(grantsDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+    ctx.close()
+  }
+})
+
+test('身份记忆只改 section，并先备份', async () => {
+  const agentDir = mkdtempSync(join(tmpdir(), 'if-identity-'))
+  try {
+    writeFileSync(
+      join(agentDir, 'SOUL.md'),
+      '# 未凉\n\n## 我叫什么\n\n旧名字。\n\n## 我怎么说话\n\n精简。\n',
+      'utf8',
+    )
+    const identity = new (await import('../src/memory/identity.ts')).MemoryIdentityStore(agentDir, {
+      now: () => new Date('2026-10-24T04:00:00.000Z'),
+    })
+    const result = identity.apply({
+      file: 'SOUL',
+      section: '我叫什么',
+      content: '新名字。',
+    })
+    assert.match(result.backup, /SOUL-identity-/)
+    const text = identity.read('SOUL')
+    assert.match(text, /新名字/)
+    assert.doesNotMatch(text.split('## 我怎么说话')[0]!, /旧名字/)
+
+    identity.apply({
+      file: 'SOUL',
+      section: '新的小节',
+      content: '追加内容。',
+      mode: 'append',
+    })
+    assert.match(identity.read('SOUL'), /## 新的小节\n\n追加内容。/)
+  } finally {
+    rmSync(agentDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+  }
+})
+
+test('identity proposal 由用户接受后落文件', async () => {
+  const agentDir = mkdtempSync(join(tmpdir(), 'if-identity-proposal-'))
+  const ctx = fixture()
+  try {
+    writeFileSync(join(agentDir, 'SOUL.md'), '# 未凉\n\n## 我叫什么\n\n旧名字。\n', 'utf8')
+    const identity = new (await import('../src/memory/identity.ts')).MemoryIdentityStore(agentDir)
+    const proposals = new MemoryProposalStore(agentDir)
+    const proposal = proposals.proposeIdentity({
+      target: 'identity:SOUL',
+      sourceSession: 'worker',
+      identity: { file: 'SOUL', section: '我叫什么', content: '新名字。' },
+      reason: '测试身份提议',
+    })
+    const accepted = await proposals.accept(proposal.proposalId, ctx.store, identity)
+    assert.equal(accepted.kind, 'identity')
+    assert.match(identity.read('SOUL'), /新名字/)
+    assert.equal(proposals.get(proposal.proposalId)?.status, 'accepted')
+  } finally {
+    rmSync(agentDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
     ctx.close()
   }
 })

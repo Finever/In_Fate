@@ -52,6 +52,10 @@ export interface RuntimePatch {
     readonly maxTotal?: number
     readonly maxPerCreator?: number
   }
+  readonly memory?: {
+    /** 写记忆后自动 git commit；默认开，但只在 memory root 是 git 仓库时生效 */
+    readonly autoCommit?: boolean
+  }
   readonly workspace?: {
     /** 不配就用 App 的 cwd */
     readonly id?: string

@@ -149,7 +149,10 @@ function validateEntry(entry: MemoryEntry): void {
     if (typeof quote.say !== 'string' || quote.say.length === 0) {
       throw new Error('memory quote say is empty')
     }
-    if (quote['log-addr'] !== undefined && !LOG_ADDR.test(quote['log-addr'])) {
+    if (quote['log-addr'] === undefined) {
+      throw new Error('memory quote needs log-addr')
+    }
+    if (!LOG_ADDR.test(quote['log-addr'])) {
       throw new Error(`invalid memory quote log-addr: ${quote['log-addr']}`)
     }
   }
@@ -211,6 +214,7 @@ export interface MemoryStoreOptions {
   readonly timeZone?: string
   readonly now?: () => Date
   readonly writer?: MemoryShardWriter
+  readonly onWrite?: (target: string) => void
 }
 
 export class MemoryStore {
@@ -218,12 +222,14 @@ export class MemoryStore {
   readonly timeZone: string
   private readonly now: () => Date
   private readonly writer: MemoryShardWriter
+  private readonly onWrite?: (target: string) => void
 
   constructor(root: string, options: MemoryStoreOptions = {}) {
     this.root = root
     this.timeZone = options.timeZone ?? 'Asia/Shanghai'
     this.now = options.now ?? (() => new Date())
     this.writer = options.writer ?? new MemoryShardWriter()
+    if (options.onWrite) this.onWrite = options.onWrite
   }
 
   target(value: string): MemoryTarget {
@@ -306,6 +312,7 @@ export class MemoryStore {
         ...doc,
         entries: [...doc.entries, entry],
       })
+      this.onWrite?.(target.target)
       return entry
     }, { timeoutMs: 5_000 }))
   }
@@ -336,6 +343,7 @@ export class MemoryStore {
       const entries = [...doc.entries]
       entries[index] = next
       writeDocument(target.path, { ...doc, entries })
+      this.onWrite?.(target.target)
       return next
     }, { timeoutMs: 5_000 }))
   }

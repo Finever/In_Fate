@@ -109,6 +109,7 @@
         "maxTotal": 64,
         "maxPerCreator": 16
       },
+      "memory": { "autoCommit": true },
       "metrics": true
     }
   }

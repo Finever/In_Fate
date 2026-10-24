@@ -36,7 +36,9 @@ import { EventStore } from '../core/store.ts'
 import { agentStream, sessionStream } from '../core/streams.ts'
 import { defaultSources } from '../memory/sources.ts'
 import { MemoryAccess, type MemoryRole } from '../memory/access.ts'
-import { MemoryProposalStore, type MemoryProposal, type ProposalStatus } from '../memory/proposals.ts'
+import { MemoryCommitter } from '../memory/committer.ts'
+import { MemoryIdentityStore } from '../memory/identity.ts'
+import { MemoryProposalStore, type MemoryAcceptResult, type MemoryProposal, type ProposalStatus } from '../memory/proposals.ts'
 import { MemoryStore, type MemoryEntry } from '../memory/store.ts'
 import { createMemoryTools } from '../memory/tools.ts'
 import type { ModelRegistry, ResolvedModel } from '../model/registry.ts'
@@ -220,7 +222,7 @@ export interface App {
   /** 只由用户/App 调用：给任意会话授予记忆角色。 */
   grantMemory(sessionId: string, role: MemoryRole): MemoryRole
   memoryProposals(status?: ProposalStatus): MemoryProposal[]
-  acceptMemoryProposal(proposalId: string): Promise<MemoryEntry>
+  acceptMemoryProposal(proposalId: string): Promise<MemoryAcceptResult>
   rejectMemoryProposal(proposalId: string): MemoryProposal
 
   dispose(): Promise<void>
@@ -438,8 +440,16 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   }), 'builtin')
 
   // 记忆工具：能力位由 session 决定；没有 memoryRoot 就不注册。
+  const memoryCommitter = config.profile.memoryLogRoot
+    ? new MemoryCommitter(config.profile.memoryLogRoot, {
+      enabled: config.patch?.runtime?.memory?.autoCommit !== false,
+    })
+    : undefined
   const memoryStore = config.profile.memoryLogRoot
-    ? new MemoryStore(config.profile.memoryLogRoot, { timeZone: config.profile.timeZone })
+    ? new MemoryStore(config.profile.memoryLogRoot, {
+      timeZone: config.profile.timeZone,
+      ...(memoryCommitter ? { onWrite: target => memoryCommitter.markDirty(target) } : {}),
+    })
     : undefined
   const memoryAccess = memoryStore
     ? new MemoryAccess(
@@ -448,7 +458,14 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     )
     : undefined
   const memoryProposals = memoryStore
-    ? new MemoryProposalStore(config.profile.memoryLogRoot!, now)
+    ? new MemoryProposalStore(
+      config.profile.memoryLogRoot!,
+      now,
+      memoryCommitter ? () => memoryCommitter.markDirty('proposals') : undefined,
+    )
+    : undefined
+  const memoryIdentity = memoryStore && config.profile.agentDir
+    ? new MemoryIdentityStore(config.profile.agentDir)
     : undefined
   if (memoryStore && memoryAccess && memoryProposals) {
     for (const tool of createMemoryTools({
@@ -461,6 +478,11 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     container.register('memoryStore', memoryStore)
     container.register('memoryAccess', memoryAccess)
     container.register('memoryProposals', memoryProposals)
+    if (memoryIdentity) container.register('memoryIdentity', memoryIdentity)
+    if (memoryCommitter) {
+      container.register('memoryCommitter', memoryCommitter)
+      container.onDispose('memoryCommitter', () => memoryCommitter.flush())
+    }
   }
 
   const dangerousEnabled = new Set(config.patch?.tools?.enabled ?? [])
@@ -1126,7 +1148,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
 
     async acceptMemoryProposal(proposalId) {
       if (!memoryStore || !memoryProposals) throw new Error('memory is not configured')
-      return memoryProposals.accept(proposalId, memoryStore)
+      return memoryProposals.accept(proposalId, memoryStore, memoryIdentity)
     },
 
     rejectMemoryProposal(proposalId) {

@@ -190,17 +190,49 @@ export function createMemoryTools(deps: {
         quotes: { type: 'array', items: QUOTE_SCHEMA },
         introduction: { type: 'string' },
         reason: { type: 'string' },
+        section: { type: 'string', description: 'identity 的二级标题' },
+        mode: { type: 'string', enum: ['replace-section', 'append'] },
       },
-      required: ['target', 'content', 'tag'],
+      required: ['target', 'content'],
       additionalProperties: false,
     },
     async run(args, context) {
+      const input = args as Record<string, unknown>
+      const target = String(input.target)
+      if (target.startsWith('identity:')) {
+        if (!deps.access.canPropose(context.sessionId, 'identity')) {
+          return denied('identity propose not granted')
+        }
+        const file = target.slice('identity:'.length)
+        if (file !== 'SOUL' && file !== 'USER' && file !== 'FACT') {
+          return { text: `unknown identity file: ${file}`, isError: true }
+        }
+        const section = typeof input.section === 'string' ? input.section : ''
+        if (section.trim().length === 0) {
+          return { text: 'identity proposal needs section', isError: true }
+        }
+        const proposal = deps.proposals.proposeIdentity({
+          target,
+          sourceSession: context.sessionId,
+          identity: {
+            file,
+            section,
+            content: String(input.content ?? ''),
+            mode: input.mode === 'append' ? 'append' : 'replace-section',
+          },
+          ...(typeof input.reason === 'string' ? { reason: input.reason } : {}),
+        })
+        return {
+          text: `已提交身份记忆提议 ${proposal.proposalId}`,
+          structured: proposal,
+        }
+      }
+
       if (!deps.access.canPropose(context.sessionId, 'shared')) {
         return denied('memory propose not granted')
       }
-      const input = args as Record<string, unknown>
       const proposal = deps.proposals.propose({
-        target: String(input.target),
+        target,
         sourceSession: context.sessionId,
         entry: entryInput(input),
         ...(typeof input.reason === 'string' ? { reason: input.reason } : {}),
