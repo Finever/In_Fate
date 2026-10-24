@@ -34,6 +34,8 @@ export interface SessionInfo {
   /** 只在 withState 时计算；尾读最后一条，不解析全量 */
   readonly state?: SessionState
   readonly lastActivity?: string
+  /** 只在 withTitle 时计算；取首条用户消息，截断后作为列表标题 */
+  readonly title?: string
 }
 
 export function sessionsDir(dataRoot: string): string {
@@ -139,6 +141,77 @@ function readSlice(file: string, start: number, length: number): string {
   } finally {
     closeSync(fd)
   }
+}
+
+const TITLE_MAX_CHARS = 80
+const TITLE_HEAD_MAX_BYTES = 1024 * 1024
+
+interface SessionTitleCacheEntry {
+  readonly mtimeMs: number
+  readonly size: number
+  readonly title?: string
+}
+
+/** 列表轮询用：文件没变就只 stat，不重复扫头部。 */
+const sessionTitleCache = new Map<string, SessionTitleCacheEntry>()
+
+function normalizeTitle(text: string): string {
+  return text.replace(/\s+/g, ' ').trim()
+}
+
+function truncateTitle(text: string): string {
+  const chars = Array.from(text)
+  return chars.length <= TITLE_MAX_CHARS ? text : chars.slice(0, TITLE_MAX_CHARS).join('')
+}
+
+/**
+ * 从会话开头取首条用户消息作为标题。只读头部，按 mtime/size 缓存；
+ * 会话没有用户消息（新建未发言）时返回 undefined，由 UI 显示“新会话”。
+ */
+export function sessionTitle(file: string): string | undefined {
+  const stat = statSync(file)
+  const cached = sessionTitleCache.get(file)
+  if (cached) {
+    if (cached.title !== undefined && stat.size >= cached.size) return cached.title
+    if (cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) return cached.title
+  }
+
+  let title: string | undefined
+  let budget = Math.min(64 * 1024, Math.max(1, stat.size))
+  for (;;) {
+    const text = readSlice(file, 0, Math.min(stat.size, budget))
+    for (const line of text.split('\n')) {
+      const trimmed = line.trim()
+      if (!trimmed) continue
+      try {
+        const event = JSON.parse(trimmed) as {
+          type?: string
+          payload?: { text?: unknown }
+        }
+        if (event.type !== 'message.user' || typeof event.payload?.text !== 'string') continue
+        const normalized = normalizeTitle(event.payload.text)
+        if (normalized) {
+          title = truncateTitle(normalized)
+          break
+        }
+      } catch {
+        // 最后半行可能正在写；找不到就扩大窗口继续
+      }
+    }
+    if (title || budget >= stat.size || budget >= TITLE_HEAD_MAX_BYTES) break
+    budget = Math.min(TITLE_HEAD_MAX_BYTES, budget * 4)
+  }
+
+  sessionTitleCache.set(file, {
+    mtimeMs: stat.mtimeMs,
+    size: stat.size,
+    ...(title ? { title } : {}),
+  })
+  if (sessionTitleCache.size > 512) {
+    const oldest = sessionTitleCache.keys().next().value
+    if (oldest !== undefined) sessionTitleCache.delete(oldest)
+  }
+  return title
 }
 
 /**
@@ -265,6 +338,8 @@ export interface ListSessionsOptions {
   readonly includeDeleted?: boolean
   /** true = 尾读每条会话的最后事件，补 state/lastActivity */
   readonly withState?: boolean
+  /** true = 扫每条会话开头，补 title */
+  readonly withTitle?: boolean
 }
 
 export function listSessions(dataRoot: string, options: ListSessionsOptions = {}): SessionInfo[] {
@@ -296,6 +371,14 @@ export function listSessions(dataRoot: string, options: ListSessionsOptions = {}
         // 文件在 readdir 之后被删/轮转：列表不因一条竞态失败
       }
     }
+    let title: string | undefined
+    if (options.withTitle) {
+      try {
+        title = sessionTitle(file)
+      } catch {
+        // 标题只是列表装饰；读不到不影响会话本身
+      }
+    }
 
     sessions.push({
       id,
@@ -309,6 +392,7 @@ export function listSessions(dataRoot: string, options: ListSessionsOptions = {}
       lifecycle,
       ...(tail ? { state: tail.state } : {}),
       ...(tail?.lastActivity ? { lastActivity: tail.lastActivity } : {}),
+      ...(title ? { title } : {}),
     })
   }
   return sessions.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))

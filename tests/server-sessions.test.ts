@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -7,6 +7,7 @@ import { buildBundle } from '../src/app/bundle.ts'
 import type { AppConfig } from '../src/app/config.ts'
 import { Container } from '../src/app/container.ts'
 import { startServer } from '../src/app/server.ts'
+import { EventStore } from '../src/core/store.ts'
 
 function configFor(dataRoot: string): AppConfig {
   return {
@@ -64,6 +65,44 @@ test('POST /api/sessions 直接落 session.created', async () => {
     assert.equal(session.lifecycle, 'active')
     assert.equal(session.createdBy, 'user')
     assert.equal(session.reason, 'ui-test')
+  } finally {
+    await handle.close()
+    await app.dispose()
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+  }
+})
+
+test('GET /api/sessions 带出首条用户消息标题', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'if-server-title-'))
+  mkdirSync(join(dir, 'sessions'), { recursive: true })
+  const store = new EventStore(join(dir, 'sessions', 'session-title.jsonl'))
+  store.append({
+    stream: 'session:session-title',
+    actor: 'system',
+    type: 'session.created',
+    payload: { sessionId: 'session-title', formatVersion: 2, createdBy: 'user' },
+  })
+  store.append({
+    stream: 'session:session-title',
+    actor: 'user',
+    type: 'message.user',
+    payload: { text: '列表里应该看到这句话' },
+  })
+  store.flush()
+
+  const app = buildBundle(configFor(dir), new Container())
+  const handle = await startServer(app, { port: 0, token: 'test-token' })
+  try {
+    const listed = await fetch(`${handle.url}/api/sessions`, {
+      headers: { authorization: 'Bearer test-token' },
+    })
+    assert.equal(listed.status, 200)
+    const data = await listed.json() as {
+      sessions: Array<{ id: string; title?: string }>
+    }
+    const session = data.sessions.find(item => item.id === 'session-title')
+    assert.ok(session)
+    assert.equal(session.title, '列表里应该看到这句话')
   } finally {
     await handle.close()
     await app.dispose()

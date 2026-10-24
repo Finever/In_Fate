@@ -22,6 +22,10 @@ export type IconName =
   | 'fullscreen'
   | 'layers'
   | 'tool'
+  | 'sidebar'
+  | 'more'
+  | 'down'
+  | 'filter'
 
 const PATHS: Record<IconName, string[]> = {
   chat: [
@@ -65,6 +69,10 @@ const PATHS: Record<IconName, string[]> = {
   fullscreen: ['M4 9V4h5', 'M20 9V4h-5', 'M4 15v5h5', 'M20 15v5h-5'],
   layers: ['M12 3l9 5-9 5-9-5 9-5Z', 'M3 13l9 5 9-5', 'M3 17l9 5 9-5'],
   tool: ['M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17v3h3l5.3-5.3a4 4 0 0 0 5.4-5.4l-2.7 2.7-2-2 2.7-2.7Z'],
+  sidebar: ['M4 4h16v16H4z', 'M9 4v16'],
+  more: ['M6 12h.01', 'M12 12h.01', 'M18 12h.01'],
+  down: ['M6 9l6 6 6-6'],
+  filter: ['M4 6h16', 'M7 12h10', 'M10 18h4'],
 }
 
 export function Icon({

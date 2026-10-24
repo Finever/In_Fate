@@ -46,3 +46,11 @@ export function oneLine(text: string, max = 120): string {
   const flat = text.replace(/\s+/g, ' ').trim()
   return flat.length <= max ? flat : `${flat.slice(0, max)}…`
 }
+
+export function formatDuration(ms: number | undefined): string {
+  if (ms === undefined || !Number.isFinite(ms)) return ''
+  if (ms < 1_000) return `${Math.round(ms)} ms`
+  if (ms < 60_000) return `${(ms / 1_000).toFixed(1)} s`
+  if (ms < 3_600_000) return `${Math.round(ms / 60_000)} min`
+  return `${(ms / 3_600_000).toFixed(1)} h`
+}

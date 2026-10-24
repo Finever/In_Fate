@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { modLabel } from '../lib/platform'
 import { Icon } from './Icon'
 
 export function Composer({
@@ -51,16 +50,17 @@ export function Composer({
         ref={ref}
         value={draft}
         onChange={event => setDraft(event.target.value)}
-        placeholder="对她说点什么…"
+        placeholder="输入消息…"
+        aria-label="消息"
         onKeyDown={event => {
-          if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-            event.preventDefault()
-            void submit()
-          }
+          if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
+          if (event.shiftKey) return
+          event.preventDefault()
+          void submit()
         }}
       />
       <div className="composer-side">
-        <span className="composer-hint">{modLabel} + Enter</span>
+        <span className="composer-hint">Enter 发送 · Shift+Enter 换行</span>
         <button
           className="send-btn"
           disabled={sending || !draft.trim()}

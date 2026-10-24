@@ -1156,6 +1156,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         includeArchived: options.includeArchived ?? false,
         includeDeleted: options.includeDeleted ?? false,
         withState: true,
+        withTitle: true,
       })
     },
 

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { relativeTime, shortId } from '../lib/format'
+import { relativeTime } from '../lib/format'
 import { modLabel } from '../lib/platform'
+import { sessionDisplayTitle, sessionSearchText } from '../lib/sessions'
 import type { SessionInfo } from '../types'
 import { Icon } from './Icon'
 import { StatusDot } from './Ui'
@@ -70,7 +71,7 @@ export function CommandPalette({
     ]
     const sessionItems: Item[] = sessions.map(session => ({
       id: `session:${session.id}`,
-      label: shortId(session.id, 26),
+      label: sessionDisplayTitle(session),
       hint: `${session.createdBy ?? 'user'} · ${session.state ?? 'unknown'} · ${relativeTime(session.updatedAt)}`,
       group: session.lifecycle === 'active' ? '会话' : '归档 / 删除',
       run: () => onSelect(session.id),
@@ -78,8 +79,13 @@ export function CommandPalette({
     const all = [...actions, ...sessionItems]
     const needle = query.trim().toLowerCase()
     if (!needle) return all
-    return all.filter(item =>
-      `${item.label} ${item.hint ?? ''} ${item.id}`.toLowerCase().includes(needle))
+    return all.filter(item => {
+      if (item.id.startsWith('session:')) {
+        const session = sessions.find(candidate => `session:${candidate.id}` === item.id)
+        if (session && sessionSearchText(session).includes(needle)) return true
+      }
+      return `${item.label} ${item.hint ?? ''} ${item.id}`.toLowerCase().includes(needle)
+    })
   }, [
     onAgents,
     onApprovals,

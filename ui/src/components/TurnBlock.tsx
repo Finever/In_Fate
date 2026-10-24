@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
 import type { TurnCache } from '../cache'
-import { oneLine } from '../lib/format'
 import type { UiTimelineItem, UiTurnMeta } from '../types'
 import { ItemCard } from './ItemCard'
 
@@ -41,30 +40,18 @@ export function TurnBlock({
     }
   }, [cache, meta.turn, refreshKey, sessionId])
 
-  const title = oneLine(
-    items?.find(item => item.kind === 'user')?.content?.preview
-    ?? items?.find(item => item.kind === 'system')?.content?.preview
-    ?? `第 ${meta.turn} 轮`,
-    76,
-  )
-
   return (
     <section className="turn-block" data-turn={meta.turn}>
-      <div className="turn-rail">
-        <span className="turn-index">{String(meta.turn).padStart(2, '0')}</span>
-        <span className="turn-thread" />
-      </div>
-      <div className="turn-body">
-        <header className="turn-head">
-          <span className="turn-title">{title}</span>
-          <span className="turn-meta">{meta.itemCount} 事件</span>
-        </header>
-        {error && <div className="inline-error">{error}</div>}
-        {!items && !error && <div className="skeleton-line">载入本轮…</div>}
-        {items?.map(item => (
-          <ItemCard key={item.id} sessionId={sessionId} item={item} />
-        ))}
-      </div>
+      {error && <div className="inline-error">{error}</div>}
+      {!items && !error && (
+        <div className="msg-skeleton" aria-label="载入本轮">
+          <span />
+          <span />
+        </div>
+      )}
+      {items?.map(item => (
+        <ItemCard key={item.id} sessionId={sessionId} item={item} />
+      ))}
     </section>
   )
 }

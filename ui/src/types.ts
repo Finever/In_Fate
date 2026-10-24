@@ -18,6 +18,7 @@ export interface SessionInfo {
   lifecycle: SessionLifecycle
   state?: SessionState
   lastActivity?: string
+  title?: string
 }
 
 export interface AgentRunInfo {

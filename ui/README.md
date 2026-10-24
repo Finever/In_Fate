@@ -1,13 +1,15 @@
-# IF UI（默认工作台 v1）
+# IF UI（默认工作台 v2：列表式）
 
-全屏、非列表式的默认工作台：
+默认界面改成以会话列表为主入口，参考 DSH / Cherry 的结构：
 
-- **星图**：会话是节点，连接是线；没有侧栏列表。
-- **聚焦窗口**：选中会话后放大成聊天窗口，其他节点退到背景。
-- **dock**：底部切换会话、新建、审批、子 agent、回到星图。
-- **抽屉**：会话详情、审批、子 agent 都不切页。
+- **侧栏**：新建、搜索、按日期分组；归档/已删除单独分组；行内悬停可归档、恢复、删除。
+- **连接线**：选中会话时，从列表左侧引出曲线连到直接关联的会话；平时不占视觉。
+- **对话区**：用户消息右侧气泡，助手左侧 Markdown；思考、工具、压缩收成可展开的轻行。
+- **右侧面板**：会话详情、审批、子 agent 共用一栏，默认收起；窄屏改浮层。
 - **命令面板**：`Ctrl / ⌘ + K`，搜索会话、执行动作。
-- **生命周期**：归档 / 恢复 / 软删除；409 时会给出强制操作。
+- **深链**：`?session=<id>` 可以直接打开某个会话。
+
+星图不再是默认入口，相关组件已移除；连接关系改由侧栏引出线表达。
 
 ## 运行
 
@@ -35,31 +37,38 @@ npm run dev
 
 打开 `http://127.0.0.1:5173/?token=dev`。
 
+## 交互
+
+- `Enter` 发送，`Shift + Enter` 换行。
+- `Ctrl / ⌘ + N` 新建会话。
+- `Ctrl / ⌘ + K` 打开命令面板。
+- `Esc` 关闭面板 / 右栏；窄屏下关闭侧栏。
+
 ## 这一版没有做
 
-- 插件加载：组件边界按“窗口内容”留好了，但还没有 manifest / 注册表。
-- 浮动/平铺多窗口：现在是单聚焦窗口 + dock。
-- 终端 / code-server / 文件管理器 / 浏览器窗口：等后面单独做。
-- Electron：现在是全屏 Web 工作台，不是 OS 窗口。
+- 插件加载、浮动/平铺多窗口。
+- 会话重命名、置顶、全文消息搜索。
+- 终端 / code-server / 文件管理器 / 浏览器窗口。
+- 附件上传与图片消息。
 
 ## 目录
 
 ```text
 src/
-  App.tsx                 壳：星图、聚焦窗口、dock、抽屉、生命周期
+  App.tsx                 壳：侧栏 + 对话 + 右栏、生命周期、命令面板
   api.ts / types.ts
   hooks/useWorkspace.ts   会话/连接/agent/审批，5 秒轮询
   hooks/useSession.ts     当前会话 turns/inspect/stats，3 秒轮询
-  lib/constellation.ts    确定性力导向布局
+  lib/sessions.ts         标题兜底、日期分组、连接关系
   lib/markdown.tsx        轻量 Markdown 渲染
   components/
-    Constellation.tsx     星图
-    FocusWindow.tsx       聚焦聊天窗口
+    Sidebar.tsx           列表、搜索、筛选、行操作
+    LinkRail.tsx          选中会话的左侧引出线
+    ChatPane.tsx          对话头、空状态、消息区、输入框
     Timeline.tsx / TurnBlock.tsx / ItemCard.tsx
-    Dock.tsx
+    RightPanel.tsx        详情 / 审批 / 子 agent 的右栏容器
     Inspector.tsx
     ApprovalsPanel.tsx / AgentsPanel.tsx
     CommandPalette.tsx
-    TopBar.tsx
     Ui.tsx / Icon.tsx
 ```

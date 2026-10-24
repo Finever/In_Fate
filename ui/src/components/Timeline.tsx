@@ -36,6 +36,11 @@ export function Timeline({ sessionId, turns, cache, refreshKey }: Props) {
   }, [cache, visibleKey])
 
   useEffect(() => {
+    atBottomRef.current = true
+    setAtBottom(true)
+  }, [sessionId])
+
+  useEffect(() => {
     if (turns.length === 0 || !atBottomRef.current) return
     const frame = requestAnimationFrame(() => {
       virtualizer.scrollToIndex(turns.length - 1, { align: 'end' })
@@ -56,16 +61,6 @@ export function Timeline({ sessionId, turns, cache, refreshKey }: Props) {
     virtualizer.scrollToIndex(turns.length - 1, { align: 'end' })
     atBottomRef.current = true
     setAtBottom(true)
-  }
-
-  if (turns.length === 0) {
-    return (
-      <div className="timeline-empty">
-        <span className="timeline-empty-mark">✦</span>
-        <h3>还没有对话</h3>
-        <p>在下面说第一句话。每一轮都会落成事件，不会丢。</p>
-      </div>
-    )
   }
 
   return (
@@ -94,8 +89,8 @@ export function Timeline({ sessionId, turns, cache, refreshKey }: Props) {
         </div>
       </div>
       {!atBottom && (
-        <button className="jump-bottom" onClick={toBottom} title="回到最新">
-          <Icon name="chevron" size={15} />
+        <button type="button" className="jump-bottom" onClick={toBottom} title="回到最新">
+          <Icon name="down" size={15} />
         </button>
       )}
     </div>

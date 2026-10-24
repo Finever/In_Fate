@@ -2,16 +2,19 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, getToken, setToken } from './api'
 import { AgentsPanel } from './components/AgentsPanel'
 import { ApprovalsPanel } from './components/ApprovalsPanel'
+import { ChatPane } from './components/ChatPane'
 import { CommandPalette } from './components/CommandPalette'
-import { Constellation } from './components/Constellation'
-import { Dock } from './components/Dock'
-import { FocusWindow } from './components/FocusWindow'
 import { Icon } from './components/Icon'
 import { Inspector } from './components/Inspector'
-import { TopBar } from './components/TopBar'
-import { Button, ConfirmDialog, Drawer, Spinner } from './components/Ui'
+import { RightPanel } from './components/RightPanel'
+import { Sidebar } from './components/Sidebar'
+import { Button, ConfirmDialog, Spinner } from './components/Ui'
 import { useSession } from './hooks/useSession'
 import { useWorkspace } from './hooks/useWorkspace'
+import { sessionDisplayTitle } from './lib/sessions'
+
+const SELECTED_KEY = 'if-selected-session'
+const SIDEBAR_KEY = 'if-sidebar'
 
 function TokenGate({ onReady }: { onReady: (token: string) => void }) {
   const [value, setValue] = useState('')
@@ -54,17 +57,27 @@ export default function App() {
 }
 
 type ForceConfirm = { kind: 'archive' | 'delete'; id: string }
+type RightMode = 'details' | 'approvals' | 'agents'
 
 function Desktop() {
   const workspace = useWorkspace()
-  const [selectedId, setSelectedId] = useState<string>()
+  const [selectedId, setSelectedId] = useState<string | undefined>(() => {
+    const fromUrl = new URLSearchParams(window.location.search).get('session')
+    return fromUrl ?? localStorage.getItem(SELECTED_KEY) ?? undefined
+  })
   const session = useSession(selectedId)
 
+  const [query, setQuery] = useState('')
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    if (window.innerWidth <= 900) return false
+    return localStorage.getItem(SIDEBAR_KEY) !== 'closed'
+  })
   const [showArchived, setShowArchived] = useState(false)
   const [showDeleted, setShowDeleted] = useState(false)
-  const [detailsOpen, setDetailsOpen] = useState(false)
-  const [approvalsOpen, setApprovalsOpen] = useState(false)
-  const [agentsOpen, setAgentsOpen] = useState(false)
+  const [rightPanel, setRightPanel] = useState<RightMode | undefined>(() => {
+    const panel = new URLSearchParams(window.location.search).get('panel')
+    return panel === 'details' || panel === 'approvals' || panel === 'agents' ? panel : undefined
+  })
   const [commandOpen, setCommandOpen] = useState(false)
   const [sending, setSending] = useState(false)
   const [actionBusy, setActionBusy] = useState(false)
@@ -80,40 +93,35 @@ function Desktop() {
     return showDeleted
   }), [showArchived, showDeleted, workspace.sessions])
 
-  const dockSessions = useMemo(() => workspace.sessions.filter(item =>
-    item.lifecycle === 'active' || item.id === selectedId), [selectedId, workspace.sessions])
-
   const sessionApprovals = useMemo(() => workspace.approvals.filter(item =>
     item.sessionId === selectedId), [selectedId, workspace.approvals])
 
   const agentsRunning = workspace.agents.filter(agent =>
     agent.status === 'running' || agent.status === 'queued').length
 
+  const notify = useCallback((kind: 'ok' | 'error', text: string) => {
+    setToast({ kind, text })
+  }, [])
+
   useEffect(() => {
     if (workspace.error) setToast({ kind: 'error', text: workspace.error })
   }, [workspace.error])
 
   useEffect(() => {
-    const onKey = (event: KeyboardEvent): void => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
-        event.preventDefault()
-        setCommandOpen(value => !value)
-        return
-      }
-      if (event.key === 'Escape') {
-        setCommandOpen(false)
-        setDetailsOpen(false)
-        setApprovalsOpen(false)
-        setAgentsOpen(false)
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
+    if (selectedId) localStorage.setItem(SELECTED_KEY, selectedId)
+    else localStorage.removeItem(SELECTED_KEY)
+  }, [selectedId])
 
-  const notify = useCallback((kind: 'ok' | 'error', text: string) => {
-    setToast({ kind, text })
-  }, [])
+  useEffect(() => {
+    localStorage.setItem(SIDEBAR_KEY, sidebarOpen ? 'open' : 'closed')
+  }, [sidebarOpen])
+
+  useEffect(() => {
+    if (workspace.loading) return
+    if (selectedId && !workspace.sessions.some(item => item.id === selectedId)) {
+      setSelectedId(undefined)
+    }
+  }, [selectedId, workspace.loading, workspace.sessions])
 
   const refreshAll = useCallback(async (): Promise<void> => {
     setActionBusy(true)
@@ -126,14 +134,9 @@ function Desktop() {
 
   const select = useCallback((id: string) => {
     setSelectedId(id)
-    setDetailsOpen(false)
+    setRightPanel(undefined)
     setCommandOpen(false)
-  }, [])
-
-  const overview = useCallback(() => {
-    setSelectedId(undefined)
-    setDetailsOpen(false)
-    setCommandOpen(false)
+    if (window.innerWidth <= 900) setSidebarOpen(false)
   }, [])
 
   const create = useCallback(async (): Promise<void> => {
@@ -142,6 +145,10 @@ function Desktop() {
       const id = await api.createSession()
       await workspace.refresh(true)
       setSelectedId(id)
+      setQuery('')
+      setRightPanel(undefined)
+      setCommandOpen(false)
+      if (window.innerWidth <= 900) setSidebarOpen(false)
       notify('ok', '已新建会话')
     } catch (reason) {
       notify('error', reason instanceof Error ? reason.message : String(reason))
@@ -149,6 +156,29 @@ function Desktop() {
       setActionBusy(false)
     }
   }, [notify, workspace])
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      const mod = event.metaKey || event.ctrlKey
+      if (mod && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setCommandOpen(value => !value)
+        return
+      }
+      if (mod && event.key.toLowerCase() === 'n') {
+        event.preventDefault()
+        void create()
+        return
+      }
+      if (event.key === 'Escape') {
+        setCommandOpen(false)
+        setRightPanel(undefined)
+        if (window.innerWidth <= 900) setSidebarOpen(false)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [create])
 
   const send = useCallback(async (text: string): Promise<void> => {
     if (!selectedId) throw new Error('没有选中会话')
@@ -174,6 +204,10 @@ function Desktop() {
       if (kind === 'archive') await api.archiveSession(id)
       else if (kind === 'unarchive') await api.unarchiveSession(id)
       else await api.deleteSession(id, force ? { force: true } : {})
+      if (kind === 'delete' && id === selectedId) {
+        setSelectedId(undefined)
+        setRightPanel(undefined)
+      }
       await Promise.all([
         workspace.refresh(true),
         id === selectedId ? session.refresh() : Promise.resolve(),
@@ -181,7 +215,7 @@ function Desktop() {
       notify('ok', kind === 'archive' ? '已归档' : kind === 'unarchive' ? '已恢复' : '已删除')
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : String(reason)
-      if (/running/i.test(message) && !force) {
+      if (/running|busy|ESESSIONBUSY/i.test(message) && !force) {
         setForceConfirm({ kind: kind === 'unarchive' ? 'archive' : kind, id })
       } else {
         notify('error', message)
@@ -217,15 +251,6 @@ function Desktop() {
     }
   }, [notify, session, workspace])
 
-  const fullscreen = useCallback(async (): Promise<void> => {
-    try {
-      if (document.fullscreenElement) await document.exitFullscreen()
-      else await document.documentElement.requestFullscreen()
-    } catch (reason) {
-      notify('error', reason instanceof Error ? reason.message : String(reason))
-    }
-  }, [notify])
-
   if (workspace.loading && workspace.sessions.length === 0) {
     return (
       <div className="boot">
@@ -235,78 +260,94 @@ function Desktop() {
     )
   }
 
+  const rightOpen = Boolean(rightPanel && (rightPanel !== 'details' || selectedSession))
+  const rightTitle = rightPanel === 'details'
+    ? '会话详情'
+    : rightPanel === 'approvals'
+      ? '待审批'
+      : '子 agent'
+  const selectedTitle = selectedSession ? sessionDisplayTitle(selectedSession) : 'In_Fate'
+
   return (
-    <div className={`desktop${selectedSession ? ' has-focus' : ''}`}>
-      <TopBar
-        sessions={workspace.sessions}
-        selected={selectedSession}
-        online={!workspace.error}
-        refreshing={workspace.refreshing || session.loading}
-        showArchived={showArchived}
-        showDeleted={showDeleted}
-        onToggleArchived={() => setShowArchived(value => !value)}
-        onToggleDeleted={() => setShowDeleted(value => !value)}
-        onCommand={() => setCommandOpen(true)}
-        onRefresh={() => void refreshAll()}
-        onFullscreen={() => void fullscreen()}
-        onOverview={overview}
-      />
-
-      <Constellation
-        sessions={visibleSessions}
-        links={workspace.links}
-        selectedId={selectedId}
-        focused={Boolean(selectedSession)}
-        onSelect={select}
-      />
-
-      {selectedSession && (
-        <FocusWindow
-          session={selectedSession}
-          inspection={session.inspection}
-          stats={session.stats}
-          turns={session.turns}
-          cache={session.cache}
-          revision={session.revision}
-          approvals={sessionApprovals}
-          loading={session.loading}
-          error={session.error}
-          sending={sending}
-          onSend={send}
-          onRefresh={() => void refreshAll()}
-          onClose={overview}
-          onDetails={() => setDetailsOpen(true)}
-          onArchive={() => void mutateLifecycle('archive', selectedSession.id)}
-          onUnarchive={() => void mutateLifecycle('unarchive', selectedSession.id)}
-          onDelete={() => setDeleteConfirm(selectedSession.id)}
-          onOpenApprovals={() => setApprovalsOpen(true)}
+    <div className={`app-shell${sidebarOpen ? ' sidebar-open' : ''}${rightOpen ? ' right-open' : ''}`}>
+      {sidebarOpen && (
+        <button
+          type="button"
+          className="sidebar-backdrop"
+          aria-label="关闭会话列表"
+          onClick={() => setSidebarOpen(false)}
         />
       )}
 
-      <Dock
-        sessions={dockSessions}
-        selectedId={selectedId}
-        approvals={workspace.approvals.length}
-        agentsRunning={agentsRunning}
-        onSelect={select}
+      {sidebarOpen && (
+        <Sidebar
+          sessions={visibleSessions}
+          links={workspace.links}
+          selectedId={selectedId}
+          approvals={workspace.approvals.length}
+          agentsRunning={agentsRunning}
+          online={!workspace.error}
+          refreshing={workspace.refreshing || session.loading}
+          showArchived={showArchived}
+          showDeleted={showDeleted}
+          query={query}
+          busy={actionBusy}
+          onQuery={setQuery}
+          onSelect={select}
+          onCreate={() => void create()}
+          onRefresh={() => void refreshAll()}
+          onToggleArchived={() => setShowArchived(value => !value)}
+          onToggleDeleted={() => setShowDeleted(value => !value)}
+          onArchive={id => void mutateLifecycle('archive', id)}
+          onUnarchive={id => void mutateLifecycle('unarchive', id)}
+          onDelete={setDeleteConfirm}
+          onApprovals={() => setRightPanel('approvals')}
+          onAgents={() => setRightPanel('agents')}
+          onCommand={() => setCommandOpen(true)}
+          onCollapse={() => setSidebarOpen(false)}
+        />
+      )}
+
+      <ChatPane
+        session={selectedSession}
+        title={selectedTitle}
+        inspection={session.inspection}
+        turns={session.turns}
+        cache={session.cache}
+        revision={session.revision}
+        approvals={sessionApprovals}
+        loading={session.loading}
+        error={session.error}
+        sending={sending}
         onCreate={() => void create()}
-        onOverview={overview}
-        onApprovals={() => setApprovalsOpen(true)}
-        onAgents={() => setAgentsOpen(true)}
-        onCommand={() => setCommandOpen(true)}
+        onSend={send}
+        onToggleSidebar={() => setSidebarOpen(value => !value)}
+        onRefresh={() => void refreshAll()}
+        onDetails={() => setRightPanel('details')}
+        onArchive={() => {
+          if (selectedSession) void mutateLifecycle('archive', selectedSession.id)
+        }}
+        onUnarchive={() => {
+          if (selectedSession) void mutateLifecycle('unarchive', selectedSession.id)
+        }}
+        onDelete={() => {
+          if (selectedSession) setDeleteConfirm(selectedSession.id)
+        }}
+        onOpenApprovals={() => setRightPanel('approvals')}
       />
 
-      <Drawer
-        open={detailsOpen && Boolean(selectedSession)}
-        title="会话详情"
-        onClose={() => setDetailsOpen(false)}
+      <RightPanel
+        open={rightOpen}
+        title={rightTitle}
+        onClose={() => setRightPanel(undefined)}
       >
-        {selectedSession && (
+        {rightPanel === 'details' && selectedSession && (
           <Inspector
             session={selectedSession}
             inspection={session.inspection}
             stats={session.stats}
             links={workspace.links}
+            sessions={workspace.sessions}
             busy={actionBusy}
             onArchive={() => void mutateLifecycle('archive', selectedSession.id)}
             onUnarchive={() => void mutateLifecycle('unarchive', selectedSession.id)}
@@ -314,19 +355,15 @@ function Desktop() {
             onCloseLink={linkId => void closeLink(linkId)}
           />
         )}
-      </Drawer>
-
-      <Drawer open={approvalsOpen} title="待审批" onClose={() => setApprovalsOpen(false)}>
-        <ApprovalsPanel
-          approvals={workspace.approvals}
-          busy={actionBusy}
-          onRespond={(id, approved) => void respondApproval(id, approved)}
-        />
-      </Drawer>
-
-      <Drawer open={agentsOpen} title="子 agent" onClose={() => setAgentsOpen(false)}>
-        <AgentsPanel agents={workspace.agents} />
-      </Drawer>
+        {rightPanel === 'approvals' && (
+          <ApprovalsPanel
+            approvals={workspace.approvals}
+            busy={actionBusy}
+            onRespond={(id, approved) => void respondApproval(id, approved)}
+          />
+        )}
+        {rightPanel === 'agents' && <AgentsPanel agents={workspace.agents} />}
+      </RightPanel>
 
       <CommandPalette
         open={commandOpen}
@@ -334,8 +371,8 @@ function Desktop() {
         onClose={() => setCommandOpen(false)}
         onSelect={select}
         onCreate={() => void create()}
-        onApprovals={() => setApprovalsOpen(true)}
-        onAgents={() => setAgentsOpen(true)}
+        onApprovals={() => setRightPanel('approvals')}
+        onAgents={() => setRightPanel('agents')}
         onToggleArchived={() => setShowArchived(value => !value)}
         onToggleDeleted={() => setShowDeleted(value => !value)}
         showArchived={showArchived}
@@ -375,6 +412,7 @@ function Desktop() {
 
       {toast && (
         <button
+          type="button"
           className={`toast ${toast.kind}`}
           onClick={() => setToast(undefined)}
           title="点击关闭"

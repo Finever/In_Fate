@@ -169,30 +169,3 @@ export function ConfirmDialog({
     </div>
   )
 }
-
-export function Drawer({
-  open,
-  title,
-  onClose,
-  children,
-}: {
-  open: boolean
-  title: string
-  onClose: () => void
-  children: ReactNode
-}) {
-  if (!open) return null
-  return (
-    <div className="drawer-backdrop" onMouseDown={event => {
-      if (event.target === event.currentTarget) onClose()
-    }}>
-      <aside className="drawer" role="dialog" aria-modal="true" aria-label={title}>
-        <header className="drawer-head">
-          <h2>{title}</h2>
-          <IconButton icon="close" label="关闭" onClick={onClose} />
-        </header>
-        <div className="drawer-body">{children}</div>
-      </aside>
-    </div>
-  )
-}

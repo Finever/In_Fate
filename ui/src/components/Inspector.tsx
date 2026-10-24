@@ -4,6 +4,7 @@ import {
   relativeTime,
   shortId,
 } from '../lib/format'
+import { sessionDisplayTitle } from '../lib/sessions'
 import type {
   SessionInfo,
   SessionInspection,
@@ -34,6 +35,7 @@ export function Inspector({
   inspection,
   stats,
   links,
+  sessions,
   busy,
   onArchive,
   onUnarchive,
@@ -44,6 +46,7 @@ export function Inspector({
   inspection: SessionInspection | undefined
   stats: UiSessionStats | undefined
   links: SessionLink[]
+  sessions: SessionInfo[]
   busy: boolean
   onArchive: () => void
   onUnarchive: () => void
@@ -51,6 +54,7 @@ export function Inspector({
   onCloseLink: (linkId: string) => void
 }) {
   const related = links.filter(link => link.from === session.id || link.to === session.id)
+  const sessionById = new Map(sessions.map(item => [item.id, item]))
   const joins = inspection?.joins ?? []
   const lifecycle = inspection?.lifecycle ?? session.lifecycle
 
@@ -121,10 +125,11 @@ export function Inspector({
         {related.length === 0 && <div className="muted-line">没有连接</div>}
         {related.map(link => {
           const other = link.from === session.id ? link.to : link.from
+          const otherSession = sessionById.get(other)
           return (
             <div key={link.linkId} className={`link-row ${link.status}`}>
               <span className={`link-relation ${link.relation}`}>{link.relation}</span>
-              <span className="link-other" title={other}>{shortId(other, 16)}</span>
+              <span className="link-other" title={other}>{otherSession ? sessionDisplayTitle(otherSession) : shortId(other, 16)}</span>
               {link.status === 'active' ? (
                 <IconButton
                   icon="close"
