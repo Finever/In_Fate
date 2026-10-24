@@ -9,7 +9,7 @@
  * @module if/core/session-writer
  */
 
-import { closeSync, mkdirSync, openSync, unlinkSync, writeFileSync } from 'node:fs'
+import { closeSync, fstatSync, mkdirSync, openSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { hostname } from 'node:os'
 import { dirname } from 'node:path'
 import type { Event, NewEvent } from './events.ts'
@@ -83,26 +83,56 @@ export class SessionWriter {
 
   append(input: NewEvent): Event {
     if (this.closedFlag) throw new IfStorageError(`writer closed: ${this.store.file}`)
+    this.assertOwnership()
     return this.store.append(input)
   }
 
   flush(): void {
     if (this.closedFlag) return
+    this.assertOwnership()
     this.store.flush()
+  }
+
+  /**
+   * 锁文件可能被外部删掉再重建。写之前核对路径上的 inode 仍是我们 open
+   * 的那一个；不是就说明所有权已经丢了，必须 fail-closed，不能继续写。
+   * 这是 DSH 在 POSIX flock 之后核对 locked inode 的同一思路。
+   */
+  private assertOwnership(): void {
+    let held: ReturnType<typeof fstatSync>
+    try {
+      held = fstatSync(this.fd)
+    } catch {
+      throw new IfStorageError(`session writer ownership lost: ${this.store.file}`)
+    }
+    const current = statSync(this.lockPath, { throwIfNoEntry: false })
+    if (!current || current.ino !== held.ino || current.dev !== held.dev) {
+      throw new IfStorageError(`session writer ownership lost: ${this.store.file}`)
+    }
   }
 
   close(): void {
     if (this.closedFlag) return
     this.closedFlag = true
+    let owned = false
+    try {
+      const held = fstatSync(this.fd)
+      const current = statSync(this.lockPath, { throwIfNoEntry: false })
+      owned = Boolean(current && current.ino === held.ino && current.dev === held.dev)
+    } catch {
+      // 查不到就当作已经不拥有，宁可留下锁文件也不误删别人的
+    }
     try {
       closeSync(this.fd)
     } catch {
       // fd 已经关了
     }
-    try {
-      unlinkSync(this.lockPath)
-    } catch {
-      // 已经不是我们的锁
+    if (owned) {
+      try {
+        unlinkSync(this.lockPath)
+      } catch {
+        // 已经不是我们的锁
+      }
     }
   }
 }

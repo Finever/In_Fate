@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -216,6 +217,91 @@ test('identity proposal 由用户接受后落文件', async () => {
     assert.equal(accepted.kind, 'identity')
     assert.match(identity.read('SOUL'), /新名字/)
     assert.equal(proposals.get(proposal.proposalId)?.status, 'accepted')
+
+    // 重复 accept 返回原结果，不再写一次。
+    const again = await proposals.accept(proposal.proposalId, ctx.store, identity)
+    assert.equal(again.kind, 'identity')
+    if (again.kind === 'identity') assert.equal(again.result.backup, accepted.kind === 'identity' ? accepted.result.backup : '')
+    assert.equal(identity.read('SOUL').match(/新名字/g)?.length, 1)
+  } finally {
+    rmSync(agentDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+    ctx.close()
+  }
+})
+
+test('identity proposal：apply 成功但状态没落盘，重试不重复追加', async () => {
+  const agentDir = mkdtempSync(join(tmpdir(), 'if-identity-recover-'))
+  const ctx = fixture()
+  try {
+    writeFileSync(join(agentDir, 'SOUL.md'), '# 未凉\n\n## 我叫什么\n\n旧名字。\n', 'utf8')
+    const { MemoryIdentityStore } = await import('../src/memory/identity.ts')
+    const identity = new MemoryIdentityStore(agentDir)
+    const proposals = new MemoryProposalStore(agentDir)
+    const patch = {
+      file: 'SOUL' as const,
+      section: '新小节',
+      content: '只应出现一次。',
+      mode: 'append' as const,
+    }
+    const proposal = proposals.proposeIdentity({
+      target: 'identity:SOUL',
+      sourceSession: 'worker',
+      identity: patch,
+      reason: '崩溃恢复测试',
+    })
+
+    // 模拟：applying 已落盘，apply 已改文件，accepted 还没写。
+    const preview = identity.preview(patch)
+    const hash = (text: string): string => createHash('sha256').update(text).digest('hex')
+    const path = join(agentDir, 'proposals', `${proposal.proposalId}.json`)
+    writeFileSync(path, `${JSON.stringify({
+      ...proposal,
+      status: 'applying',
+      beforeHash: hash(preview.before),
+      afterHash: hash(preview.after),
+      resultPath: preview.path,
+    }, null, 2)}\n`, 'utf8')
+    identity.apply(patch)
+
+    const accepted = await proposals.accept(proposal.proposalId, ctx.store, identity)
+    assert.equal(accepted.kind, 'identity')
+    assert.equal(identity.read('SOUL').match(/只应出现一次。/g)?.length, 1)
+    assert.equal(proposals.get(proposal.proposalId)?.status, 'accepted')
+  } finally {
+    rmSync(agentDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+    ctx.close()
+  }
+})
+
+test('identity proposal：applying 期间目标被外部改过就拒绝自动处理', async () => {
+  const agentDir = mkdtempSync(join(tmpdir(), 'if-identity-conflict-'))
+  const ctx = fixture()
+  try {
+    writeFileSync(join(agentDir, 'SOUL.md'), '# 未凉\n\n## 我叫什么\n\n旧名字。\n', 'utf8')
+    const { MemoryIdentityStore } = await import('../src/memory/identity.ts')
+    const identity = new MemoryIdentityStore(agentDir)
+    const proposals = new MemoryProposalStore(agentDir)
+    const patch = { file: 'SOUL' as const, section: '我叫什么', content: '新名字。' }
+    const proposal = proposals.proposeIdentity({
+      target: 'identity:SOUL',
+      sourceSession: 'worker',
+      identity: patch,
+      reason: '冲突测试',
+    })
+
+    const path = join(agentDir, 'proposals', `${proposal.proposalId}.json`)
+    writeFileSync(path, `${JSON.stringify({
+      ...proposal,
+      status: 'applying',
+      beforeHash: 'not-the-current-hash',
+      afterHash: 'also-not',
+      resultPath: join(agentDir, 'SOUL.md'),
+    }, null, 2)}\n`, 'utf8')
+
+    await assert.rejects(
+      proposals.accept(proposal.proposalId, ctx.store, identity),
+      /changed while applying/,
+    )
   } finally {
     rmSync(agentDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
     ctx.close()

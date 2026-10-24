@@ -452,3 +452,53 @@ UI 行为：
 ## 10. 一句话
 
 先把“不坏档、不越权、投影不扫全量”做稳，再谈卸载和 UI。卸载只对新数据减字节；旧数据靠段归档/fork。UI 和模型看两份投影，永远不要共用一份。
+
+---
+
+## 11. P0 续：host 锁与收件箱（2026-10-24）
+
+这一轮先读了 DSH 与 Cherry 的实际运行时，再改方案。
+
+### 11.1 DSH 的 session 写锁
+
+`session-persistence-jsonl/src/lease.ts`：
+
+- POSIX 用非阻塞 `flock(2)` 锁 `session.lock`；Windows 用按规范路径哈希命名的内核信号量，不用锁文件；
+- 锁由内核持有，进程死掉（包括崩溃）自动释放；
+- **故意不设 TTL**：活着的写者即使卡住也不能被抢锁，否则恢复写入会撕裂日志；
+- POSIX 锁定后还要核对 inode 仍是锁路径上的文件，防止 unlink/重建竞争；
+- 读句柄完全不碰锁；
+- `session-checkpoint-policy` 在每次模型请求前、每次顶层工具执行前 `flush`，失败即拒绝下游。
+
+### 11.2 Cherry 的 agent loop
+
+打包的 `agent-loop.mjs` 里：
+
+- 收件箱是持久化投影：`next-turn` / `next-step` 都是事件，不是进程内 Promise；
+- 消息在 `pre-step` 才被 claim，进程重启后未 claim 的消息还在；
+- 每个 agent 只有一个 `phase: idle | running | maintenance`，忙时只置 `wakeRequested`，不并行开轮；
+- `followup` / `steer` / `inject` 分别对应下一轮、当前轮下一步、只注入不唤醒。
+
+### 11.3 落到 IF 的改动
+
+1. **`HostLease`**（`src/core/host-lease.ts`）：一个 dataRoot 同时只允许一个 host。用 Node 24 自带的 `node:sqlite`，在 `dataRoot/locks/host.db` 上持长期 `BEGIN IMMEDIATE`；第二个 host 得到 SQLITE_BUSY 就拒绝。进程崩溃时内核释放，不设 TTL。
+2. **写者所有权校验**（`src/core/session-writer.ts`）：append/flush 前核对锁路径 inode 是否仍是自己 open 的那个；不是就 fail-closed。close 只删自己的锁，不误删新写者的锁。
+3. **收件箱恢复**（`src/session/inbox.ts`）：未读边界是 `seq > max(所有完成轮的 lastSeenSeq)`，不是“最后一次 turn.completed 之后”。消息可能在一轮进行中、模型请求投影之后落盘，位置排在 turn.completed 前面却从未被看到。首次打开会话和 `if serve` 启动时补跑，`skipStartEvent`，消息本身已在事件流里。
+4. **身份提议两阶段**（`src/memory/proposals.ts`）：先写 `applying` + 前后全文哈希，再改文件，最后写 `accepted`。崩溃后用 afterHash 认出已落盘，append 模式不重复追加；文件被外部改过则拒绝自动处理。
+5. **跨进程 workspace 租约不进 P0**：HostLease 已经保证同一 dataRoot 只有一个 host；`dataRoot/workspaces/leases.db` 在单 host 下不提供额外互斥，反而多一个要维护的真相源。等真正支持“多 host 共享同一 workspace”时，锁库必须按 workspace 定位，而不是按 dataRoot。进程内 `WorkspaceLeaseManager` 的 TTL+续租保留，用于同 host 的路径/整仓公平调度。
+
+### 11.4 验收
+
+- 同 dataRoot 第二把 host 锁被拒绝；持有者进程被 SIGKILL 后锁可再获取。
+- 锁文件被外部删掉后写者拒绝继续写，close 不误删新锁。
+- 崩溃前未处理的 wake 消息在启动恢复时只补一轮；已读消息不重复。
+- 消息落在 turn.completed 之前但晚于 lastSeenSeq 时仍会被恢复。
+- 身份提议 apply 成功但状态没落盘，重试不重复追加；applying 期间目标被外部改过则报错。
+
+| 主题 | 文件 |
+|---|---|
+| host 锁 | `src/core/host-lease.ts` |
+| 写者所有权 | `src/core/session-writer.ts` |
+| 收件箱边界 | `src/session/inbox.ts` |
+| 启动恢复 | `src/app/bundle.ts`、`src/app/cli.ts` |
+| 身份提议幂等 | `src/memory/proposals.ts`、`src/memory/identity.ts` |

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -56,6 +56,41 @@ test('同机死进程留下的写者锁可接管', () => {
 
     const writer = SessionWriter.open(store)
     writer.close()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('锁文件被外部删掉后，写者 fail-closed，且 close 不误删新锁', () => {
+  const { dir, store } = tempStore()
+  try {
+    const writer = SessionWriter.open(store)
+    writer.append({
+      stream: 'session:s',
+      actor: 'system',
+      type: 'session.created',
+      payload: { formatVersion: 2 },
+    })
+
+    unlinkSync(`${store.file}.writer.lock`)
+    assert.throws(() => writer.append({
+      stream: 'session:s',
+      actor: 'user',
+      type: 'message.user',
+      payload: { text: 'lost' },
+    }), /ownership lost/)
+    assert.throws(() => writer.flush(), /ownership lost/)
+
+    // 新写者拿到新锁；旧写者 close 不能把它删掉。
+    const next = SessionWriter.open(store)
+    writer.close()
+    next.append({
+      stream: 'session:s',
+      actor: 'user',
+      type: 'message.user',
+      payload: { text: 'still alive' },
+    })
+    next.close()
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

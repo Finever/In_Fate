@@ -26,6 +26,13 @@ export interface IdentityApplyResult {
   readonly backup: string
 }
 
+export interface IdentityPreview {
+  readonly file: IdentityFile
+  readonly path: string
+  readonly before: string
+  readonly after: string
+}
+
 const FILES: Record<IdentityFile, (agentDir: string) => string> = {
   SOUL: agentDir => join(agentDir, 'SOUL.md'),
   USER: agentDir => join(agentDir, 'USER.md'),
@@ -60,25 +67,47 @@ export class MemoryIdentityStore {
     return readFileSync(path, 'utf8')
   }
 
+  path(file: IdentityFile): string {
+    return this.pathFor(file)
+  }
+
+  /** 只计算写入后的文本，不碰文件；proposal 用它记录 before/after 指纹。 */
+  preview(patch: IdentityPatch): IdentityPreview {
+    const rendered = this.render(patch)
+    return {
+      file: patch.file,
+      path: rendered.path,
+      before: rendered.original,
+      after: rendered.next,
+    }
+  }
+
   apply(patch: IdentityPatch): IdentityApplyResult {
+    const rendered = this.render(patch)
+    mkdirSync(this.archiveDir, { recursive: true })
+    const backup = join(this.archiveDir, `${patch.file}-identity-${stamp(this.now())}.md`)
+    copyFileSync(rendered.path, backup)
+
+    const temp = `${rendered.path}.${process.pid}.tmp`
+    writeFileSync(temp, rendered.next, 'utf8')
+    renameSync(temp, rendered.path)
+    return { file: patch.file, path: rendered.path, backup }
+  }
+
+  private render(patch: IdentityPatch): { path: string; original: string; next: string } {
     assertSection(patch.section)
     if (patch.content.trim().length === 0) throw new Error('identity patch content is empty')
     const path = this.pathFor(patch.file)
     if (!existsSync(path)) throw new Error(`identity file not found: ${path}`)
     const original = readFileSync(path, 'utf8')
     const mode = patch.mode ?? 'replace-section'
-    const next = mode === 'append'
-      ? this.appendSection(original, patch.section, patch.content)
-      : this.replaceSection(original, patch.section, patch.content)
-
-    mkdirSync(this.archiveDir, { recursive: true })
-    const backup = join(this.archiveDir, `${patch.file}-identity-${stamp(this.now())}.md`)
-    copyFileSync(path, backup)
-
-    const temp = `${path}.${process.pid}.tmp`
-    writeFileSync(temp, next, 'utf8')
-    renameSync(temp, path)
-    return { file: patch.file, path, backup }
+    return {
+      path,
+      original,
+      next: mode === 'append'
+        ? this.appendSection(original, patch.section, patch.content)
+        : this.replaceSection(original, patch.section, patch.content),
+    }
   }
 
   private pathFor(file: IdentityFile): string {

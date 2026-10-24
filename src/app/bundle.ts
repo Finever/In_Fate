@@ -27,6 +27,7 @@ import { staticSection, memorySection, timeSection } from '../context/sections.t
 import type { ContextSection } from '../context/types.ts'
 import { BlobStore } from '../core/blobs.ts'
 import { FsPolicy } from '../core/fs-policy.ts'
+import { HostLease } from '../core/host-lease.ts'
 import { Metrics, type MetricsSnapshot } from '../core/metrics.ts'
 import { NetworkPolicy } from '../core/network-policy.ts'
 import { registerCoreEvents } from '../core/registry.ts'
@@ -59,6 +60,7 @@ import {
   type SessionTailOptions,
 } from './inspect.ts'
 import { SessionHost } from '../session/host.ts'
+import { pendingWakeMessages } from '../session/inbox.ts'
 import {
   SessionJoinScheduler,
   type SessionJoinInput,
@@ -173,6 +175,8 @@ export interface App {
   createSession(input?: CreateSessionInput): string
   /** 列举已有会话；扁平列表，不用父子树。 */
   sessions(): SessionInfo[]
+  /** 启动时扫一遍所有会话，补跑未处理的 wake 消息；返回有 pending 的会话数。 */
+  recoverInboxes(): number
   /** 只读事件尾部；调试用，不进模型上下文。 */
   sessionEvents(sessionId: string, options?: SessionTailOptions): SessionTail
   /** 会话当前状态、pending 工具与连接。 */
@@ -239,6 +243,20 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   const config = applyPatches(rawConfig)
   const cwd = options.cwd ?? process.cwd()
   const now = options.now ?? ((): Date => new Date())
+
+  // 一个 dataRoot 只允许一个 host。锁是内核事务，进程崩溃时自动释放；
+  // 不设 TTL，避免抢走还活着但卡死的写者。
+  const hostLeaseConfig = config.patch?.runtime?.hostLease
+  const hostLease = hostLeaseConfig?.enabled === false
+    ? undefined
+    : HostLease.acquire(config.profile.dataRoot, {
+      ...(hostLeaseConfig?.lockDir ? { lockDir: hostLeaseConfig.lockDir } : {}),
+      now,
+    })
+  if (hostLease) {
+    container.register('hostLease', hostLease)
+    container.onDispose('hostLease', () => hostLease.release())
+  }
 
   // 运行时策略：默认开；配置可以关，但关的是检查，不是事件记录。
   const metrics = config.patch?.runtime?.metrics === false ? undefined : new Metrics()
@@ -406,6 +424,8 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       repairInterruptedSession(store, writer)
       settleInterruptedApprovals(store, writer)
       joinScheduler?.restore(sessionId)
+      // 上次进程崩溃时留下的 wake 消息：它们还没进过任何完成轮。
+      if (pendingWakeMessages(store.read()).length > 0) queueInboxWake(sessionId)
     }
     return store
   }
@@ -655,6 +675,22 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     return result
   }
 
+  /**
+   * 排队补一轮，只处理还没被任何完成轮看到的 wake 消息。
+   *
+   * 用 SessionHost 排队而不是直接跑：目标正在跑时，当前轮可能已经看到这条
+   * 消息，等它结束后再检查一次，避免重复开轮。消息本身在事件流里，这一轮
+   * 用 skipStartEvent，不需要把文本再写一遍。
+   */
+  function queueInboxWake(sessionId: string): void {
+    void sessionHost.run(sessionId, async () => {
+      if (pendingWakeMessages(storeFor(sessionId).read()).length === 0) return
+      await runSessionTurn({ sessionId, text: '', priority: 'normal' }, true)
+    }).catch(() => {
+      // runTurn 自己会落 turn.completed；这里只兜底存储层异常，避免未处理拒绝。
+    })
+  }
+
   const sendSessionMessage = (input: SendSessionMessageInput): SessionMessageDelivery => {
     const kind = input.kind ?? 'note'
     const wake = input.wake ?? kind !== 'note'
@@ -695,25 +731,10 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     })
     writerFor(input.to).flush()
 
-    const messageSeq = typeof event.seq === 'number'
-      ? event.seq
-      : storeFor(input.to).read().length - 1
-    const seenByLastTurn = (): boolean => {
-      const events = storeFor(input.to).read()
-      const lastTurn = [...events].reverse().find(item => item.type === 'turn.completed')
-      const seen = lastTurn?.payload.lastSeenSeq
-      return typeof seen === 'number' && messageSeq <= seen
-    }
-
     if (wake) {
-      // 目标正在跑时也排队：当前 turn 若在后续 step 已经看到这条消息，
-      // 队列任务会直接跳过；只有它没看到，才补一轮。
-      void sessionHost.run(input.to, async () => {
-        if (seenByLastTurn()) return
-        await runSessionTurn({ sessionId: input.to, text, priority: 'normal' }, true)
-      }).catch(() => {
-        // runTurn 自己会落 turn.completed；这里只兜底存储层异常，避免未处理拒绝。
-      })
+      // 目标正在跑时也排队：当前 turn 若已看到这条消息，队列任务会直接跳过；
+      // 只有它没看到（消息落在模型请求投影之后），才补一轮。
+      queueInboxWake(input.to)
     }
 
     return { messageId, eventId: event.id, linkId: link.linkId, woke: wake }
@@ -1016,6 +1037,17 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
 
     sessions() {
       return listSessions(config.profile.dataRoot)
+    },
+
+    recoverInboxes() {
+      let pending = 0
+      for (const session of listSessions(config.profile.dataRoot)) {
+        const store = ensureSession(session.id)
+        if (pendingWakeMessages(store.read()).length === 0) continue
+        pending += 1
+        queueInboxWake(session.id)
+      }
+      return pending
     },
 
     sessionEvents(sessionId, options) {

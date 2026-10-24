@@ -26,6 +26,74 @@ function resolvedFor(port: number): ResolvedModel {
   }
 }
 
+test('工具正文执行前，tool.call 已经落盘', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'if-checkpoint-'))
+  let hits = 0
+  const server = createServer((_req, res) => {
+    hits += 1
+    res.writeHead(200, { 'content-type': 'text/event-stream' })
+    if (hits === 1) {
+      res.end(`data: ${JSON.stringify({
+        choices: [{
+          delta: {
+            tool_calls: [{
+              index: 0,
+              id: 'call-check',
+              function: { name: 'check_tool', arguments: '{}' },
+            }],
+          },
+          finish_reason: 'tool_calls',
+        }],
+      })}\n\ndata: [DONE]\n\n`)
+    } else {
+      res.end(`data: ${JSON.stringify({
+        choices: [{ delta: { content: 'done' }, finish_reason: 'stop' }],
+      })}\n\ndata: [DONE]\n\n`)
+    }
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  const port = (server.address() as AddressInfo).port
+
+  try {
+    const store = new EventStore(join(dir, 'session.jsonl'))
+    store.append({ stream: 'session:s', actor: 'system', type: 'session.created', payload: {} })
+    const tools = new ToolRegistry()
+    let observed = false
+    tools.register({
+      name: 'check_tool',
+      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      async run() {
+        observed = store.read().some(event =>
+          event.type === 'tool.call' && event.payload.callId === 'call-check')
+        return { text: 'ok' }
+      },
+    })
+
+    const result = await runTurn('go', {
+      store,
+      sessionId: 's',
+      profile: {
+        dataRoot: dir,
+        timeZone: 'Asia/Shanghai',
+        principals: { user: { id: 'user' }, agents: [{ id: 'agent' }] },
+      },
+      model: resolvedFor(port),
+      tools,
+      approvals: new InMemoryApprovalRegistry(),
+      sections: [],
+      maxSteps: 5,
+      now: () => new Date('2026-10-24T00:00:00.000Z'),
+    })
+
+    assert.equal(result.status, 'completed')
+    assert.equal(observed, true)
+  } finally {
+    server.closeAllConnections?.()
+    await new Promise<void>(resolve => server.close(() => resolve()))
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+  }
+})
+
 test('工具 waiting 会结束本轮并落 waiting 状态', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'if-waiting-'))
   let hits = 0

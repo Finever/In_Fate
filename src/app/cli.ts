@@ -476,6 +476,10 @@ export async function runCli(argv: string[]): Promise<void> {
         stdout.write(`${item.approvalId}\t${item.toolName}\t${JSON.stringify(item.input)}\n`)
       }
     } else if (command === 'serve') {
+      // 长驻 host 启动时补跑崩溃前没处理的 wake 消息；一次性命令不触发。
+      if (app.config.patch?.runtime?.sessions?.recoverInbox !== false) {
+        app.recoverInboxes()
+      }
       const handle = await startServer(app, {
         ...(typeof values.port === 'string' ? { port: numberArg(values.port) ?? 8787 } : {}),
         ...(typeof values.token === 'string' ? { token: values.token } : {}),

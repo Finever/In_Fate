@@ -47,10 +47,18 @@ export interface RuntimePatch {
   }
   /** false = 不记录进程内指标（默认 true） */
   readonly metrics?: boolean
+  /** 进程级 host 锁：一个 dataRoot 只允许一个 host，默认开 */
+  readonly hostLease?: {
+    readonly enabled?: boolean
+    /** 不配就用 `<dataRoot>/locks` */
+    readonly lockDir?: string
+  }
   /** agent 主动创建会话的配额；不配用默认值 */
   readonly sessions?: {
     readonly maxTotal?: number
     readonly maxPerCreator?: number
+    /** 启动时补跑未处理的 wake 消息；默认开 */
+    readonly recoverInbox?: boolean
   }
   readonly memory?: {
     /** 写记忆后自动 git commit；默认开，但只在 memory root 是 git 仓库时生效 */

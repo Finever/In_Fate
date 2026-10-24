@@ -89,6 +89,9 @@
           "cooldownMaxMs": 60000
         }
       },
+      "hostLease": {
+        "enabled": true
+      },
       "fs": { "enforce": true },
       "network": {
         "enforce": true,
@@ -107,7 +110,8 @@
       },
       "sessions": {
         "maxTotal": 64,
-        "maxPerCreator": 16
+        "maxPerCreator": 16,
+        "recoverInbox": true
       },
       "memory": { "autoCommit": true },
       "metrics": true

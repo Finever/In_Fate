@@ -7,13 +7,15 @@
  * @module if/memory/proposals
  */
 
+import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { IdentityApplyResult, IdentityPatch } from './identity.ts'
 import { MemoryIdentityStore } from './identity.ts'
 import type { MemoryAddInput, MemoryEntry, MemoryStore } from './store.ts'
 
-export type ProposalStatus = 'pending' | 'accepted' | 'rejected'
+/** `applying` 是身份写入的两阶段状态：先记意图，再落文件。 */
+export type ProposalStatus = 'pending' | 'applying' | 'accepted' | 'rejected'
 
 export interface MemoryProposal {
   readonly kind: 'detail' | 'identity'
@@ -30,6 +32,15 @@ export interface MemoryProposal {
   readonly resolvedAt?: string
   readonly resolvedBy?: string
   readonly resultId?: string
+  /** identity proposal：写入前后全文指纹，用于崩溃后判断是否已落盘 */
+  readonly beforeHash?: string
+  readonly afterHash?: string
+  readonly resultPath?: string
+  readonly backupPath?: string
+}
+
+function hashText(text: string): string {
+  return createHash('sha256').update(text).digest('hex')
 }
 
 export interface ProposeInput {
@@ -100,7 +111,15 @@ export class MemoryProposalStore {
         const proposal = this.normalize(
           JSON.parse(readFileSync(join(this.root, name), 'utf8')) as MemoryProposal,
         )
-        if (!status || proposal.status === status) out.push(proposal)
+        // `applying` 是未完成状态：崩溃后它需要出现在待处理列表里，
+        // 用户点 accept 会按指纹判断该补写还是已经落盘。
+        if (
+          !status
+          || proposal.status === status
+          || (status === 'pending' && proposal.status === 'applying')
+        ) {
+          out.push(proposal)
+        }
       } catch {
         // 坏 proposal 不阻塞列表
       }
@@ -121,21 +140,23 @@ export class MemoryProposalStore {
       const entry = doc.entries.find(item => item.id === proposal.resultId)
       if (entry) return { kind: 'detail', entry }
     }
-    if (proposal.status !== 'pending') throw new Error(`proposal already ${proposal.status}`)
+    if (proposal.status === 'accepted' && proposal.kind === 'identity' && proposal.identity) {
+      return {
+        kind: 'identity',
+        result: {
+          file: proposal.identity.file,
+          path: proposal.resultPath ?? (identityStore?.path(proposal.identity.file) ?? ''),
+          backup: proposal.backupPath ?? '',
+        },
+      }
+    }
 
     if (proposal.kind === 'identity') {
       if (!identityStore) throw new Error('identity memory is not configured')
       if (!proposal.identity) throw new Error('identity proposal has no patch')
-      const result = identityStore.apply(proposal.identity)
-      this.write({
-        ...proposal,
-        status: 'accepted',
-        resolvedAt: this.now().toISOString(),
-        resolvedBy,
-        resultId: `identity:${result.file}#${proposal.identity.section}`,
-      })
-      return { kind: 'identity', result }
+      return this.acceptIdentity(proposal, identityStore, resolvedBy)
     }
+    if (proposal.status !== 'pending') throw new Error(`proposal already ${proposal.status}`)
 
     if (!proposal.entry) throw new Error('detail proposal has no entry')
     const entry = await store.add(proposal.target, proposal.entry)
@@ -147,6 +168,99 @@ export class MemoryProposalStore {
       resultId: entry.id,
     })
     return { kind: 'detail', entry }
+  }
+
+  /**
+   * 身份写入的两阶段接受。
+   *
+   * 先写 `applying` + 前后指纹，再改文件，最后写 `accepted`。如果进程死在
+   * 改文件之后、写 accepted 之前，重试时用 afterHash 认出“已经落过”，不会
+   * 对 append 模式重复追加；如果文件在 applying 期间被外部改过，拒绝自动
+   * 处理，留给人判断。
+   */
+  private acceptIdentity(
+    proposal: MemoryProposal,
+    identityStore: MemoryIdentityStore,
+    resolvedBy: string,
+  ): MemoryAcceptResult {
+    const patch = proposal.identity!
+    const currentHash = (): string => hashText(identityStore.read(patch.file))
+
+    if (proposal.status === 'applying') {
+      if (proposal.afterHash && currentHash() === proposal.afterHash) {
+        return this.finishIdentity(
+          proposal,
+          proposal.resultPath ?? identityStore.path(patch.file),
+          proposal.backupPath ?? '',
+          resolvedBy,
+        )
+      }
+      if (proposal.beforeHash && currentHash() !== proposal.beforeHash) {
+        throw new Error(
+          `identity proposal ${proposal.proposalId} target changed while applying; resolve manually`,
+        )
+      }
+    } else if (proposal.status !== 'pending') {
+      throw new Error(`proposal already ${proposal.status}`)
+    }
+
+    const preview = identityStore.preview(patch)
+    const beforeHash = hashText(preview.before)
+    const afterHash = hashText(preview.after)
+    if (proposal.status === 'applying' && proposal.beforeHash && beforeHash !== proposal.beforeHash) {
+      throw new Error(
+        `identity proposal ${proposal.proposalId} target changed while applying; resolve manually`,
+      )
+    }
+
+    const applying: MemoryProposal = {
+      ...proposal,
+      status: 'applying',
+      beforeHash,
+      afterHash,
+      resultPath: preview.path,
+    }
+    this.write(applying)
+
+    let result: IdentityApplyResult
+    try {
+      result = identityStore.apply(patch)
+    } catch (error) {
+      // 上一次尝试可能已经写进去了（例如崩溃前 apply 成功、状态没落盘）。
+      if (hashText(identityStore.read(patch.file)) === afterHash) {
+        result = { file: patch.file, path: preview.path, backup: proposal.backupPath ?? '' }
+      } else {
+        throw error
+      }
+    }
+
+    return this.finishIdentity(proposal, result.path, result.backup, resolvedBy, {
+      ...applying,
+      backupPath: result.backup,
+    })
+  }
+
+  private finishIdentity(
+    proposal: MemoryProposal,
+    path: string,
+    backup: string,
+    resolvedBy: string,
+    base: MemoryProposal = proposal,
+  ): MemoryAcceptResult {
+    const patch = proposal.identity!
+    this.write({
+      ...base,
+      status: 'accepted',
+      resolvedAt: this.now().toISOString(),
+      resolvedBy,
+      resultPath: path,
+      backupPath: backup,
+      resultId: `identity:${patch.file}#${patch.section}`,
+    })
+    return {
+      kind: 'identity',
+      result: { file: patch.file, path, backup },
+    }
   }
 
   reject(proposalId: string, resolvedBy = 'user'): MemoryProposal {
