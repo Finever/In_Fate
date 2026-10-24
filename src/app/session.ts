@@ -9,6 +9,7 @@
 import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { assertSafeSessionId } from '../core/safe-path.ts'
+import type { SessionLifecycleState } from '../session/lifecycle.ts'
 
 export interface SessionOrigin {
   readonly sessionId: string
@@ -25,6 +26,8 @@ export interface SessionInfo {
   readonly createdFrom?: SessionOrigin
   readonly reason?: string
   readonly kind?: 'user' | 'agent'
+  /** 生命周期投影；没有 lifecycle 事件时是 active */
+  readonly lifecycle: SessionLifecycleState
 }
 
 export function sessionsDir(dataRoot: string): string {
@@ -101,7 +104,11 @@ function readOrigin(file: string, name: string): SessionOriginInfo {
   }
 }
 
-export function sessionInfo(dataRoot: string, sessionId: string): SessionInfo | undefined {
+export function sessionInfo(
+  dataRoot: string,
+  sessionId: string,
+  lifecycle: SessionLifecycleState = 'active',
+): SessionInfo | undefined {
   const file = sessionFile(dataRoot, sessionId)
   if (!existsSync(file)) return undefined
   const stat = statSync(file)
@@ -116,10 +123,20 @@ export function sessionInfo(dataRoot: string, sessionId: string): SessionInfo | 
     ...(origin.createdFrom ? { createdFrom: origin.createdFrom } : {}),
     ...(origin.reason ? { reason: origin.reason } : {}),
     kind: origin.kind,
+    lifecycle,
   }
 }
 
-export function listSessions(dataRoot: string): SessionInfo[] {
+export interface ListSessionsOptions {
+  /** 由生命周期投影回答；不传就全部按 active 处理。 */
+  readonly lifecycle?: (sessionId: string) => SessionLifecycleState
+  /** 默认不列归档会话 */
+  readonly includeArchived?: boolean
+  /** 默认不列软删除会话 */
+  readonly includeDeleted?: boolean
+}
+
+export function listSessions(dataRoot: string, options: ListSessionsOptions = {}): SessionInfo[] {
   const dir = sessionsDir(dataRoot)
   if (!existsSync(dir)) return []
 
@@ -136,8 +153,13 @@ export function listSessions(dataRoot: string): SessionInfo[] {
     const origin = readOrigin(file, name)
     if (name.startsWith('agent-') && !origin.createdBy) continue
 
+    const id = match[1]!
+    const lifecycle = options.lifecycle?.(id) ?? 'active'
+    if (lifecycle === 'deleted' && options.includeDeleted !== true) continue
+    if (lifecycle === 'archived' && options.includeArchived !== true) continue
+
     sessions.push({
-      id: match[1]!,
+      id,
       file,
       bytes: stat.size,
       updatedAt: stat.mtime.toISOString(),
@@ -145,6 +167,7 @@ export function listSessions(dataRoot: string): SessionInfo[] {
       ...(origin.createdFrom ? { createdFrom: origin.createdFrom } : {}),
       ...(origin.reason ? { reason: origin.reason } : {}),
       kind: origin.kind,
+      lifecycle,
     })
   }
   return sessions.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
@@ -156,12 +179,22 @@ export interface AgentRunInfo {
   readonly status: string
   readonly summary: string
   readonly updatedAt: string
+  readonly lifecycle: SessionLifecycleState
+}
+
+export interface ListAgentRunsOptions {
+  readonly lifecycle?: (sessionId: string) => SessionLifecycleState
+  readonly includeArchived?: boolean
+  readonly includeDeleted?: boolean
 }
 
 const TERMINAL = new Set(['agent.completed', 'agent.failed', 'agent.cancelled', 'agent.interrupted'])
 
 /** 从 agent 事件流读终态：磁盘是唯一的跨进程记录。 */
-export function listAgentRuns(dataRoot: string): AgentRunInfo[] {
+export function listAgentRuns(
+  dataRoot: string,
+  options: ListAgentRunsOptions = {},
+): AgentRunInfo[] {
   const dir = sessionsDir(dataRoot)
   if (!existsSync(dir)) return []
 
@@ -169,6 +202,10 @@ export function listAgentRuns(dataRoot: string): AgentRunInfo[] {
   for (const name of readdirSync(dir)) {
     if (!name.startsWith('agent-') || !name.endsWith('.jsonl')) continue
     const file = join(dir, name)
+    const id = name.slice(0, -'.jsonl'.length)
+    const lifecycle = options.lifecycle?.(id) ?? 'active'
+    if (lifecycle === 'deleted' && options.includeDeleted !== true) continue
+    if (lifecycle === 'archived' && options.includeArchived !== true) continue
     let preset = ''
     let status = 'unknown'
     let summary = ''
@@ -198,11 +235,12 @@ export function listAgentRuns(dataRoot: string): AgentRunInfo[] {
     }
 
     runs.push({
-      id: name.slice(0, -'.jsonl'.length),
+      id,
       preset,
       status,
       summary,
       updatedAt,
+      lifecycle,
     })
   }
 

@@ -86,6 +86,46 @@ test('join all：目标都完成才唤醒', () => {
   }
 })
 
+test('cancelInvolving：目标不可用时取消等待并唤醒等待方', () => {
+  const ctx = setup()
+  try {
+    ctx.running.add('a')
+    ctx.scheduler.create({ sessionId: 'w', targets: ['a'] })
+    assert.equal(ctx.scheduler.pending('w').length, 1)
+
+    assert.equal(ctx.scheduler.cancelInvolving('a', '目标会话已删除'), 1)
+    assert.equal(ctx.scheduler.pending('w').length, 0)
+    assert.deepEqual(ctx.wake, ['w'])
+
+    const events = ctx.storeFor('w').read()
+    assert.ok(events.some(event => event.type === 'session.join.cancelled'))
+    assert.ok(events.some(event =>
+      event.type === 'message.system'
+      && String(event.payload.text).includes('目标会话已删除')))
+  } finally {
+    ctx.close()
+  }
+})
+
+test('cancelInvolving：等待方自己归档/删除时静默取消，不唤醒', () => {
+  const ctx = setup()
+  try {
+    ctx.running.add('a')
+    ctx.scheduler.create({ sessionId: 'w', targets: ['a'] })
+    assert.equal(ctx.scheduler.cancelInvolving('w', '会话已归档'), 1)
+    assert.equal(ctx.scheduler.pending('w').length, 0)
+    assert.deepEqual(ctx.wake, [])
+
+    const events = ctx.storeFor('w').read()
+    assert.ok(events.some(event => event.type === 'session.join.cancelled'))
+    assert.ok(!events.some(event =>
+      event.type === 'message.system'
+      && String(event.payload.text).includes('等待已取消')))
+  } finally {
+    ctx.close()
+  }
+})
+
 test('join any / 已空闲目标立即满足', () => {
   const ctx = setup()
   try {

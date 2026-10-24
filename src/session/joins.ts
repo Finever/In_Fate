@@ -56,6 +56,8 @@ export interface JoinSchedulerDeps {
   readonly isRunning: (sessionId: string) => boolean
   /** 等待方是否有权关联目标 */
   readonly linked: (from: string, to: string) => boolean
+  /** 会话是否还能跑；归档/删除的会话不能作为等待方或目标 */
+  readonly canRun?: (sessionId: string) => boolean
   /** 唤醒等待方；由宿主负责排队和 skipStartEvent */
   readonly wake: (sessionId: string) => void
   readonly now?: () => Date
@@ -89,6 +91,14 @@ export class SessionJoinScheduler {
       .filter(target => target.length > 0)
     if (targets.length === 0) throw new Error('join needs at least one target')
     if (targets.includes(input.sessionId)) throw new Error('join cannot target itself')
+    if (this.deps.canRun) {
+      if (!this.deps.canRun(input.sessionId)) {
+        throw new Error(`join session is not active: ${input.sessionId}`)
+      }
+      for (const target of targets) {
+        if (!this.deps.canRun(target)) throw new Error(`join target is not active: ${target}`)
+      }
+    }
     for (const target of targets) {
       if (!this.deps.linked(input.sessionId, target)) {
         throw new Error(`join target is not linked: ${target}`)
@@ -156,6 +166,25 @@ export class SessionJoinScheduler {
     return count
   }
 
+  /**
+   * 会话归档/删除时取消所有涉及它的等待。
+   *
+   * - 它自己是等待方：静默取消，不唤醒一个已经不能跑的会话；
+   * - 它只是目标：取消等待方的 join，并给等待方一条 system 注入后唤醒，
+   *   否则等待方会一直停在 waiting，直到超时。
+   */
+  cancelInvolving(sessionId: string, reason?: string): number {
+    let count = 0
+    for (const record of [...this.records.values()]) {
+      if (record.status !== 'pending') continue
+      const isWaiter = record.sessionId === sessionId
+      if (!isWaiter && !record.targets.includes(sessionId)) continue
+      this.finish(record, 'cancelled', !isWaiter, isWaiter ? undefined : reason)
+      count += 1
+    }
+    return count
+  }
+
   pending(sessionId?: string): SessionJoinRecord[] {
     return [...this.records.values()].filter(record =>
       record.status === 'pending' && (!sessionId || record.sessionId === sessionId))
@@ -209,6 +238,18 @@ export class SessionJoinScheduler {
       for (const target of targets) {
         if (!this.deps.isRunning(target)) record.satisfied.add(target)
       }
+      if (this.deps.canRun && !this.deps.canRun(sessionId)) {
+        // 等待方自己已经归档/删除：静默补一条终态，不再恢复。
+        this.finish(record, 'cancelled', false)
+        continue
+      }
+      const unavailable = this.deps.canRun
+        ? targets.filter(target => !this.deps.canRun!(target))
+        : []
+      if (unavailable.length > 0) {
+        this.finish(record, 'cancelled', true, `目标会话已不可用：${unavailable.join(', ')}`)
+        continue
+      }
       this.scheduleTimeout(record)
       this.maybeComplete(record)
     }
@@ -241,6 +282,7 @@ export class SessionJoinScheduler {
     record: SessionJoinRecord,
     status: Exclude<JoinStatus, 'pending'>,
     wake = true,
+    reason?: string,
   ): void {
     if (record.status !== 'pending') return
     record.status = status
@@ -278,6 +320,17 @@ export class SessionJoinScheduler {
         type: 'message.system',
         refs: { join: record.joinId },
         payload: { text: notice, mark: 'injection' },
+      })
+      writer.flush()
+      if (wake) this.deps.wake(record.sessionId)
+    } else if (reason) {
+      // 目标被归档/删除：让等待方知道等待已结束，而不是干等到超时。
+      writer.append({
+        stream: sessionStream(record.sessionId),
+        actor: 'system',
+        type: 'message.system',
+        refs: { join: record.joinId },
+        payload: { text: `[join] 等待已取消：${reason}`, mark: 'injection' },
       })
       writer.flush()
       if (wake) this.deps.wake(record.sessionId)

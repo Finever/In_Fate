@@ -13,6 +13,7 @@ export const ENVELOPE_VERSION = 1
 /** 内置事件类型。扩展类型不在这里加。 */
 export type CoreEventType =
   | 'session.created'
+  | 'session.lifecycle'
   | 'session.link'
   | 'session.link.closed'
   | 'session.message'

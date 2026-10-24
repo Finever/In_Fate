@@ -45,12 +45,15 @@ const HELP = `IF — In_Fate
   if join <会话> <target...>        等待目标会话完成（--mode all|any --timeout ms）
   if joins [会话]                   查看未完成等待
   if cancel-joins <会话> [join-id]  取消等待
+  if archive <会话> [--reason]      归档会话（--force 运行中也允许）
+  if unarchive <会话>               恢复归档
+  if delete <会话> [--reason]       软删除（--force 运行中也允许）
   if approvals [-s 会话]            待审批队列
   if serve [--port 8787] [--token]  启动本地 UI API（仅 127.0.0.1）
   if tools                          列出工具
-  if agents                         列出子 agent
+  if agents [--all]                 列出子 agent（--all 含归档/软删除）
   if compact [-s 会话]              手动压缩
-  if sessions                       列出会话
+  if sessions [--all]               列出会话（--all 含归档/软删除）
   if config                         打印生效配置（密钥打码）
   if doctor                         自检
 
@@ -145,6 +148,8 @@ export async function runCli(argv: string[]): Promise<void> {
       config: { type: 'string', short: 'c' },
       session: { type: 'string', short: 's' },
       json: { type: 'boolean' },
+      all: { type: 'boolean' },
+      force: { type: 'boolean' },
       limit: { type: 'string' },
       before: { type: 'string' },
       after: { type: 'string' },
@@ -469,6 +474,23 @@ export async function runCli(argv: string[]): Promise<void> {
       }
       const count = app.cancelJoins(sessionId, rest[1])
       stdout.write(`cancelled ${count}\n`)
+    } else if (command === 'archive' || command === 'unarchive' || command === 'delete') {
+      const sessionId = typeof values.session === 'string' ? values.session : rest[0]
+      if (!sessionId) {
+        process.stderr.write(`${command}: 需要 <会话>\n`)
+        process.exitCode = 1
+        return
+      }
+      const input = {
+        ...(typeof values.reason === 'string' ? { reason: values.reason } : {}),
+        force: Boolean(values.force),
+      }
+      const record = command === 'archive'
+        ? app.archiveSession(sessionId, input)
+        : command === 'unarchive'
+          ? app.unarchiveSession(sessionId, input)
+          : app.deleteSession(sessionId, input)
+      stdout.write(`${record.state}\t${record.sessionId}${record.reason ? `\t${record.reason}` : ''}\n`)
     } else if (command === 'approvals') {
       const items = app.uiApprovals(typeof values.session === 'string' ? values.session : undefined)
       if (items.length === 0) stdout.write('（没有待审批）\n')
@@ -510,10 +532,14 @@ export async function runCli(argv: string[]): Promise<void> {
         stdout.write(`${tool.name}\t${tool.source}\t${tool.approval}\t${tool.enabled ? 'on' : 'off'}\n`)
       }
     } else if (command === 'agents') {
-      const items = app.agentRuns()
+      const items = app.agentRuns(values.all
+        ? { includeArchived: true, includeDeleted: true }
+        : {})
       if (items.length === 0) stdout.write('（没有子 agent）\n')
       for (const item of items) {
-        stdout.write(`${item.id} [${item.status}] ${item.preset} ${oneLine(item.summary)}\n`)
+        stdout.write(
+          `${item.id} [${item.status}] ${item.lifecycle} ${item.preset} ${oneLine(item.summary)}\n`,
+        )
       }
     } else if (command === 'compact') {
       const sessionId = typeof values.session === 'string'
@@ -526,11 +552,14 @@ export async function runCli(argv: string[]): Promise<void> {
       const payload = await app.compact(sessionId)
       stdout.write(payload ? JSON.stringify(payload, null, 2) + '\n' : '（未达到压缩阈值）\n')
     } else if (command === 'sessions') {
-      const sessions = app.sessions()
+      const sessions = app.sessions(values.all
+        ? { includeArchived: true, includeDeleted: true }
+        : {})
       if (sessions.length === 0) stdout.write('（没有会话）\n')
       for (const session of sessions) {
         stdout.write(
-          `${session.id}\t${session.bytes} bytes\t${session.updatedAt}\t${session.createdBy ?? 'user'}\n`,
+          `${session.id}\t${session.lifecycle}\t${session.bytes} bytes\t`
+          + `${session.updatedAt}\t${session.createdBy ?? 'user'}\n`,
         )
       }
     } else if (command === 'config') {

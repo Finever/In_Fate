@@ -55,6 +55,15 @@ function authorized(req: IncomingMessage, url: URL, token: string): boolean {
   return url.searchParams.get('token') === token
 }
 
+async function readOptionalJson(req: IncomingMessage): Promise<Record<string, unknown>> {
+  const text = await readBody(req)
+  if (text.trim().length === 0) return {}
+  const parsed = JSON.parse(text) as unknown
+  return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+    ? parsed as Record<string, unknown>
+    : {}
+}
+
 async function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
@@ -203,12 +212,20 @@ async function handle(app: App, req: IncomingMessage, res: ServerResponse, token
   }
 
   if (req.method === 'GET' && parts[1] === 'sessions' && parts.length === 2) {
-    json(res, 200, { sessions: app.sessions() })
+    const includeArchived = url.searchParams.get('includeArchived') === '1'
+      || url.searchParams.get('includeArchived') === 'true'
+    const includeDeleted = url.searchParams.get('includeDeleted') === '1'
+      || url.searchParams.get('includeDeleted') === 'true'
+    json(res, 200, { sessions: app.sessions({ includeArchived, includeDeleted }) })
     return
   }
 
   if (req.method === 'GET' && parts[1] === 'agents' && parts.length === 2) {
-    json(res, 200, { agents: app.agentRuns() })
+    const includeArchived = url.searchParams.get('includeArchived') === '1'
+      || url.searchParams.get('includeArchived') === 'true'
+    const includeDeleted = url.searchParams.get('includeDeleted') === '1'
+      || url.searchParams.get('includeDeleted') === 'true'
+    json(res, 200, { agents: app.agentRuns({ includeArchived, includeDeleted }) })
     return
   }
 
@@ -246,6 +263,26 @@ async function handle(app: App, req: IncomingMessage, res: ServerResponse, token
 
   const sessionId = parts[2]
   const action = parts[3]
+
+  if (
+    req.method === 'POST'
+    && (action === 'archive' || action === 'unarchive' || action === 'delete')
+    && parts.length === 4
+  ) {
+    const body = await readOptionalJson(req)
+    const input = {
+      ...(typeof body.by === 'string' ? { by: body.by } : {}),
+      ...(typeof body.reason === 'string' ? { reason: body.reason } : {}),
+      ...(body.force === true ? { force: true } : {}),
+    }
+    const record = action === 'archive'
+      ? app.archiveSession(sessionId, input)
+      : action === 'unarchive'
+        ? app.unarchiveSession(sessionId, input)
+        : app.deleteSession(sessionId, input)
+    json(res, 200, { session: record })
+    return
+  }
 
   if (req.method === 'GET' && action === 'events' && parts.length === 4) {
     const afterSeq = numberParam(url, 'afterSeq')

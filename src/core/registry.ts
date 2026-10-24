@@ -34,6 +34,7 @@ export function listEventSpecs(): readonly EventSpec[] {
 export function registerCoreEvents(): void {
   const core: CoreEventType[] = [
     'session.created',
+    'session.lifecycle',
     'session.link',
     'session.link.closed',
     'session.message',

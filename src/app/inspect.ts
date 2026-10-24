@@ -9,6 +9,7 @@
 import type { Event } from '../core/events.ts'
 import type { SessionLink } from '../graph/links.ts'
 import type { SessionJoinSnapshot } from '../session/joins.ts'
+import type { SessionLifecycleState } from '../session/lifecycle.ts'
 import type { SessionInfo } from './session.ts'
 
 export interface SessionEventView {
@@ -47,6 +48,7 @@ export interface SessionInspection {
   readonly createdFrom?: { readonly sessionId: string; readonly eventId?: string }
   readonly reason?: string
   readonly kind?: 'user' | 'agent'
+  readonly lifecycle: SessionLifecycleState
   readonly state: 'idle' | 'running' | 'waiting' | 'done' | 'unknown'
   readonly events: number
   readonly lastSeq: number
@@ -211,6 +213,7 @@ export function inspectEvents(
     ...(info?.createdFrom ? { createdFrom: info.createdFrom } : {}),
     ...(info?.reason ? { reason: info.reason } : {}),
     ...(info?.kind ? { kind: info.kind } : {}),
+    lifecycle: info?.lifecycle ?? 'active',
     state,
     events: events.length,
     lastSeq: last ? seqOf(last, events.length - 1) : -1,

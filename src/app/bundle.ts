@@ -62,6 +62,11 @@ import {
 import { SessionHost } from '../session/host.ts'
 import { pendingWakeMessages } from '../session/inbox.ts'
 import {
+  SessionLifecycle,
+  type SessionLifecycleRecord,
+  type SessionLifecycleState,
+} from '../session/lifecycle.ts'
+import {
   SessionJoinScheduler,
   type SessionJoinInput,
   type SessionJoinRecord,
@@ -144,6 +149,18 @@ export interface CreateSessionInput {
   readonly reason?: string
 }
 
+export interface SessionListOptions {
+  readonly includeArchived?: boolean
+  readonly includeDeleted?: boolean
+}
+
+export interface SessionLifecycleInput {
+  readonly by?: string
+  readonly reason?: string
+  /** 正在跑时仍允许归档/删除；不会中止当前轮，只阻止后续唤醒 */
+  readonly force?: boolean
+}
+
 export interface App {
   readonly config: AppConfig
   readonly models: ModelRegistry
@@ -173,10 +190,16 @@ export interface App {
   compact(sessionId: string): Promise<CompactionPayload | null>
   /** 新建会话 id（不落盘，首次 chat 时创建）。 */
   createSession(input?: CreateSessionInput): string
-  /** 列举已有会话；扁平列表，不用父子树。 */
-  sessions(): SessionInfo[]
+  /** 列举已有会话；扁平列表，不用父子树。默认只列 active。 */
+  sessions(options?: SessionListOptions): SessionInfo[]
   /** 启动时扫一遍所有会话，补跑未处理的 wake 消息；返回有 pending 的会话数。 */
   recoverInboxes(): number
+  /** 会话当前生命周期状态；没有记录就是 active。 */
+  sessionState(sessionId: string): SessionLifecycleState
+  archiveSession(sessionId: string, input?: SessionLifecycleInput): SessionLifecycleRecord
+  unarchiveSession(sessionId: string, input?: SessionLifecycleInput): SessionLifecycleRecord
+  /** 软删除；关闭连接、取消涉及它的等待，不删盘。 */
+  deleteSession(sessionId: string, input?: SessionLifecycleInput): SessionLifecycleRecord
   /** 只读事件尾部；调试用，不进模型上下文。 */
   sessionEvents(sessionId: string, options?: SessionTailOptions): SessionTail
   /** 会话当前状态、pending 工具与连接。 */
@@ -213,8 +236,8 @@ export interface App {
   }): AgentRequest
   agentStatus(id: string): AgentResult | 'queued' | 'running' | undefined
   agentList(limit?: number): ReturnType<AgentManagerType['list']>
-  /** 从磁盘读全部 agent 终态，跨进程可用。 */
-  agentRuns(): AgentRunInfo[]
+  /** 从磁盘读全部 agent 终态，跨进程可用；默认只列 active。 */
+  agentRuns(options?: SessionListOptions): AgentRunInfo[]
   agentInterrupt(id: string): boolean
   /** 等子 agent 到终态；超时返回仍在跑/排队的数量。 */
   waitForAgents(timeoutMs?: number): Promise<{ active: number; queued: number }>
@@ -341,6 +364,10 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   container.register('sessionGraph', sessionGraph)
   container.onDispose('sessionGraph', () => graphWriter.close())
 
+  // 生命周期和 link 共用 workspace 流；不写会话自己的日志。
+  const sessionLifecycle = new SessionLifecycle(graphStore, graphWriter)
+  container.register('sessionLifecycle', sessionLifecycle)
+
   // 同一会话同一时刻只允许一个 turn；不同会话并行。
   const sessionHost = new SessionHost()
   container.register('sessionHost', sessionHost)
@@ -396,6 +423,9 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
 
   const repaired = new Set<string>()
   const ensureSession = (sessionId: string): EventStore => {
+    if (sessionLifecycle.stateOf(sessionId) === 'deleted') {
+      throw new Error(`session is deleted: ${sessionId}`)
+    }
     const store = storeFor(sessionId)
     if (!store.hasAnyEvents()) {
       const provenance = pendingProvenance.get(sessionId)
@@ -581,6 +611,8 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     }),
     // 终态回送来源会话；正文自带分类标记，模型能认出这不是用户说的。
     deliver: (result, request) => {
+      // 来源会话已归档/删除：不再往它里面写回送消息，结果留在 agent 流里。
+      if (!sessionLifecycle.canMessage(request.source.session)) return
       const writer = writerFor(request.source.session)
       const lines = [
         `子 agent 结束：${result.id}`,
@@ -635,6 +667,9 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   let disposed = false
 
   const runSessionTurn = async (input: ChatOptions, skipStartEvent = false): Promise<RunResult> => {
+    if (!sessionLifecycle.canRun(input.sessionId)) {
+      throw new Error(`session is not active: ${input.sessionId} (${sessionLifecycle.stateOf(input.sessionId)})`)
+    }
     const store = ensureSession(input.sessionId)
     const writer = writerFor(input.sessionId)
     const result = await runTurn(input.text, {
@@ -683,7 +718,9 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
    * 用 skipStartEvent，不需要把文本再写一遍。
    */
   function queueInboxWake(sessionId: string): void {
+    if (!sessionLifecycle.canRun(sessionId)) return
     void sessionHost.run(sessionId, async () => {
+      if (!sessionLifecycle.canRun(sessionId)) return
       if (pendingWakeMessages(storeFor(sessionId).read()).length === 0) return
       await runSessionTurn({ sessionId, text: '', priority: 'normal' }, true)
     }).catch(() => {
@@ -692,6 +729,12 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   }
 
   const sendSessionMessage = (input: SendSessionMessageInput): SessionMessageDelivery => {
+    if (!sessionLifecycle.canMessage(input.from)) {
+      throw new Error(`source session is not active: ${input.from}`)
+    }
+    if (!sessionLifecycle.canMessage(input.to)) {
+      throw new Error(`target session is not active: ${input.to}`)
+    }
     const kind = input.kind ?? 'note'
     const wake = input.wake ?? kind !== 'note'
     const link = input.linkId
@@ -747,10 +790,16 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   }): SpawnedSession => {
     const text = input.text.trim()
     if (text.length === 0) throw new Error('spawn text is empty')
+    if (!sessionLifecycle.canRun(input.creator)) {
+      throw new Error(`creator session is not active: ${input.creator}`)
+    }
     const limits = config.patch?.runtime?.sessions
     const maxTotal = limits?.maxTotal ?? 64
     const maxPerCreator = limits?.maxPerCreator ?? 16
-    const sessions = listSessions(config.profile.dataRoot)
+    const sessions = listSessions(config.profile.dataRoot, {
+      lifecycle: id => sessionLifecycle.stateOf(id),
+      includeArchived: true,
+    })
     if (sessions.length >= maxTotal) {
       throw new Error(`session quota exceeded: ${sessions.length}/${maxTotal}`)
     }
@@ -788,15 +837,18 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     storeFor,
     writerFor,
     isRunning: id => {
+      if (!sessionLifecycle.canRun(id)) return false
       const state = inspectEvents(
         id,
         storeFor(id).read(),
-        sessionInfo(config.profile.dataRoot, id),
+        sessionInfo(config.profile.dataRoot, id, sessionLifecycle.stateOf(id)),
       ).state
       return state === 'running' || state === 'waiting'
     },
     linked: (from, to) => sessionGraph.canRead(from, to) || sessionGraph.canMessage(from, to),
+    canRun: id => sessionLifecycle.canRun(id),
     wake: id => {
+      if (!sessionLifecycle.canRun(id)) return
       void sessionHost.run(id, () => runSessionTurn({ sessionId: id, text: '', priority: 'normal' }, true))
         .catch(() => {
           // runTurn 自己会落 turn.completed；这里只兜底存储层异常。
@@ -809,6 +861,61 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   tools.register(createSessionJoinTool({ joins: joinScheduler }), 'builtin')
   tools.register(createSessionCreateTool({ spawn: spawnSession }), 'builtin')
   tools.register(createSessionMessageTool({ send: sendSessionMessage }), 'builtin')
+
+  const requireSession = (sessionId: string): SessionInfo => {
+    const info = sessionInfo(
+      config.profile.dataRoot,
+      sessionId,
+      sessionLifecycle.stateOf(sessionId),
+    )
+    if (!info) throw new Error(`session not found: ${sessionId}`)
+    return info
+  }
+
+  const archiveSession = (
+    sessionId: string,
+    input: SessionLifecycleInput = {},
+  ): SessionLifecycleRecord => {
+    const current = sessionLifecycle.stateOf(sessionId)
+    if (current === 'deleted') throw new Error(`session is deleted: ${sessionId}`)
+    requireSession(sessionId)
+    if (current === 'archived') return sessionLifecycle.recordOf(sessionId)!
+    if (sessionHost.isActive(sessionId) && input.force !== true) {
+      throw new Error(`session is running: ${sessionId}; wait for the turn to finish or pass force`)
+    }
+    const record = sessionLifecycle.archive(sessionId, input.by ?? 'user', input.reason)
+    // 归档后不再有新的完成轮，涉及它的等待不该继续空等。
+    joinScheduler?.cancelInvolving(sessionId, `会话已归档：${sessionId}`)
+    return record
+  }
+
+  const unarchiveSession = (
+    sessionId: string,
+    input: SessionLifecycleInput = {},
+  ): SessionLifecycleRecord => {
+    requireSession(sessionId)
+    return sessionLifecycle.unarchive(sessionId, input.by ?? 'user', input.reason)
+  }
+
+  const deleteSession = (
+    sessionId: string,
+    input: SessionLifecycleInput = {},
+  ): SessionLifecycleRecord => {
+    const current = sessionLifecycle.stateOf(sessionId)
+    if (current === 'deleted') return sessionLifecycle.recordOf(sessionId)!
+    requireSession(sessionId)
+    if (sessionHost.isActive(sessionId) && input.force !== true) {
+      throw new Error(`session is running: ${sessionId}; wait for the turn to finish or pass force`)
+    }
+    const by = input.by ?? 'user'
+    // 先落终态，后续清理即使失败也不会让会话重新可写。
+    const record = sessionLifecycle.delete(sessionId, by, input.reason)
+    for (const link of sessionGraph.links(sessionId, { includeClosed: false })) {
+      sessionGraph.close(link.linkId, by, `session deleted: ${sessionId}`)
+    }
+    joinScheduler?.cancelInvolving(sessionId, `会话已删除：${sessionId}`)
+    return record
+  }
 
   const app: App = {
     config,
@@ -1035,13 +1142,19 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       return sessionId
     },
 
-    sessions() {
-      return listSessions(config.profile.dataRoot)
+    sessions(options = {}) {
+      return listSessions(config.profile.dataRoot, {
+        lifecycle: id => sessionLifecycle.stateOf(id),
+        includeArchived: options.includeArchived ?? false,
+        includeDeleted: options.includeDeleted ?? false,
+      })
     },
 
     recoverInboxes() {
       let pending = 0
-      for (const session of listSessions(config.profile.dataRoot)) {
+      for (const session of listSessions(config.profile.dataRoot, {
+        lifecycle: id => sessionLifecycle.stateOf(id),
+      })) {
         const store = ensureSession(session.id)
         if (pendingWakeMessages(store.read()).length === 0) continue
         pending += 1
@@ -1050,13 +1163,25 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       return pending
     },
 
+    sessionState(sessionId) {
+      return sessionLifecycle.stateOf(sessionId)
+    },
+    archiveSession,
+    unarchiveSession,
+    deleteSession,
+
     sessionEvents(sessionId, options) {
       return tailSession(sessionId, storeFor(sessionId).read(), options)
     },
 
     inspectSession(sessionId) {
-      joinScheduler?.restore(sessionId)
-      const info = sessionInfo(config.profile.dataRoot, sessionId)
+      // 归档/删除的会话不再恢复等待，inspect 本身保持只读。
+      if (sessionLifecycle.canRun(sessionId)) joinScheduler?.restore(sessionId)
+      const info = sessionInfo(
+        config.profile.dataRoot,
+        sessionId,
+        sessionLifecycle.stateOf(sessionId),
+      )
       return {
         ...inspectEvents(sessionId, storeFor(sessionId).read(), info),
         links: sessionGraph.links(sessionId, { includeClosed: false }),
@@ -1083,6 +1208,9 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     spawnSession,
 
     async wake(sessionId, text) {
+      if (!sessionLifecycle.canRun(sessionId)) {
+        throw new Error(`session is not active: ${sessionId} (${sessionLifecycle.stateOf(sessionId)})`)
+      }
       ensureSession(sessionId)
       if (text && text.trim().length > 0) {
         writerFor(sessionId).append({
@@ -1100,6 +1228,9 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     },
 
     join(input) {
+      if (!sessionLifecycle.canRun(input.sessionId)) {
+        throw new Error(`join session is not active: ${input.sessionId}`)
+      }
       ensureSession(input.sessionId)
       return joinScheduler!.create(input)
     },
@@ -1137,8 +1268,12 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       return agents.list(limit)
     },
 
-    agentRuns() {
-      return listAgentRuns(config.profile.dataRoot)
+    agentRuns(options = {}) {
+      return listAgentRuns(config.profile.dataRoot, {
+        lifecycle: id => sessionLifecycle.stateOf(id),
+        includeArchived: options.includeArchived ?? false,
+        includeDeleted: options.includeDeleted ?? false,
+      })
     },
 
     agentInterrupt(id) {

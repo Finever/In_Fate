@@ -502,3 +502,39 @@ UI 行为：
 | 收件箱边界 | `src/session/inbox.ts` |
 | 启动恢复 | `src/app/bundle.ts`、`src/app/cli.ts` |
 | 身份提议幂等 | `src/memory/proposals.ts`、`src/memory/identity.ts` |
+
+---
+
+## 12. 会话生命周期（2026-10-24）
+
+### 12.1 状态
+
+- `active`：默认；可运行、可收消息、出现在列表里。
+- `archived`：从默认列表隐藏；不能唤醒/收消息；历史仍可读。可 `unarchive` 回到 active。
+- `deleted`：软删除终态；隐藏、不可再运行/收消息；历史文件保留，UI/审计仍可按 id 查看。不可 unarchive。
+
+事件是 `session.lifecycle`，写在 `workspace:default` 流，和 `session.link` 共用同一个真相源；不修改会话自己的 append-only 日志。没有 lifecycle 事件的会话默认 active。
+
+### 12.2 行为
+
+- `listSessions` / `agentRuns` 默认只列 active；`includeArchived` / `includeDeleted` 显式打开。
+- `sendMessage` 的 from/to 都必须是 active；`spawnSession` 的 creator 必须是 active。
+- `runSessionTurn`、`queueInboxWake`、join 的 `wake` 都先检查 `canRun`。
+- 归档/删除正在跑的会话默认拒绝；`force` 只挡后续唤醒，不中止当前轮。当前轮可以收尾，但不能再创建/派发新工作。
+- 删除时先落 `deleted` 终态，再关闭涉及它的 active link，并取消所有涉及它的 pending join。顺序保证后续清理失败也不会让会话重新可写。
+- 如果被删/归档的会话是 join 的目标，等待方会收到一条 `[join] 等待已取消：...` 系统注入并被唤醒；如果它就是等待方，静默取消，不唤醒一个已经不能跑的会话。
+- 子 agent 的终态回送先查来源会话是否还能收消息；归档/删除后结果只留在 agent 流里。
+- `delete` 是软删除，不删盘。硬删除/purge 需要单独的显式命令，等 UI 和审计需求明确后再做。
+
+### 12.3 接口
+
+- App：`sessionState`、`archiveSession`、`unarchiveSession`、`deleteSession`、`sessions({includeArchived,includeDeleted})`、`agentRuns({...})`。
+- CLI：`archive` / `unarchive` / `delete`（`--reason`、`--force`）；`sessions --all`、`agents --all`。
+- HTTP：`POST /api/sessions/:id/archive|unarchive|delete`；`GET /api/sessions?includeArchived=1&includeDeleted=1`；`GET /api/agents?includeArchived=1&includeDeleted=1`。
+
+### 12.4 验收
+
+- 归档后默认列表隐藏、恢复后重新出现。
+- 删除后默认列表隐藏，link 关闭，等待被取消；直接 chat 被拒绝。
+- 正在跑时归档/删除默认报错；`force` 下当前轮能收尾，之后不再唤醒。
+- 旧 agent 流的终态列表也认生命周期。
