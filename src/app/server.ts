@@ -10,6 +10,7 @@
 import { randomBytes } from 'node:crypto'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
+import type { MemoryRole } from '../memory/access.ts'
 import type { App } from './bundle.ts'
 
 export interface ServeOptions {
@@ -107,6 +108,53 @@ async function handle(app: App, req: IncomingMessage, res: ServerResponse, token
 
   if (req.method === 'GET' && parts[1] === 'metrics' && parts.length === 2) {
     json(res, 200, app.metrics())
+    return
+  }
+
+  if (req.method === 'GET' && parts[1] === 'memory' && parts[2] === 'role') {
+    const sessionId = url.searchParams.get('sessionId')
+    if (!sessionId) {
+      json(res, 400, { error: 'sessionId is required' })
+      return
+    }
+    json(res, 200, { sessionId, role: app.memoryRole(sessionId) ?? null })
+    return
+  }
+
+  if (req.method === 'POST' && parts[1] === 'memory' && parts[2] === 'grant' && parts.length === 3) {
+    const body = JSON.parse(await readBody(req)) as { sessionId?: unknown; role?: unknown }
+    if (typeof body.sessionId !== 'string' || typeof body.role !== 'string') {
+      json(res, 400, { error: 'sessionId and role are required' })
+      return
+    }
+    const role = app.grantMemory(body.sessionId, body.role as MemoryRole)
+    json(res, 200, { sessionId: body.sessionId, role })
+    return
+  }
+
+  if (req.method === 'GET' && parts[1] === 'memory' && parts[2] === 'proposals' && parts.length === 3) {
+    const status = url.searchParams.get('status')
+    json(res, 200, {
+      proposals: app.memoryProposals(
+        status === 'all' ? undefined : (status === 'accepted' || status === 'rejected'
+          ? status
+          : 'pending'),
+      ),
+    })
+    return
+  }
+
+  if (req.method === 'POST' && parts[1] === 'memory' && parts[2] === 'proposals'
+    && parts[3] && parts[4] === 'accept' && parts.length === 5) {
+    const entry = await app.acceptMemoryProposal(parts[3])
+    json(res, 200, { entry })
+    return
+  }
+
+  if (req.method === 'POST' && parts[1] === 'memory' && parts[2] === 'proposals'
+    && parts[3] && parts[4] === 'reject' && parts.length === 5) {
+    const proposal = app.rejectMemoryProposal(parts[3])
+    json(res, 200, { proposal })
     return
   }
 

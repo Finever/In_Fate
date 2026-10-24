@@ -15,6 +15,7 @@ import type { ModelEvent } from '../model/types.ts'
 import type { ChatMessage } from '../projections/history.ts'
 import type { UiTimelineItem } from '../ui/timeline.ts'
 import type { PendingApproval } from '../tools/types.ts'
+import type { MemoryRole } from '../memory/access.ts'
 import { bootstrap, classifyError } from './bootstrap.ts'
 import type { App } from './bundle.ts'
 import { startServer } from './server.ts'
@@ -31,6 +32,11 @@ const HELP = `IF — In_Fate
   if payload <ref|事件id> [-s 会话] 取全文切片（--offset / --limit）
   if stats [会话]                   会话统计
   if metrics                        进程内指标
+  if memory-role <会话>              查看记忆角色
+  if memory-grant <会话> <角色>      授予记忆角色（steward|worker|observer|private）
+  if memory-proposals               查看待处理记忆提议
+  if memory-accept <proposal-id>    接受记忆提议
+  if memory-reject <proposal-id>    拒绝记忆提议
   if links [会话]                   查看会话连接
   if link <from> <to>               建立连接（--relation peer|handoff|reference）
   if unlink <link-id>               关闭连接
@@ -295,6 +301,51 @@ export async function runCli(argv: string[]): Promise<void> {
           + `${stats.compacted} 次压缩\t${stats.fileBytes} bytes\t${stats.segments} 段\n`)
     } else if (command === 'metrics') {
       stdout.write(JSON.stringify(app.metrics(), null, 2) + '\n')
+    } else if (command === 'memory-role') {
+      const sessionId = rest[0] ?? (typeof values.session === 'string' ? values.session : undefined)
+      if (!sessionId) {
+        process.stderr.write('memory-role: 需要 <会话>\n')
+        process.exitCode = 1
+        return
+      }
+      stdout.write(`${app.memoryRole(sessionId) ?? 'unavailable'}\n`)
+    } else if (command === 'memory-grant') {
+      const sessionId = rest[0]
+      const role = rest[1]
+      if (!sessionId || !role) {
+        process.stderr.write('memory-grant: 需要 <会话> <角色>\n')
+        process.exitCode = 1
+        return
+      }
+      stdout.write(`${app.grantMemory(sessionId, role as MemoryRole)}\n`)
+    } else if (command === 'memory-proposals') {
+      const proposals = app.memoryProposals(values.json ? undefined : 'pending')
+      if (values.json) {
+        stdout.write(JSON.stringify({ proposals }, null, 2) + '\n')
+        return
+      }
+      if (proposals.length === 0) stdout.write('（没有待处理记忆提议）\n')
+      for (const proposal of proposals) {
+        stdout.write(`${proposal.proposalId}\t${proposal.target}\t${proposal.sourceSession}\t${proposal.reason ?? ''}\n`)
+      }
+    } else if (command === 'memory-accept') {
+      const proposalId = rest[0]
+      if (!proposalId) {
+        process.stderr.write('memory-accept: 需要 <proposal-id>\n')
+        process.exitCode = 1
+        return
+      }
+      const entry = await app.acceptMemoryProposal(proposalId)
+      stdout.write(`accepted ${entry.id}\n`)
+    } else if (command === 'memory-reject') {
+      const proposalId = rest[0]
+      if (!proposalId) {
+        process.stderr.write('memory-reject: 需要 <proposal-id>\n')
+        process.exitCode = 1
+        return
+      }
+      const proposal = app.rejectMemoryProposal(proposalId)
+      stdout.write(`rejected ${proposal.proposalId}\n`)
     } else if (command === 'links') {
       const sessionId = typeof values.session === 'string' ? values.session : (rest[0] ?? undefined)
       const links = app.links(sessionId)
