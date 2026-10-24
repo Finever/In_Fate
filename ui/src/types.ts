@@ -1,3 +1,112 @@
+export type SessionLifecycle = 'active' | 'archived' | 'deleted'
+export type SessionState = 'idle' | 'running' | 'waiting' | 'done' | 'unknown'
+
+export interface SessionCreatedFrom {
+  sessionId: string
+  eventId?: string
+}
+
+export interface SessionInfo {
+  id: string
+  file: string
+  bytes: number
+  updatedAt: string
+  createdBy?: string
+  createdFrom?: SessionCreatedFrom
+  reason?: string
+  kind?: 'user' | 'agent'
+  lifecycle: SessionLifecycle
+  state?: SessionState
+  lastActivity?: string
+}
+
+export interface AgentRunInfo {
+  id: string
+  preset: string
+  status: string
+  summary: string
+  updatedAt: string
+  lifecycle: SessionLifecycle
+}
+
+export type LinkRelation = 'peer' | 'handoff' | 'reference'
+
+export interface LinkSidePermissions {
+  read: boolean
+  message: boolean
+}
+
+export interface LinkPermissions {
+  from: LinkSidePermissions
+  to: LinkSidePermissions
+}
+
+export interface SessionLink {
+  linkId: string
+  from: string
+  to: string
+  relation: LinkRelation
+  permissions: LinkPermissions
+  snapshotSeq?: number
+  createdBy: string
+  createdAt: string
+  reason?: string
+  status: 'active' | 'closed'
+  closedAt?: string
+  closedBy?: string
+  closeReason?: string
+}
+
+export interface SessionJoinSnapshot {
+  joinId: string
+  sessionId: string
+  targets: string[]
+  mode: 'all' | 'any'
+  timeoutMs: number
+  createdAt: string
+  status: 'pending' | 'done' | 'timeout' | 'cancelled'
+  satisfied: string[]
+}
+
+export interface PendingToolCall {
+  callId: string
+  name: string
+}
+
+export interface SessionInspection {
+  sessionId: string
+  createdBy?: string
+  createdFrom?: SessionCreatedFrom
+  reason?: string
+  kind?: 'user' | 'agent'
+  lifecycle: SessionLifecycle
+  state: SessionState
+  events: number
+  lastSeq: number
+  lastType?: string
+  lastTs?: string
+  lastTurnSeq?: number
+  pendingToolCalls: PendingToolCall[]
+  links?: SessionLink[]
+  joins?: SessionJoinSnapshot[]
+}
+
+export interface SessionLifecycleRecord {
+  sessionId: string
+  state: SessionLifecycle
+  updatedAt: string
+  updatedBy: string
+  reason?: string
+}
+
+export interface UiApproval {
+  approvalId: string
+  sessionId: string
+  toolCallId: string
+  toolName: string
+  input: Record<string, unknown>
+}
+
 export interface UiContent {
   preview: string
   bytes: number
@@ -47,18 +156,6 @@ export interface UiTimelineItem {
   }
 }
 
-export interface UiTimelinePage {
-  sessionId: string
-  items: UiTimelineItem[]
-  turns: number
-  hasMoreBefore: boolean
-  hasMoreAfter: boolean
-  nextBefore?: number
-  nextAfter?: number
-  asOfSeq?: number
-  generation?: number
-}
-
 export interface UiTurnMeta {
   turn: number
   startSeq: number
@@ -78,14 +175,6 @@ export interface UiSessionStats {
   segments: number
 }
 
-export interface UiApproval {
-  approvalId: string
-  sessionId: string
-  toolCallId: string
-  toolName: string
-  input: Record<string, unknown>
-}
-
 export interface UiPayloadSlice {
   data: string
   offset: number
@@ -94,21 +183,6 @@ export interface UiPayloadSlice {
   bytes: number
   mime?: string
   encoding?: string
-}
-
-export interface SessionInfo {
-  id: string
-  file: string
-  bytes: number
-  updatedAt: string
-}
-
-export interface AgentRunInfo {
-  id: string
-  preset: string
-  status: string
-  summary: string
-  updatedAt: string
 }
 
 export interface TurnResponse {
