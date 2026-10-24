@@ -1,5 +1,5 @@
 /**
- * 身份记忆（SOUL / USER / FACT）的受控写入。
+ * 旧身份记忆（SOUL / USER / FACT）的受控写入；新 agent 用 manifest 槽位。
  *
  * 只接受“替换某个二级标题的内容”或“追加一个新二级标题”；
  * 不接受整文件覆盖。每次写入前先备份到 memory/_archive。
@@ -9,6 +9,7 @@
 
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { appendIdentitySection, assertIdentitySection, replaceIdentitySection } from './identity-sections.ts'
 
 export type IdentityFile = 'SOUL' | 'USER' | 'FACT'
 export type IdentityPatchMode = 'replace-section' | 'append'
@@ -33,6 +34,14 @@ export interface IdentityPreview {
   readonly after: string
 }
 
+/** 旧文件存储和新 manifest 槽位存储共用的接口。 */
+export interface IdentityStoreLike {
+  read(file: IdentityFile): string
+  path(file: IdentityFile): string
+  preview(patch: IdentityPatch): IdentityPreview
+  apply(patch: IdentityPatch): IdentityApplyResult | Promise<IdentityApplyResult>
+}
+
 const FILES: Record<IdentityFile, (agentDir: string) => string> = {
   SOUL: agentDir => join(agentDir, 'SOUL.md'),
   USER: agentDir => join(agentDir, 'USER.md'),
@@ -50,7 +59,7 @@ function assertSection(section: string): void {
   }
 }
 
-export class MemoryIdentityStore {
+export class MemoryIdentityStore implements IdentityStoreLike {
   readonly agentDir: string
   readonly archiveDir: string
   private readonly now: () => Date
@@ -95,7 +104,7 @@ export class MemoryIdentityStore {
   }
 
   private render(patch: IdentityPatch): { path: string; original: string; next: string } {
-    assertSection(patch.section)
+    assertIdentitySection(patch.section)
     if (patch.content.trim().length === 0) throw new Error('identity patch content is empty')
     const path = this.pathFor(patch.file)
     if (!existsSync(path)) throw new Error(`identity file not found: ${path}`)
@@ -105,8 +114,8 @@ export class MemoryIdentityStore {
       path,
       original,
       next: mode === 'append'
-        ? this.appendSection(original, patch.section, patch.content)
-        : this.replaceSection(original, patch.section, patch.content),
+        ? appendIdentitySection(original, patch.section, patch.content)
+        : replaceIdentitySection(original, patch.section, patch.content),
     }
   }
 
@@ -114,32 +123,5 @@ export class MemoryIdentityStore {
     const resolvePath = FILES[file]
     if (!resolvePath) throw new Error(`unknown identity file: ${file}`)
     return resolvePath(this.agentDir)
-  }
-
-  private replaceSection(text: string, section: string, content: string): string {
-    const lines = text.split('\n')
-    const heading = `## ${section}`
-    const start = lines.findIndex(line => line.trim() === heading)
-    if (start < 0) throw new Error(`identity section not found: ${section}`)
-
-    let end = lines.length
-    for (let index = start + 1; index < lines.length; index += 1) {
-      if (/^#{1,6}\s+/.test(lines[index]!)) {
-        end = index
-        break
-      }
-    }
-
-    const body = content.split('\n')
-    const before = lines.slice(0, start + 1)
-    const after = lines.slice(end)
-    return [...before, '', ...body, '', ...after].join('\n').replace(/\n{3,}/g, '\n\n')
-  }
-
-  private appendSection(text: string, section: string, content: string): string {
-    if (text.split('\n').some(line => line.trim() === `## ${section}`)) {
-      throw new Error(`identity section already exists: ${section}`)
-    }
-    return `${text.trimEnd()}\n\n## ${section}\n\n${content.trim()}\n`
   }
 }

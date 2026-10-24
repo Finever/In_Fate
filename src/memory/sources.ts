@@ -1,15 +1,16 @@
 /**
  * 记忆源：文件到角色的映射。
  *
- * SOUL / USER / FACT 只是当前的名字，不是系统的假设。换名字改配置，
- * 不改代码。读不到的文件跳过（Cherry 的规则：一个文件缺失不阻断整轮）。
+ * 有 agent manifest 时按槽位读；没有时回退 SOUL / USER / FACT。
+ * 读不到的文件跳过（一个文件缺失不阻断整轮）。
  *
  * @module if/memory/sources
  */
 
 import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { AgentManifestStore, type AgentManifest } from './agent-manifest.ts'
 
 export type SourceLayer = 'stable' | 'dynamic' | 'ephemeral'
 
@@ -42,6 +43,45 @@ export function defaultSources(agentDir: string): MemorySource[] {
     { id: 'user', path: join(agentDir, 'USER.md'), role: 'user', layer: 'stable', priority: 90 },
     { id: 'fact', path: join(agentDir, 'memory', 'FACT.md'), role: 'fact', layer: 'stable', priority: 80 },
   ]
+}
+
+/** 从 manifest 的槽位生成身份源；槽位顺序即上下文优先级。 */
+export function identitySources(
+  manifest: AgentManifest,
+  store: AgentManifestStore,
+): MemorySource[] {
+  return [...manifest.identity]
+    .sort((a, b) => b.order - a.order)
+    .map(slot => ({
+      id: slot.id,
+      path: store.slotPath(manifest.id, slot),
+      role: slot.role ?? 'identity',
+      layer: slot.layer ?? 'stable',
+      priority: slot.priority ?? slot.order,
+    }))
+}
+
+/**
+ * 有 agent manifest 就从槽位读；没有就回退旧的 SOUL/USER/FACT。
+ * manifest 坏掉时回退而不是阻断整轮——身份缺失不该让会话起不来。
+ */
+export function loadIdentitySources(
+  agentDir: string,
+  memoryRoot: string | undefined,
+  agentId = 'main',
+): MemorySource[] {
+  if (!memoryRoot) return defaultSources(agentDir)
+  try {
+    const store = new AgentManifestStore(memoryRoot)
+    const manifest = store.read(agentId)
+    if (manifest) {
+      const sources = identitySources(manifest, store)
+      if (sources.some(source => existsSync(source.path))) return sources
+    }
+  } catch {
+    // 坏 manifest：回退到旧路径，保证会话仍能加载
+  }
+  return defaultSources(agentDir)
 }
 
 /** 从 JSON 读配置；路径里可用 {agentDir} 占位。 */

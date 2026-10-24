@@ -13,7 +13,8 @@
     "desktop": "npm --prefix desktop start",
     "desktop:smoke": "npm --prefix desktop run smoke",
     "desktop:shortcut": "node desktop/install-shortcut.mjs",
-    "desktop:shortcut:remove": "node desktop/install-shortcut.mjs --remove"
+    "desktop:shortcut:remove": "node desktop/install-shortcut.mjs --remove",
+    "memory:migrate-identity": "node bin/migrate-identity.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

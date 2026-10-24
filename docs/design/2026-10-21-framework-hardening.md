@@ -679,3 +679,77 @@ Electron 壳只做生命周期，不碰 UI 和窗口管理：
 - 星图组件 `Constellation`、`Dock`、`FocusWindow`、`TopBar` 与 `lib/constellation.ts` 已删除；git 历史保留。
 
 未做：会话重命名/置顶、全文消息搜索、插件窗口、终端/文件管理器/浏览器嵌入。
+
+---
+
+## 18. Agent 记忆 manifest 骨架（2026-10-25）
+
+这一轮只做记忆结构，不动 UI，也不迁移真实文件。
+
+### 18.1 结构
+
+```text
+memory/
+  detail/                     # 共享 detail，保持现有 git 仓库
+  agents/
+    <agentId>/
+      agent.json              # manifest
+      identity/<file>.md      # 身份槽位；slot id 稳定，label/file 可配
+      _archive/               # 身份写入前的备份
+```
+
+manifest：
+
+```json
+{
+  "version": 1,
+  "id": "main",
+  "name": "未凉",
+  "identity": [
+    { "id": "self", "label": "本心", "file": "self.md", "order": 100, "role": "identity" },
+    { "id": "user", "label": "所爱", "file": "user.md", "order": 90, "role": "user" },
+    { "id": "context", "label": "当口", "file": "context.md", "order": 80, "role": "fact" }
+  ]
+}
+```
+
+- `id` 稳定，UI 不直接改；`label` 是显示名；`file` 是 identity 目录里的文件名。
+- 校验拒绝越界文件、重复 slot/file、空 label、非法 slot id。
+- 默认槽位是 `self/user/context`；旧 SOUL/USER/FACT 不再是系统假设。
+
+### 18.2 加载
+
+- `loadIdentitySources(agentDir, memoryRoot, agentId)`：有 manifest 且至少一个槽位文件存在，就从槽位生成 `MemorySource[]`；否则回退旧的 `SOUL.md` / `USER.md` / `memory/FACT.md`。
+- 槽位按 `order` 从大到小进入上下文；文件缺失跳过，不阻断整轮。
+- manifest 坏掉时回退旧路径，避免身份缺失导致会话起不来。
+
+### 18.3 写入与 proposal
+
+- `AgentIdentityStore`：只替换/追加二级标题，写入前备份到 `agents/<id>/_archive`；写入走 target 文件锁。
+- `ManifestIdentityStore` 适配器：proposal/tool 仍用 `identity:SOUL|USER|FACT`，实际落到 `self/user/context` 槽位。旧文件不动。
+- 旧 `MemoryIdentityStore` 保留为 legacy 回退；manifest 存在时 bundle 使用适配器。
+- `MemoryProposalStore.accept` 的 identity 分支改为可等待异步 store；旧同步 store 仍兼容。
+
+### 18.4 迁移
+
+```bash
+npm run memory:migrate-identity -- \
+  --memory-root C:\Users\qielan\work\memory \
+  --agent-dir <agentDir> \
+  --agent-id main \
+  --name 未凉 \
+  --labels 本心,所爱,当口
+```
+
+- 默认 dry-run；`--apply` 才写 `agents/<id>/agent.json` 和 `identity/*.md`。
+- 旧 `SOUL/USER/FACT` 永远不动。
+- 目标文件已存在且内容不同时默认拒绝；`--force` 先备份再覆盖。
+- 这一轮没有对真实记忆库执行迁移。
+
+### 18.5 验收与未做
+
+- 根测试 **146/146** 通过（新增 7 条 agent memory 测试）。
+- 未接 UI；真实 SOUL/USER/FACT 未迁移。
+- 未修 `MemoryCommitter` 的 git 根（memory 根没有 `.git`，仓库在 `detail/.git`）；手动提交路由和 UI 保存/提交状态还没做。
+- `memory_propose` 仍只接受 legacy identity 文件名；新槽位的直接编辑 UI 还没做。
+- `validate.py` / `add_entry.py` 仍是 Python 侧规则；Node 写入器与它们的 2/4 空格、log-addr 严格度差异还没统一。

@@ -35,7 +35,10 @@ import { WorkspaceLeaseManager } from '../core/workspace-lease.ts'
 import { SessionWriter } from '../core/session-writer.ts'
 import { EventStore } from '../core/store.ts'
 import { agentStream, sessionStream } from '../core/streams.ts'
-import { defaultSources } from '../memory/sources.ts'
+import { loadIdentitySources } from '../memory/sources.ts'
+import { AgentManifestStore } from '../memory/agent-manifest.ts'
+import { AgentIdentityStore } from '../memory/identity-slots.ts'
+import { ManifestIdentityStore } from '../memory/identity-adapter.ts'
 import { MemoryAccess, type MemoryRole } from '../memory/access.ts'
 import { MemoryCommitter } from '../memory/committer.ts'
 import { MemoryIdentityStore } from '../memory/identity.ts'
@@ -493,6 +496,16 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     agentStore: storeFor,
   }), 'builtin')
 
+  const mainAgentId = config.profile.principals.agents?.[0]?.id ?? 'main'
+  const agentManifest = (() => {
+    if (!config.profile.memoryLogRoot) return undefined
+    try {
+      return new AgentManifestStore(config.profile.memoryLogRoot).read(mainAgentId)
+    } catch {
+      return undefined
+    }
+  })()
+
   // 记忆工具：能力位由 session 决定；没有 memoryRoot 就不注册。
   const memoryCommitter = config.profile.memoryLogRoot
     ? new MemoryCommitter(config.profile.memoryLogRoot, {
@@ -518,8 +531,16 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       memoryCommitter ? () => memoryCommitter.markDirty('proposals') : undefined,
     )
     : undefined
-  const memoryIdentity = memoryStore && config.profile.agentDir
-    ? new MemoryIdentityStore(config.profile.agentDir)
+  const memoryIdentity = memoryStore
+    ? agentManifest
+      ? new ManifestIdentityStore(new AgentIdentityStore(
+        config.profile.memoryLogRoot!,
+        mainAgentId,
+        { manifest: agentManifest },
+      ))
+      : config.profile.agentDir
+        ? new MemoryIdentityStore(config.profile.agentDir)
+        : undefined
     : undefined
   if (memoryStore && memoryAccess && memoryProposals) {
     for (const tool of createMemoryTools({
@@ -661,8 +682,12 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   // 上下文：请求头 + 身份/记忆 + 时间。记忆读不到就跳过。
   const sections: ContextSection[] = []
   if (config.profile.header) sections.push(staticSection('header', config.profile.header, 100))
-  if (config.profile.agentDir) {
-    sections.push(memorySection('memory', defaultSources(config.profile.agentDir), 90))
+  if (config.profile.agentDir || agentManifest) {
+    sections.push(memorySection('memory', loadIdentitySources(
+      config.profile.agentDir ?? '',
+      config.profile.memoryLogRoot,
+      mainAgentId,
+    ), 90))
   }
   sections.push(timeSection())
 

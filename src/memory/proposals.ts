@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { IdentityApplyResult, IdentityPatch } from './identity.ts'
-import { MemoryIdentityStore } from './identity.ts'
+import type { IdentityStoreLike } from './identity.ts'
 import type { MemoryAddInput, MemoryEntry, MemoryStore } from './store.ts'
 
 /** `applying` 是身份写入的两阶段状态：先记意图，再落文件。 */
@@ -130,7 +130,7 @@ export class MemoryProposalStore {
   async accept(
     proposalId: string,
     store: MemoryStore,
-    identityStore?: MemoryIdentityStore,
+    identityStore?: IdentityStoreLike,
     resolvedBy = 'user',
   ): Promise<MemoryAcceptResult> {
     const proposal = this.get(proposalId)
@@ -178,11 +178,11 @@ export class MemoryProposalStore {
    * 对 append 模式重复追加；如果文件在 applying 期间被外部改过，拒绝自动
    * 处理，留给人判断。
    */
-  private acceptIdentity(
+  private async acceptIdentity(
     proposal: MemoryProposal,
-    identityStore: MemoryIdentityStore,
+    identityStore: IdentityStoreLike,
     resolvedBy: string,
-  ): MemoryAcceptResult {
+  ): Promise<MemoryAcceptResult> {
     const patch = proposal.identity!
     const currentHash = (): string => hashText(identityStore.read(patch.file))
 
@@ -224,7 +224,7 @@ export class MemoryProposalStore {
 
     let result: IdentityApplyResult
     try {
-      result = identityStore.apply(patch)
+      result = await identityStore.apply(patch)
     } catch (error) {
       // 上一次尝试可能已经写进去了（例如崩溃前 apply 成功、状态没落盘）。
       if (hashText(identityStore.read(patch.file)) === afterHash) {
