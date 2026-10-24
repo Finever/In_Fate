@@ -132,7 +132,7 @@ export function ItemCard({ sessionId, item }: Props) {
     return (
       <div className={`entry entry-tool status-${tool?.status ?? 'running'}`}>
         <div className="entry-head">
-          <span className="tool-mark"><Icon name="warning" size={13} /></span>
+          <span className="tool-mark"><Icon name="tool" size={13} /></span>
           <span className="entry-label tool-name">{tool?.name ?? '工具'}</span>
           <span className={`tool-state ${tool?.status ?? 'running'}`}>
             {tool?.status === 'running' ? '运行中' : tool?.status === 'error' ? '失败' : '完成'}

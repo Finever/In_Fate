@@ -1,4 +1,5 @@
 import { formatBytes, relativeTime, shortId } from '../lib/format'
+import { modLabel } from '../lib/platform'
 import type { SessionInfo } from '../types'
 import { Icon } from './Icon'
 import { Button, IconButton, LifecycleBadge, StatusDot } from './Ui'
@@ -73,10 +74,15 @@ export function TopBar({
             删除
           </button>
         </div>
-        <button className="command-trigger" aria-label="搜索 / 命令" onClick={onCommand}>
+        <button
+          className="command-trigger"
+          aria-label={`搜索 / 命令（${modLabel}+K）`}
+          title={`搜索 / 命令（${modLabel}+K）`}
+          onClick={onCommand}
+        >
           <Icon name="search" size={15} />
           <span>搜索 / 命令</span>
-          <kbd>⌘K</kbd>
+          <kbd>{modLabel} K</kbd>
         </button>
         <span className={`online-pill${online ? ' on' : ''}`}>
           <span className="online-dot" />

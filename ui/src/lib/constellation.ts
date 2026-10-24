@@ -55,7 +55,7 @@ export function layoutConstellation(
           dy = ((j + 1) % 7) - 3
           distance = Math.hypot(dx, dy) || 1
         }
-        const force = (ideal * ideal) / distance
+        const force = ((ideal * ideal) / distance) * 0.78
         const fx = (dx / distance) * force
         const fy = (dy / distance) * force
         const av = velocity.get(aId)!
@@ -88,8 +88,8 @@ export function layoutConstellation(
     for (const id of ids) {
       const point = points.get(id)!
       const v = velocity.get(id)!
-      v.x += (cx - point.x) * 0.005
-      v.y += (cy - point.y) * 0.005
+      v.x += (cx - point.x) * 0.011
+      v.y += (cy - point.y) * 0.011
       v.x *= 0.84
       v.y *= 0.84
       const maxStep = 24 * cooling
@@ -98,8 +98,8 @@ export function layoutConstellation(
         v.x = (v.x / step) * maxStep
         v.y = (v.y / step) * maxStep
       }
-      point.x = Math.max(90, Math.min(width - 90, point.x + v.x))
-      point.y = Math.max(80, Math.min(height - 80, point.y + v.y))
+      point.x = Math.max(72, Math.min(width - 72, point.x + v.x))
+      point.y = Math.max(68, Math.min(height - 68, point.y + v.y))
 
       // 给中央的标题留一个空洞，避免节点压在品牌字上。
       const dx = point.x - cx

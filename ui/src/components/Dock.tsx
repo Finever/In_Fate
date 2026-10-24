@@ -81,11 +81,13 @@ export function Dock({
 
       <button className="dock-action" onClick={onApprovals} title="待审批" aria-label="待审批">
         <Icon name="approvals" size={17} />
+        <span className="dock-action-label">审批</span>
         {approvals > 0 && <span className="dock-count warn">{approvals > 99 ? '99+' : approvals}</span>}
       </button>
 
       <button className="dock-action" onClick={onAgents} title="子 agent" aria-label="子 agent">
         <Icon name="agents" size={17} />
+        <span className="dock-action-label">agent</span>
         {agentsRunning > 0 && <span className="dock-count mint">{agentsRunning}</span>}
       </button>
 

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { modLabel } from '../lib/platform'
 import { Icon } from './Icon'
 
 export function Composer({
@@ -59,7 +60,7 @@ export function Composer({
         }}
       />
       <div className="composer-side">
-        <span className="composer-hint">Ctrl / ⌘ + Enter</span>
+        <span className="composer-hint">{modLabel} + Enter</span>
         <button
           className="send-btn"
           disabled={sending || !draft.trim()}

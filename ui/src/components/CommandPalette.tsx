@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { relativeTime, shortId } from '../lib/format'
+import { modLabel } from '../lib/platform'
 import type { SessionInfo } from '../types'
 import { Icon } from './Icon'
 import { StatusDot } from './Ui'
@@ -158,6 +159,7 @@ export function CommandPalette({
         </div>
 
         <footer className="palette-foot">
+          <span>{modLabel} K 开关</span>
           <span>↑↓ 选择</span>
           <span>Enter 打开</span>
           <span>Esc 关闭</span>
