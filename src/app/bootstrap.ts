@@ -19,7 +19,7 @@ export type ErrorKind = 'config' | 'dependency' | 'environment'
 export function classifyError(error: unknown): ErrorKind {
   if (error instanceof ConfigError) return 'config'
   const code = (error as { code?: unknown } | null)?.code
-  if (typeof code === 'string' && /^(EACCES|EPERM|ENOENT|ENOSPC|EEXIST|EMFILE)$/.test(code)) {
+  if (typeof code === 'string' && /^(EACCES|EPERM|ENOENT|ENOSPC|EEXIST|EMFILE|EHOSTBUSY)$/.test(code)) {
     return 'environment'
   }
   if (error instanceof SyntaxError) return 'config'

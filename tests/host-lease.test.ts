@@ -28,6 +28,7 @@ test('host lease：同一 dataRoot 第二把锁被拒绝，释放后可重取', 
       () => HostLease.acquire(dir),
       (error: unknown) => {
         assert.ok(error instanceof HostAlreadyRunningError)
+        assert.equal(error.code, 'EHOSTBUSY')
         assert.equal(error.holder?.pid, process.pid)
         return true
       },

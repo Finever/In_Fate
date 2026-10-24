@@ -43,6 +43,7 @@ export interface HostLeaseOptions {
 }
 
 export class HostAlreadyRunningError extends Error {
+  readonly code = 'EHOSTBUSY'
   readonly lockPath: string
   readonly holder?: HostLeaseHolder
 
