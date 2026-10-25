@@ -23,6 +23,7 @@ import {
   defaultIdentitySlots,
   type AgentManifest,
   type IdentitySlot,
+  type IdentitySlotName,
 } from './agent-manifest.ts'
 
 export interface LegacyIdentitySource {
@@ -36,26 +37,26 @@ export interface LegacyIdentitySource {
 
 export const LEGACY_IDENTITY_SOURCES: readonly LegacyIdentitySource[] = [
   {
-    slot: 'self',
+    slot: 'principle',
     legacyPath: 'SOUL.md',
-    file: 'self.md',
-    label: 'SOUL',
+    file: 'principle.md',
+    label: 'Principle',
     role: 'identity',
     order: 100,
   },
   {
-    slot: 'user',
+    slot: 'preference',
     legacyPath: 'USER.md',
-    file: 'user.md',
-    label: 'USER',
+    file: 'preference.md',
+    label: 'Preference',
     role: 'user',
     order: 90,
   },
   {
-    slot: 'context',
+    slot: 'prompt',
     legacyPath: join('memory', 'FACT.md'),
-    file: 'context.md',
-    label: 'FACT',
+    file: 'prompt.md',
+    label: 'Prompt',
     role: 'fact',
     order: 80,
   },
@@ -85,7 +86,7 @@ export interface IdentityMigrationOptions {
   readonly memoryRoot: string
   readonly agentId: string
   readonly name?: string
-  readonly labels?: Partial<Record<'self' | 'user' | 'context', string>>
+  readonly labels?: Partial<Record<IdentitySlotName, string>>
   /** 目标文件已存在且内容不同时，允许备份后覆盖 */
   readonly force?: boolean
 }

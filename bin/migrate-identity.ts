@@ -55,7 +55,7 @@ async function main(): Promise<void> {
     throw new Error('--labels 需要三个，用逗号分隔')
   }
   const labels = labelParts
-    ? { self: labelParts[0]!, user: labelParts[1]!, context: labelParts[2]! }
+    ? { principle: labelParts[0]!, preference: labelParts[1]!, prompt: labelParts[2]! }
     : undefined
 
   const plan = planIdentityMigration({

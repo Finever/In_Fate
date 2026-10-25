@@ -16,9 +16,9 @@ import type {
 import type { AgentIdentityStore } from './identity-slots.ts'
 
 const FILE_TO_SLOT: Record<IdentityFile, string> = {
-  SOUL: 'self',
-  USER: 'user',
-  FACT: 'context',
+  SOUL: 'principle',
+  USER: 'preference',
+  FACT: 'prompt',
 }
 
 const FILE_TO_ROLE: Record<IdentityFile, string> = {

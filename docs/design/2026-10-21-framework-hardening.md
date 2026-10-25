@@ -706,16 +706,17 @@ manifest：
   "id": "main",
   "name": "未凉",
   "identity": [
-    { "id": "self", "label": "本心", "file": "self.md", "order": 100, "role": "identity" },
-    { "id": "user", "label": "所爱", "file": "user.md", "order": 90, "role": "user" },
-    { "id": "context", "label": "当口", "file": "context.md", "order": 80, "role": "fact" }
+    { "id": "principle", "label": "本心", "file": "principle.md", "order": 100, "role": "identity", "description": "本心、原则、边界、说话方式" },
+    { "id": "preference", "label": "所爱", "file": "preference.md", "order": 90, "role": "user", "description": "我与你各自的偏好、习惯、画像" },
+    { "id": "prompt", "label": "当口", "file": "prompt.md", "order": 80, "role": "fact", "description": "环境与记忆系统的稳定说明；末尾接续点" }
   ]
 }
 ```
 
 - `id` 稳定，UI 不直接改；`label` 是显示名；`file` 是 identity 目录里的文件名。
 - 校验拒绝越界文件、重复 slot/file、空 label、非法 slot id。
-- 默认槽位是 `self/user/context`；旧 SOUL/USER/FACT 不再是系统假设。
+- 默认槽位是 `principle / preference / prompt`；旧 SOUL/USER/FACT 不再是系统假设。
+- `description` 写清每个槽位的边界：Principle 是本心与准则，Preference 是偏好/习惯/画像，Prompt 是环境/记忆说明与接续点。
 
 ### 18.2 加载
 
@@ -726,7 +727,7 @@ manifest：
 ### 18.3 写入与 proposal
 
 - `AgentIdentityStore`：只替换/追加二级标题，写入前备份到 `agents/<id>/_archive`；写入走 target 文件锁。
-- `ManifestIdentityStore` 适配器：proposal/tool 仍用 `identity:SOUL|USER|FACT`，实际落到 `self/user/context` 槽位。旧文件不动。
+- `ManifestIdentityStore` 适配器：proposal/tool 仍用 `identity:SOUL|USER|FACT`，实际落到 `principle/preference/prompt` 槽位。旧文件不动。
 - 旧 `MemoryIdentityStore` 保留为 legacy 回退；manifest 存在时 bundle 使用适配器。
 - `MemoryProposalStore.accept` 的 identity 分支改为可等待异步 store；旧同步 store 仍兼容。
 

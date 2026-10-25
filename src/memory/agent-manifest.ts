@@ -2,7 +2,8 @@
  * Agent manifest：`<memoryRoot>/agents/<agentId>/agent.json`。
  *
  * 身份槽位 id 稳定；label 是给 UI/模型看的名字，file 是 identity 目录里的
- * 文件名。旧 SOUL/USER/FACT 只是 legacy 默认值，不是系统假设。
+ * 文件名。默认三段是 Principle / Preference / Prompt；旧 SOUL/USER/FACT 只是
+ * legacy 来源，不是系统假设。
  *
  * @module if/memory/agent-manifest
  */
@@ -20,9 +21,10 @@ import { withFileLock } from '../core/lock.ts'
 import { assertWithin } from '../core/safe-path.ts'
 
 export type IdentitySourceLayer = 'stable' | 'dynamic' | 'ephemeral'
+export type IdentitySlotName = 'principle' | 'preference' | 'prompt'
 
 export interface IdentitySlot {
-  /** 稳定 id，例如 self / user / context；UI 不直接改 */
+  /** 稳定 id，例如 principle / preference / prompt；UI 不直接改 */
   readonly id: string
   /** 显示名，例如 本心 / 所爱 / 当口 */
   readonly label: string
@@ -30,6 +32,8 @@ export interface IdentitySlot {
   readonly file: string
   /** 越大越先进入上下文 */
   readonly order: number
+  /** 给 UI/模型看的边界说明 */
+  readonly description?: string
   /** 记忆源角色，默认 identity */
   readonly role?: string
   readonly layer?: IdentitySourceLayer
@@ -89,6 +93,9 @@ export function validateAgentManifest(manifest: AgentManifest): AgentManifest {
       throw new Error(`invalid identity slot label: ${JSON.stringify(slot.label)}`)
     }
     if (slot.label.length > 80) throw new Error(`identity slot label too long: ${slot.label}`)
+    if (slot.description !== undefined && (typeof slot.description !== 'string' || slot.description.trim().length === 0)) {
+      throw new Error(`invalid identity slot description: ${String(slot.description)}`)
+    }
     assertFile(slot.file)
     if (files.has(slot.file)) throw new Error(`duplicate identity file: ${slot.file}`)
     files.add(slot.file)
@@ -99,19 +106,43 @@ export function validateAgentManifest(manifest: AgentManifest): AgentManifest {
 }
 
 export function defaultIdentitySlots(
-  labels: Partial<Record<'self' | 'user' | 'context', string>> = {},
+  labels: Partial<Record<IdentitySlotName, string>> = {},
 ): IdentitySlot[] {
   return [
-    { id: 'self', label: labels.self ?? 'SOUL', file: 'self.md', order: 100, role: 'identity', layer: 'stable' },
-    { id: 'user', label: labels.user ?? 'USER', file: 'user.md', order: 90, role: 'user', layer: 'stable' },
-    { id: 'context', label: labels.context ?? 'FACT', file: 'context.md', order: 80, role: 'fact', layer: 'stable' },
+    {
+      id: 'principle',
+      label: labels.principle ?? 'Principle',
+      file: 'principle.md',
+      order: 100,
+      role: 'identity',
+      layer: 'stable',
+      description: '本心、原则、边界、说话方式',
+    },
+    {
+      id: 'preference',
+      label: labels.preference ?? 'Preference',
+      file: 'preference.md',
+      order: 90,
+      role: 'user',
+      layer: 'stable',
+      description: '我与你各自的偏好、习惯、画像',
+    },
+    {
+      id: 'prompt',
+      label: labels.prompt ?? 'Prompt',
+      file: 'prompt.md',
+      order: 80,
+      role: 'fact',
+      layer: 'stable',
+      description: '环境与记忆系统的稳定说明；末尾接续点',
+    },
   ]
 }
 
 export function defaultAgentManifest(
   agentId: string,
   name = agentId,
-  labels: Partial<Record<'self' | 'user' | 'context', string>> = {},
+  labels: Partial<Record<IdentitySlotName, string>> = {},
 ): AgentManifest {
   return validateAgentManifest({
     version: 1,
@@ -194,7 +225,7 @@ export class AgentManifestStore {
   async ensureDefault(
     agentId: string,
     name = agentId,
-    labels: Partial<Record<'self' | 'user' | 'context', string>> = {},
+    labels: Partial<Record<IdentitySlotName, string>> = {},
   ): Promise<AgentManifest> {
     const existing = this.read(agentId)
     if (existing) return existing

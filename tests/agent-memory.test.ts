@@ -46,15 +46,15 @@ test('agent manifest 可读写，槽位顺序稳定', async () => {
   try {
     const store = new AgentManifestStore(memoryRoot)
     const manifest = defaultAgentManifest('main', '未凉', {
-      self: '本心',
-      user: '所爱',
-      context: '当口',
+      principle: '本心',
+      preference: '所爱',
+      prompt: '当口',
     })
     await store.write(manifest)
 
     const read = store.read('main')
     assert.equal(read?.name, '未凉')
-    assert.deepEqual(read?.identity.map(slot => slot.id), ['self', 'user', 'context'])
+    assert.deepEqual(read?.identity.map(slot => slot.id), ['principle', 'preference', 'prompt'])
     assert.deepEqual(read?.identity.map(slot => slot.label), ['本心', '所爱', '当口'])
     assert.equal(store.list().length, 1)
   } finally {
@@ -69,7 +69,7 @@ test('manifest 拒绝越界文件和重复槽位', async () => {
       version: 1,
       id: 'main',
       name: 'x',
-      identity: [{ id: 'self', label: 'x', file: '../x.md', order: 1 }],
+      identity: [{ id: 'principle', label: 'x', file: '../x.md', order: 1 }],
     }), /unsafe identity file/)
 
     assert.throws(() => validateAgentManifest({
@@ -77,8 +77,8 @@ test('manifest 拒绝越界文件和重复槽位', async () => {
       id: 'main',
       name: 'x',
       identity: [
-        { id: 'self', label: 'x', file: 'a.md', order: 1 },
-        { id: 'self', label: 'y', file: 'b.md', order: 2 },
+        { id: 'principle', label: 'x', file: 'a.md', order: 1 },
+        { id: 'principle', label: 'y', file: 'b.md', order: 2 },
       ],
     }), /duplicate identity slot id/)
   } finally {
@@ -110,7 +110,7 @@ test('迁移 dry-run 不写文件；apply 写 manifest 和槽位副本，旧文�
       memoryRoot,
       agentId: 'main',
       name: '未凉',
-      labels: { self: '本心', user: '所爱', context: '当口' },
+      labels: { principle: '本心', preference: '所爱', prompt: '当口' },
     })
     assert.equal(plan.files.length, 3)
     assert.deepEqual(plan.manifest.identity.map(slot => slot.label), ['本心', '所爱', '当口'])
@@ -120,13 +120,13 @@ test('迁移 dry-run 不写文件；apply 写 manifest 和槽位副本，旧文�
     assert.equal(result.written.length, 3)
     assert.equal(existsSync(join(memoryRoot, 'agents', 'main', 'agent.json')), true)
     assert.equal(
-      readFileSync(join(memoryRoot, 'agents', 'main', 'identity', 'self.md'), 'utf8'),
+      readFileSync(join(memoryRoot, 'agents', 'main', 'identity', 'principle.md'), 'utf8'),
       legacySoul,
     )
     assert.equal(readFileSync(join(agentDir, 'SOUL.md'), 'utf8'), legacySoul)
 
     const sources = loadIdentitySources(agentDir, memoryRoot, 'main')
-    assert.deepEqual(sources.map(source => source.id), ['self', 'user', 'context'])
+    assert.deepEqual(sources.map(source => source.id), ['principle', 'preference', 'prompt'])
     assert.equal(readSources(sources).length, 3)
   } finally {
     rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
@@ -137,12 +137,12 @@ test('目标文件冲突时默认拒绝，force 才备份覆盖', async () => {
   const { dir, agentDir, memoryRoot } = workspace()
   try {
     seedLegacy(agentDir)
-    const target = join(memoryRoot, 'agents', 'main', 'identity', 'self.md')
+    const target = join(memoryRoot, 'agents', 'main', 'identity', 'principle.md')
     mkdirSync(join(target, '..'), { recursive: true })
     writeFileSync(target, '# 别的\n', 'utf8')
 
     const plan = planIdentityMigration({ agentDir, memoryRoot, agentId: 'main' })
-    assert.equal(plan.files.find(file => file.slot === 'self')?.conflict, true)
+    assert.equal(plan.files.find(file => file.slot === 'principle')?.conflict, true)
     await assert.rejects(() => applyIdentityMigration(plan), /identity target conflict/)
 
     const result = await applyIdentityMigration(plan, { force: true })
@@ -161,9 +161,9 @@ test('AgentIdentityStore 只替换指定二级标题并留备份', async () => {
     await applyIdentityMigration(plan)
 
     const store = new AgentIdentityStore(memoryRoot, 'main')
-    const before = store.read('self')
+    const before = store.read('principle')
     const preview = store.preview({
-      slot: 'self',
+      slot: 'principle',
       section: '我叫什么',
       content: '新名字。',
     })
@@ -172,13 +172,13 @@ test('AgentIdentityStore 只替换指定二级标题并留备份', async () => {
     assert.doesNotMatch(preview.after, /旧名字/)
 
     const result = await store.apply({
-      slot: 'self',
+      slot: 'principle',
       section: '我叫什么',
       content: '新名字。',
     })
     assert.equal(existsSync(result.backup), true)
-    assert.match(store.read('self'), /新名字/)
-    assert.doesNotMatch(store.read('self'), /旧名字/)
+    assert.match(store.read('principle'), /新名字/)
+    assert.doesNotMatch(store.read('principle'), /旧名字/)
     assert.equal(before.includes('旧名字'), true)
     assert.equal(readFileSync(join(agentDir, 'SOUL.md'), 'utf8').includes('旧名字'), true)
   } finally {
@@ -211,7 +211,7 @@ test('identity proposal 通过适配器落到 manifest 槽位', async () => {
 
     assert.match(adapter.read('SOUL'), /适配器名字/)
     assert.match(
-      readFileSync(join(memoryRoot, 'agents', 'main', 'identity', 'self.md'), 'utf8'),
+      readFileSync(join(memoryRoot, 'agents', 'main', 'identity', 'principle.md'), 'utf8'),
       /适配器名字/,
     )
     assert.match(readFileSync(join(agentDir, 'SOUL.md'), 'utf8'), /旧名字/)
