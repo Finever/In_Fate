@@ -214,6 +214,7 @@ export interface ModelConfigProvider {
   }>
   hasApiKey: boolean
   apiKeyEnv?: string
+  removable: boolean
 }
 
 export interface ModelConfig {

@@ -135,8 +135,8 @@ export function validateConfig(raw: unknown): AppConfig {
     throw new ConfigError('profile.timeZone', 'must be a non-empty string')
   }
 
-  if (!Array.isArray(raw.providers) || raw.providers.length === 0) {
-    throw new ConfigError('providers', 'must be a non-empty array')
+  if (!Array.isArray(raw.providers)) {
+    throw new ConfigError('providers', 'must be an array')
   }
   if (!Array.isArray(raw.presets)) {
     throw new ConfigError('presets', 'must be an array')

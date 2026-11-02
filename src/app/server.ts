@@ -50,7 +50,7 @@ function cors(req: IncomingMessage, res: ServerResponse): void {
     res.setHeader('access-control-allow-origin', origin)
     res.setHeader('vary', 'origin')
   }
-  res.setHeader('access-control-allow-methods', 'GET, POST, PUT, PATCH, OPTIONS')
+  res.setHeader('access-control-allow-methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
   res.setHeader('access-control-allow-headers', 'authorization, content-type')
 }
 
@@ -326,6 +326,17 @@ async function handle(
           : {}),
         models: modelsInput,
       })
+      json(res, 200, { config })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  if (req.method === 'DELETE' && parts[1] === 'model-config' && parts[2] === 'providers'
+    && parts[3] && parts.length === 4) {
+    try {
+      const config = await app.removeModelProvider(parts[3]!)
       json(res, 200, { config })
     } catch (error) {
       json(res, 400, { error: error instanceof Error ? error.message : String(error) })

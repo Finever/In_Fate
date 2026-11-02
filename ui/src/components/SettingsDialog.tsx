@@ -54,6 +54,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [selectedModels, setSelectedModels] = useState<Set<string>>(new Set())
   const [newModel, setNewModel] = useState('')
   const [addingModels, setAddingModels] = useState(false)
+  const [providerQuery, setProviderQuery] = useState('')
+  const [providerFilter, setProviderFilter] = useState<'all' | 'configured'>('all')
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -99,10 +102,23 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     setSelectedModels(new Set())
     setNewModel('')
     setAddingModels(false)
+    setDeleting(false)
   }, [providerId])
 
   const provider = config?.providers.find(item => item.id === providerId)
   const draft = provider ? drafts[provider.id] : undefined
+  const providerList = config?.providers ?? []
+  const providerNeedle = providerQuery.trim().toLowerCase()
+  const visibleProviders = providerList
+    .filter(item => {
+      if (providerFilter === 'configured' && !item.hasApiKey) return false
+      return !providerNeedle
+        || item.name.toLowerCase().includes(providerNeedle)
+        || item.id.toLowerCase().includes(providerNeedle)
+    })
+    .sort((a, b) =>
+      Number(b.hasApiKey) - Number(a.hasApiKey)
+      || a.name.localeCompare(b.name, 'zh'))
   const editingProvider = editing
     ? config?.providers.find(item => item.id === editing.providerId)
     : undefined
@@ -230,6 +246,24 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     await addModels([id])
   }
 
+  async function deleteProvider(): Promise<void> {
+    if (!provider || !provider.removable) return
+    if (!window.confirm(`删除服务商「${provider.name}」？\n配置里的端点、模型和 key 会一起删掉。`)) return
+    setDeleting(true)
+    setError(undefined)
+    setNotice(undefined)
+    try {
+      const next = await api.removeModelProvider(provider.id)
+      applyConfig(next)
+      setProviderId(next.providers[0]?.id ?? '')
+      setNotice('服务商已删除')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   const keyPlaceholder = provider?.apiKeyEnv
     ? `使用环境变量 ${provider.apiKeyEnv}，留空不改`
     : provider?.hasApiKey
@@ -331,37 +365,81 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                     </div>
 
                     {config && (
-                      <div className="fw-model-provider-grid">
-                        {config.providers.map(item => {
-                          const active = item.id === providerId
-                          return (
+                      <>
+                        <div className="fw-model-provider-toolbar">
+                          <input
+                            value={providerQuery}
+                            onChange={event => setProviderQuery(event.target.value)}
+                            placeholder="搜索服务商 id / 名称"
+                            spellCheck={false}
+                          />
+                          <div className="fw-model-filter">
                             <button
-                              key={item.id}
                               type="button"
-                              className={`fw-settings-provider${active ? ' is-active' : ''}`}
-                              onClick={() => chooseProvider(item.id)}
-                              disabled={saving || Boolean(editing)}
+                              className={providerFilter === 'all' ? 'is-active' : ''}
+                              onClick={() => setProviderFilter('all')}
                             >
-                              <span className="fw-settings-provider-mark">
-                                {providerMark(item.name)}
-                              </span>
-                              <span className="fw-settings-provider-text">
-                                <b>{item.name}</b>
-                                <small>
-                                  {item.models.length} 个模型
-                                  {!item.hasApiKey ? ' · 未配置 key' : ''}
-                                </small>
-                              </span>
+                              全部
                             </button>
-                          )
-                        })}
-                      </div>
+                            <button
+                              type="button"
+                              className={providerFilter === 'configured' ? 'is-active' : ''}
+                              onClick={() => setProviderFilter('configured')}
+                            >
+                              已配置 key
+                            </button>
+                          </div>
+                          <small>{visibleProviders.length} / {providerList.length}</small>
+                        </div>
+                        <div className="fw-model-provider-grid">
+                          {visibleProviders.map(item => {
+                            const active = item.id === providerId
+                            return (
+                              <button
+                                key={item.id}
+                                type="button"
+                                className={`fw-settings-provider${active ? ' is-active' : ''}`}
+                                onClick={() => chooseProvider(item.id)}
+                                disabled={saving || Boolean(editing)}
+                              >
+                                <span className="fw-settings-provider-mark">
+                                  {providerMark(item.name)}
+                                </span>
+                                <span className="fw-settings-provider-text">
+                                  <b>{item.name}</b>
+                                  <small>
+                                    {item.models.length} 个模型
+                                    {!item.hasApiKey ? ' · 未配置 key' : ''}
+                                  </small>
+                                </span>
+                              </button>
+                            )
+                          })}
+                          {visibleProviders.length === 0 && (
+                            <div className="fw-panel-empty">没有匹配的服务商。</div>
+                          )}
+                        </div>
+                      </>
                     )}
 
                     {provider && draft ? (
                       <>
                         <div className="fw-settings-provider-head">
                           <h3>{provider.name}</h3>
+                          {!provider.removable && (
+                            <span className="fw-settings-provider-builtin">内置</span>
+                          )}
+                          <span className="fw-model-head-spacer" />
+                          {provider.removable && (
+                            <button
+                              type="button"
+                              className="fw-settings-provider-delete"
+                              onClick={() => void deleteProvider()}
+                              disabled={saving || deleting}
+                            >
+                              {deleting ? '删除中…' : '删除服务商'}
+                            </button>
+                          )}
                         </div>
 
                     <div className="fw-settings-fields">

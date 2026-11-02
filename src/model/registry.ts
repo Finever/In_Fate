@@ -36,6 +36,11 @@ export class ModelRegistry {
     return [...this.providers.values()]
   }
 
+  /** 移除 provider（只用于用户自建的；内置在 App 层拦住）。 */
+  remove(id: string): void {
+    this.providers.delete(id)
+  }
+
   /** 给已有 provider 追加模型；重复 id 跳过。 */
   addModels(id: string, models: readonly ModelCard[]): void {
     const provider = this.get(id)

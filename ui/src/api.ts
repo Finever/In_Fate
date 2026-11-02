@@ -205,6 +205,14 @@ export const api = {
     return body.config
   },
 
+  async removeModelProvider(provider: string): Promise<ModelConfig> {
+    const body = await request<{ config: ModelConfig }>(
+      `/api/model-config/providers/${encodeURIComponent(provider)}`,
+      { method: 'DELETE' },
+    )
+    return body.config
+  },
+
   async probeModelProvider(
     provider: string,
     input: { apiKey?: string; baseUrl?: string } = {},

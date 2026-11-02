@@ -285,6 +285,8 @@ export interface App {
   probeModelProvider(input: ModelProbeInput): Promise<{ models: readonly string[] }>
   /** 给已有 provider 追加模型；重复 id 跳过。 */
   addProviderModels(input: ModelProviderModelsInput): Promise<ModelConfigView>
+  /** 删除用户自建 provider；内置或正在被 agent 使用时拒绝。 */
+  removeModelProvider(provider: string): Promise<ModelConfigView>
   /** 更新单个模型的上下文/输出/价格；有 configPath 时写回配置文件。 */
   saveModelCard(input: ModelCardUpdate): Promise<ModelConfigView>
 
@@ -363,6 +365,8 @@ export interface ModelConfigProviderView {
   }>
   readonly hasApiKey: boolean
   readonly apiKeyEnv?: string
+  /** 内置服务商不可删。 */
+  readonly removable: boolean
 }
 
 export interface ModelConfigView {
@@ -860,6 +864,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
           || (provider.apiKeyEnv && process.env[provider.apiKeyEnv]),
         ),
         ...(provider.apiKeyEnv ? { apiKeyEnv: provider.apiKeyEnv } : {}),
+        removable: !BUILTIN_PROVIDERS.some(builtin => builtin.id === provider.id),
       }
     }),
   })
@@ -1062,6 +1067,27 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       }
     })
     models.addModels(provider.id, cards)
+    return modelConfigView()
+  }
+
+  const removeModelProvider = async (id: string): Promise<ModelConfigView> => {
+    models.get(id)
+    if (BUILTIN_PROVIDERS.some(builtin => builtin.id === id)) {
+      throw new Error(`内置服务商不能删除：${id}`)
+    }
+    for (const settings of agentSettings.list()) {
+      if (settings.models?.main?.provider === id) {
+        throw new Error(`agent ${settings.agentId} 正在使用这个服务商，先改掉它的主模型`)
+      }
+      if ((settings.models?.subagents ?? []).some(model => model.provider === id)) {
+        throw new Error(`agent ${settings.agentId} 的子 agent 正在使用这个服务商`)
+      }
+    }
+    await writeConfigFile(raw => {
+      raw.providers = (raw.providers ?? []).filter(item => item.id !== id)
+    })
+    models.remove(id)
+    providerOverrides.delete(id)
     return modelConfigView()
   }
 
@@ -2326,6 +2352,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     saveModelConfig,
     addModelProvider,
     addProviderModels,
+    removeModelProvider,
     probeModelProvider,
     saveModelCard,
 

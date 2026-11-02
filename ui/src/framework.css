@@ -3947,7 +3947,7 @@ body.fw-resizing {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
   gap: 6px;
-  max-height: 210px;
+  max-height: 260px;
   overflow-y: auto;
   margin-bottom: 14px;
   padding: 2px 2px 12px;
@@ -4093,4 +4093,82 @@ body.fw-resizing {
 }
 .fw-model-manual button:disabled {
   opacity: .45;
+}
+
+/* ---------- 设置：服务商多时的搜索与删除 ---------- */
+
+.fw-model-provider-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.fw-model-provider-toolbar input {
+  min-width: 0;
+  flex: 1;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  outline: none;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 10.5px;
+}
+.fw-model-provider-toolbar input:focus {
+  border-color: rgba(143, 123, 255, .5);
+}
+.fw-model-provider-toolbar small {
+  color: var(--faint);
+  font: 9px var(--mono);
+  white-space: nowrap;
+}
+.fw-model-filter {
+  display: flex;
+  gap: 3px;
+}
+.fw-model-filter button {
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: none;
+  color: var(--faint);
+  font-size: 9.5px;
+}
+.fw-model-filter button:hover {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+.fw-model-filter button.is-active {
+  border-color: rgba(143, 123, 255, .26);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.fw-settings-provider-builtin {
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--faint);
+  font-size: 8.5px;
+  font-weight: 400;
+}
+.fw-settings-provider-delete {
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid rgba(255, 107, 125, .24);
+  border-radius: 6px;
+  background: rgba(255, 107, 125, .05);
+  color: var(--danger);
+  font-size: 9.5px;
+  font-weight: 400;
+}
+.fw-settings-provider-delete:hover:not(:disabled) {
+  border-color: rgba(255, 107, 125, .5);
+}
+.fw-settings-provider-delete:disabled {
+  opacity: .45;
+}
+.fw-model-provider-grid > .fw-panel-empty {
+  grid-column: 1 / -1;
 }
