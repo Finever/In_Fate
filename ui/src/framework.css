@@ -3960,3 +3960,137 @@ body.fw-resizing {
 .fw-model-provider-grid .fw-settings-provider.is-active {
   border-color: var(--accent);
 }
+
+/* ---------- 设置：模型读取与手动添加 ---------- */
+
+.fw-settings-models-head {
+  align-items: center;
+  justify-content: flex-start;
+}
+.fw-model-head-spacer {
+  flex: 1;
+}
+.fw-settings-probe {
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, .04);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 400;
+}
+.fw-settings-probe:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+.fw-settings-probe:disabled {
+  opacity: .45;
+}
+.fw-model-probe-error {
+  margin: 0 0 8px;
+}
+.fw-model-discovered {
+  margin-bottom: 10px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, .015);
+}
+.fw-model-discovered-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.fw-model-discovered-head > span:first-child {
+  color: var(--text);
+}
+.fw-model-discovered-head button {
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font-size: 9.5px;
+}
+.fw-model-discovered-head button:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+.fw-model-discovered-head button:disabled {
+  opacity: .45;
+}
+.fw-model-discovered-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 4px 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.fw-model-discovered-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--muted);
+  font: 9.5px var(--mono);
+}
+.fw-model-discovered-item input {
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+}
+.fw-model-discovered-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fw-model-discovered-item em {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 8.5px;
+  font-style: normal;
+}
+.fw-model-discovered-item.is-existing {
+  opacity: .55;
+}
+.fw-model-manual {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+.fw-model-manual input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  outline: none;
+  background: var(--bg);
+  color: var(--text);
+  font: 10px var(--mono);
+}
+.fw-model-manual input:focus {
+  border-color: rgba(143, 123, 255, .5);
+}
+.fw-model-manual button {
+  height: 30px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, .04);
+  color: var(--muted);
+  font-size: 10px;
+}
+.fw-model-manual button:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+.fw-model-manual button:disabled {
+  opacity: .45;
+}

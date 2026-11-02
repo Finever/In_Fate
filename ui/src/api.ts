@@ -6,6 +6,7 @@ import type {
   MainAgentInfo,
   ModelConfig,
   ModelProviderInput,
+  ModelProviderModelInput,
   SaveModelCardInput,
   SaveModelConfigInput,
   LogSearchResult,
@@ -201,6 +202,27 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(input),
     })
+    return body.config
+  },
+
+  async probeModelProvider(
+    provider: string,
+    input: { apiKey?: string; baseUrl?: string } = {},
+  ): Promise<{ models: string[] }> {
+    return request<{ models: string[] }>(
+      `/api/model-config/providers/${encodeURIComponent(provider)}/probe`,
+      { method: 'POST', body: JSON.stringify(input) },
+    )
+  },
+
+  async addProviderModels(
+    provider: string,
+    models: ModelProviderModelInput[],
+  ): Promise<ModelConfig> {
+    const body = await request<{ config: ModelConfig }>(
+      `/api/model-config/providers/${encodeURIComponent(provider)}/models`,
+      { method: 'POST', body: JSON.stringify({ models }) },
+    )
     return body.config
   },
 

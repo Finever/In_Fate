@@ -48,6 +48,12 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string>()
   const [notice, setNotice] = useState<string>()
+  const [probing, setProbing] = useState(false)
+  const [probeError, setProbeError] = useState<string>()
+  const [discovered, setDiscovered] = useState<string[]>()
+  const [selectedModels, setSelectedModels] = useState<Set<string>>(new Set())
+  const [newModel, setNewModel] = useState('')
+  const [addingModels, setAddingModels] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -85,6 +91,15 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [editing, requestClose, saving])
+
+  useEffect(() => {
+    setProbing(false)
+    setProbeError(undefined)
+    setDiscovered(undefined)
+    setSelectedModels(new Set())
+    setNewModel('')
+    setAddingModels(false)
+  }, [providerId])
 
   const provider = config?.providers.find(item => item.id === providerId)
   const draft = provider ? drafts[provider.id] : undefined
@@ -156,6 +171,63 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     } finally {
       setSaving(false)
     }
+  }
+
+  async function probeModels(): Promise<void> {
+    if (!provider) return
+    setProbing(true)
+    setProbeError(undefined)
+    setNotice(undefined)
+    setDiscovered(undefined)
+    setSelectedModels(new Set())
+    try {
+      const result = await api.probeModelProvider(provider.id, {
+        ...(draft?.apiKey.trim() ? { apiKey: draft.apiKey.trim() } : {}),
+        ...(draft?.baseUrl.trim() ? { baseUrl: draft.baseUrl.trim() } : {}),
+      })
+      setDiscovered(result.models)
+    } catch (reason) {
+      setProbeError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setProbing(false)
+    }
+  }
+
+  async function addModels(ids: string[]): Promise<void> {
+    if (!provider) return
+    const fresh = ids.filter(id => !provider.models.some(model => model.id === id))
+    if (fresh.length === 0) {
+      setProbeError('这些模型已经在列表里。')
+      return
+    }
+    setAddingModels(true)
+    setProbeError(undefined)
+    setNotice(undefined)
+    try {
+      const next = await api.addProviderModels(
+        provider.id,
+        fresh.map(id => ({ id })),
+      )
+      applyConfig(next)
+      setDiscovered(undefined)
+      setSelectedModels(new Set())
+      setNewModel('')
+      setNotice(`已添加 ${fresh.length} 个模型`)
+    } catch (reason) {
+      setProbeError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setAddingModels(false)
+    }
+  }
+
+  async function addManualModel(): Promise<void> {
+    const id = newModel.trim()
+    if (!id || !provider) return
+    if (provider.models.some(model => model.id === id)) {
+      setProbeError('这个模型已经在列表里。')
+      return
+    }
+    await addModels([id])
   }
 
   const keyPlaceholder = provider?.apiKeyEnv
@@ -322,10 +394,83 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                       <div className="fw-settings-models-head">
                         <span>模型</span>
                         <small>{provider.models.length} 个</small>
+                        <span className="fw-model-head-spacer" />
+                        <button
+                          type="button"
+                          className="fw-settings-probe"
+                          onClick={() => void probeModels()}
+                          disabled={probing || addingModels || saving}
+                        >
+                          {probing ? '读取中…' : '读取模型列表'}
+                        </button>
                       </div>
 
+                      {probeError && (
+                        <div className="fw-dialog-error fw-model-probe-error">{probeError}</div>
+                      )}
+
+                      {discovered && (
+                        <div className="fw-model-discovered">
+                          <div className="fw-model-discovered-head">
+                            <span>读到 {discovered.length} 个模型</span>
+                            <span className="fw-model-head-spacer" />
+                            <button
+                              type="button"
+                              onClick={() => setSelectedModels(new Set(
+                                discovered.filter(id =>
+                                  !provider.models.some(model => model.id === id)),
+                              ))}
+                            >
+                              全选新模型
+                            </button>
+                            <button type="button" onClick={() => setSelectedModels(new Set())}>
+                              清空
+                            </button>
+                            <button
+                              type="button"
+                              className="fw-dialog-submit fw-mem-btn"
+                              onClick={() => void addModels([...selectedModels])}
+                              disabled={selectedModels.size === 0 || addingModels}
+                            >
+                              {addingModels
+                                ? '添加中…'
+                                : `添加所选${selectedModels.size ? `（${selectedModels.size}）` : ''}`}
+                            </button>
+                          </div>
+                          <div className="fw-model-discovered-list">
+                            {discovered.map(id => {
+                              const exists = provider.models.some(model => model.id === id)
+                              return (
+                                <label
+                                  key={id}
+                                  className={`fw-model-discovered-item${exists ? ' is-existing' : ''}`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedModels.has(id)}
+                                    disabled={exists || addingModels}
+                                    onChange={event => {
+                                      setSelectedModels(current => {
+                                        const next = new Set(current)
+                                        if (event.target.checked) next.add(id)
+                                        else next.delete(id)
+                                        return next
+                                      })
+                                    }}
+                                  />
+                                  <span>{id}</span>
+                                  {exists && <em>已有</em>}
+                                </label>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )}
+
                       {provider.models.length === 0 && (
-                        <div className="fw-settings-models-empty">没有可用模型。</div>
+                        <div className="fw-settings-models-empty">
+                          还没有模型；点「读取模型列表」或手动添加。
+                        </div>
                       )}
 
                       <div className="fw-settings-model-list">
@@ -359,6 +504,29 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                             </button>
                           </div>
                         ))}
+                      </div>
+
+                      <div className="fw-model-manual">
+                        <input
+                          value={newModel}
+                          onChange={event => setNewModel(event.target.value)}
+                          placeholder="手动添加 model id"
+                          spellCheck={false}
+                          disabled={addingModels}
+                          onKeyDown={event => {
+                            if (event.key === 'Enter') {
+                              event.preventDefault()
+                              void addManualModel()
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => void addManualModel()}
+                          disabled={!newModel.trim() || addingModels}
+                        >
+                          添加
+                        </button>
                       </div>
                     </section>
                       </>

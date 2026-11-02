@@ -281,6 +281,10 @@ export interface App {
   saveModelConfig(input: ModelConfigUpdate): Promise<ModelConfigView>
   /** 添加一个新的 OpenAI 兼容服务商；有 configPath 时写回配置文件。 */
   addModelProvider(input: ModelProviderInput): Promise<ModelConfigView>
+  /** 用 provider 的 key / baseUrl 调 GET /models，返回模型 id。 */
+  probeModelProvider(input: ModelProbeInput): Promise<{ models: readonly string[] }>
+  /** 给已有 provider 追加模型；重复 id 跳过。 */
+  addProviderModels(input: ModelProviderModelsInput): Promise<ModelConfigView>
   /** 更新单个模型的上下文/输出/价格；有 configPath 时写回配置文件。 */
   saveModelCard(input: ModelCardUpdate): Promise<ModelConfigView>
 
@@ -381,6 +385,13 @@ export interface ModelCardUpdate {
   readonly pricing?: ModelPricing | null
 }
 
+export interface ModelProviderModelInput {
+  readonly id: string
+  readonly name?: string
+  readonly contextWindow?: number
+  readonly maxOutputTokens?: number
+}
+
 export interface ModelProviderInput {
   readonly id: string
   readonly name: string
@@ -388,12 +399,20 @@ export interface ModelProviderInput {
   readonly baseUrl: string
   readonly apiKey?: string
   readonly apiKeyEnv?: string
-  readonly models: readonly {
-    readonly id: string
-    readonly name?: string
-    readonly contextWindow?: number
-    readonly maxOutputTokens?: number
-  }[]
+  readonly models: readonly ModelProviderModelInput[]
+}
+
+export interface ModelProviderModelsInput {
+  readonly provider: string
+  readonly models: readonly ModelProviderModelInput[]
+}
+
+export interface ModelProbeInput {
+  readonly provider: string
+  /** 未保存的草稿 key；不传就用已保存的。 */
+  readonly apiKey?: string
+  /** 未保存的草稿 baseUrl；不传就用已保存的。 */
+  readonly baseUrl?: string
 }
 
 export interface AgentPresetSummary {
@@ -964,7 +983,6 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
           : {}),
       }
     })
-    if (modelCards.length === 0) throw new Error('provider needs at least one model')
 
     const provider: ProviderConfig = {
       id,
@@ -995,6 +1013,119 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       baseUrl,
     })
     return modelConfigView()
+  }
+
+  const addProviderModels = async (
+    input: ModelProviderModelsInput,
+  ): Promise<ModelConfigView> => {
+    const provider = models.get(input.provider)
+    const existing = new Set(provider.models.map(model => model.id))
+    const seen = new Set<string>()
+    const cards: ModelCard[] = []
+    for (const item of input.models) {
+      const modelId = item.id.trim()
+      if (!modelId) throw new Error('model id is required')
+      if (existing.has(modelId) || seen.has(modelId)) continue
+      seen.add(modelId)
+      if (item.contextWindow !== undefined
+        && (!Number.isFinite(item.contextWindow) || item.contextWindow <= 0)) {
+        throw new Error(`invalid contextWindow for ${modelId}`)
+      }
+      if (item.maxOutputTokens !== undefined
+        && (!Number.isFinite(item.maxOutputTokens) || item.maxOutputTokens <= 0)) {
+        throw new Error(`invalid maxOutputTokens for ${modelId}`)
+      }
+      cards.push({
+        id: modelId,
+        ...(item.name?.trim() ? { name: item.name.trim() } : {}),
+        ...(item.contextWindow !== undefined ? { contextWindow: item.contextWindow } : {}),
+        ...(item.maxOutputTokens !== undefined
+          ? { maxOutputTokens: item.maxOutputTokens }
+          : {}),
+      })
+    }
+    if (cards.length === 0) return modelConfigView()
+
+    await writeConfigFile(raw => {
+      const rawProvider = ensureRawProvider(raw, provider)
+      rawProvider.models ??= []
+      for (const card of cards) {
+        if (rawProvider.models.some(model => model.id === card.id)) continue
+        rawProvider.models.push({
+          id: card.id,
+          ...(card.name ? { name: card.name } : {}),
+          ...(card.contextWindow !== undefined ? { contextWindow: card.contextWindow } : {}),
+          ...(card.maxOutputTokens !== undefined
+            ? { maxOutputTokens: card.maxOutputTokens }
+            : {}),
+        })
+      }
+    })
+    models.addModels(provider.id, cards)
+    return modelConfigView()
+  }
+
+  const probeModelProvider = async (
+    input: ModelProbeInput,
+  ): Promise<{ models: readonly string[] }> => {
+    const provider = models.get(input.provider)
+    const override = providerOverrides.get(provider.id)
+    const family = provider.defaultChatEndpoint ?? Object.keys(provider.endpoints)[0]
+    const baseUrl = input.baseUrl?.trim()
+      || override?.baseUrl
+      || (family ? provider.endpoints[family]?.baseUrl : '')
+    if (!baseUrl) throw new Error(`provider ${provider.id} has no baseUrl`)
+    const apiKey = input.apiKey?.trim()
+      || override?.apiKey
+      || provider.apiKey
+      || (provider.apiKeyEnv ? process.env[provider.apiKeyEnv] : undefined)
+
+    const url = `${baseUrl.replace(/\/+$/, '')}/models`
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 10_000)
+    try {
+      const response = await fetch(url, {
+        headers: {
+          accept: 'application/json',
+          ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
+        },
+        signal: controller.signal,
+      })
+      const text = await response.text()
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${text.slice(0, 200)}`)
+      }
+      let body: unknown
+      try {
+        body = JSON.parse(text)
+      } catch {
+        throw new Error('返回不是 JSON')
+      }
+      const rows: unknown[] = Array.isArray(body)
+        ? body
+        : (typeof body === 'object' && body !== null
+          && Array.isArray((body as { data?: unknown }).data))
+          ? (body as { data: unknown[] }).data
+          : []
+      const ids = rows.map(row => {
+        if (typeof row === 'string') return row
+        if (typeof row === 'object' && row !== null
+          && typeof (row as { id?: unknown }).id === 'string') {
+          return (row as { id: string }).id
+        }
+        return ''
+      }).filter(id => id.length > 0)
+      const unique = [...new Set(ids)].sort()
+      if (unique.length === 0) throw new Error('返回里没有模型 id')
+      return { models: unique }
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error('读取模型列表超时（10 秒）')
+      }
+      throw error
+    } finally {
+      clearTimeout(timer)
+    }
   }
 
   // 全文库与写时卸载：工具结果落事件前经过它。
@@ -2194,6 +2325,8 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
 
     saveModelConfig,
     addModelProvider,
+    addProviderModels,
+    probeModelProvider,
     saveModelCard,
 
     memoryRole(sessionId) {

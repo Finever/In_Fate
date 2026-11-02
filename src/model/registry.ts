@@ -36,6 +36,19 @@ export class ModelRegistry {
     return [...this.providers.values()]
   }
 
+  /** 给已有 provider 追加模型；重复 id 跳过。 */
+  addModels(id: string, models: readonly ModelCard[]): void {
+    const provider = this.get(id)
+    const seen = new Set(provider.models.map(model => model.id))
+    const merged = [...provider.models]
+    for (const model of models) {
+      if (seen.has(model.id)) continue
+      seen.add(model.id)
+      merged.push(model)
+    }
+    this.providers.set(id, { ...provider, models: merged })
+  }
+
   resolve(providerId: string, modelId: string, apiFamily?: string): ResolvedModel {
     const provider = this.get(providerId)
     const model = provider.models.find(item => item.id === modelId)

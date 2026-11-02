@@ -235,6 +235,13 @@ export interface SaveModelCardInput {
   pricing?: ModelPricing | null
 }
 
+export interface ModelProviderModelInput {
+  id: string
+  name?: string
+  contextWindow?: number
+  maxOutputTokens?: number
+}
+
 export interface ModelProviderInput {
   id: string
   name: string
@@ -242,12 +249,7 @@ export interface ModelProviderInput {
   baseUrl: string
   apiKey?: string
   apiKeyEnv?: string
-  models: Array<{
-    id: string
-    name?: string
-    contextWindow?: number
-    maxOutputTokens?: number
-  }>
+  models: ModelProviderModelInput[]
 }
 
 export interface AgentPresetSummary {

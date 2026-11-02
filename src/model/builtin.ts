@@ -1,7 +1,8 @@
 /**
- * 内置模型服务商：只提供 OpenAI 兼容端点，不替用户写死 key。
+ * 内置模型服务商：只给端点，不猜模型。
  *
- * 这些 provider 会并入 registry，出现在设置里；配置文件和 key 仍然由用户决定。
+ * 这些 provider 会并入 registry，出现在设置里；模型列表由用户用
+ * 「读取模型列表」（GET /models）或手动添加，不再写死默认模型。
  * 没有对应 API key 时只是不可用，不会阻止其它 provider。
  *
  * @module if/model/builtin
@@ -24,22 +25,7 @@ export const BUILTIN_PROVIDERS: readonly ProviderConfig[] = [
     apiKeyEnv: 'DEEPSEEK_API_KEY',
     defaultChatEndpoint: 'openai-chat-completions',
     endpoints: openaiCompatible('https://api.deepseek.com/v1'),
-    models: [
-      {
-        id: 'deepseek-chat',
-        name: 'DeepSeek Chat',
-        contextWindow: 128_000,
-        maxOutputTokens: 8_192,
-        capabilities: ['function-call'],
-      },
-      {
-        id: 'deepseek-reasoner',
-        name: 'DeepSeek Reasoner',
-        contextWindow: 128_000,
-        maxOutputTokens: 8_192,
-        capabilities: ['function-call', 'reasoning'],
-      },
-    ],
+    models: [],
   },
   {
     id: 'openai',
@@ -48,22 +34,7 @@ export const BUILTIN_PROVIDERS: readonly ProviderConfig[] = [
     apiKeyEnv: 'OPENAI_API_KEY',
     defaultChatEndpoint: 'openai-chat-completions',
     endpoints: openaiCompatible('https://api.openai.com/v1'),
-    models: [
-      {
-        id: 'gpt-4o',
-        name: 'GPT-4o',
-        contextWindow: 128_000,
-        maxOutputTokens: 16_384,
-        capabilities: ['function-call', 'reasoning', 'image-recognition', 'structured-output'],
-      },
-      {
-        id: 'gpt-4o-mini',
-        name: 'GPT-4o mini',
-        contextWindow: 128_000,
-        maxOutputTokens: 16_384,
-        capabilities: ['function-call', 'reasoning', 'image-recognition', 'structured-output'],
-      },
-    ],
+    models: [],
   },
   {
     id: 'zhipu',
@@ -72,22 +43,7 @@ export const BUILTIN_PROVIDERS: readonly ProviderConfig[] = [
     apiKeyEnv: 'ZHIPU_API_KEY',
     defaultChatEndpoint: 'openai-chat-completions',
     endpoints: openaiCompatible('https://open.bigmodel.cn/api/paas/v4'),
-    models: [
-      {
-        id: 'glm-4-plus',
-        name: 'GLM-4 Plus',
-        contextWindow: 128_000,
-        maxOutputTokens: 4_096,
-        capabilities: ['function-call', 'reasoning'],
-      },
-      {
-        id: 'glm-4-flash',
-        name: 'GLM-4 Flash',
-        contextWindow: 128_000,
-        maxOutputTokens: 4_096,
-        capabilities: ['function-call'],
-      },
-    ],
+    models: [],
   },
   {
     id: 'moonshot',
@@ -96,29 +52,7 @@ export const BUILTIN_PROVIDERS: readonly ProviderConfig[] = [
     apiKeyEnv: 'MOONSHOT_API_KEY',
     defaultChatEndpoint: 'openai-chat-completions',
     endpoints: openaiCompatible('https://api.moonshot.cn/v1'),
-    models: [
-      {
-        id: 'moonshot-v1-8k',
-        name: 'Moonshot v1 8K',
-        contextWindow: 8_192,
-        maxOutputTokens: 8_192,
-        capabilities: ['function-call'],
-      },
-      {
-        id: 'moonshot-v1-32k',
-        name: 'Moonshot v1 32K',
-        contextWindow: 32_768,
-        maxOutputTokens: 8_192,
-        capabilities: ['function-call'],
-      },
-      {
-        id: 'moonshot-v1-128k',
-        name: 'Moonshot v1 128K',
-        contextWindow: 128_000,
-        maxOutputTokens: 8_192,
-        capabilities: ['function-call'],
-      },
-    ],
+    models: [],
   },
   {
     id: 'qwen',
@@ -127,22 +61,7 @@ export const BUILTIN_PROVIDERS: readonly ProviderConfig[] = [
     apiKeyEnv: 'DASHSCOPE_API_KEY',
     defaultChatEndpoint: 'openai-chat-completions',
     endpoints: openaiCompatible('https://dashscope.aliyuncs.com/compatible-mode/v1'),
-    models: [
-      {
-        id: 'qwen-max',
-        name: 'Qwen Max',
-        contextWindow: 32_768,
-        maxOutputTokens: 8_192,
-        capabilities: ['function-call'],
-      },
-      {
-        id: 'qwen-plus',
-        name: 'Qwen Plus',
-        contextWindow: 131_072,
-        maxOutputTokens: 8_192,
-        capabilities: ['function-call'],
-      },
-    ],
+    models: [],
   },
   {
     id: 'openrouter',
@@ -151,14 +70,6 @@ export const BUILTIN_PROVIDERS: readonly ProviderConfig[] = [
     apiKeyEnv: 'OPENROUTER_API_KEY',
     defaultChatEndpoint: 'openai-chat-completions',
     endpoints: openaiCompatible('https://openrouter.ai/api/v1'),
-    models: [
-      {
-        id: 'openrouter/auto',
-        name: 'OpenRouter Auto',
-        contextWindow: 128_000,
-        maxOutputTokens: 8_192,
-        capabilities: ['function-call'],
-      },
-    ],
+    models: [],
   },
 ]

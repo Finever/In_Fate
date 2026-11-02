@@ -52,7 +52,6 @@ export function AddProviderDialog({
     id.trim()
     && name.trim()
     && baseUrl.trim()
-    && models.length > 0
     && models.every(model => model.id),
   )
 
@@ -154,11 +153,11 @@ export function AddProviderDialog({
         </label>
 
         <label className="fw-field">
-          <span>模型</span>
+          <span>模型（可空）</span>
           <textarea
             value={modelsText}
             onChange={event => setModelsText(event.target.value)}
-            placeholder={'一行一个模型 id，例如：\nmy-model\nmy-model-pro|显示名|128000|8192'}
+            placeholder={'可以留空；添加后在设置里点「读取模型列表」或手动添加。\n也可一行一个：my-model 或 my-model|显示名|128000|8192'}
             spellCheck={false}
             disabled={busy}
           />

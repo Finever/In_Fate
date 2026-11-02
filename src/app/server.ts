@@ -272,10 +272,6 @@ async function handle(
       return
     }
     const rawModels = Array.isArray(body.models) ? body.models : []
-    if (rawModels.length === 0) {
-      json(res, 400, { error: 'at least one model is required' })
-      return
-    }
     const modelsInput: Array<{
       id: string
       name?: string
@@ -328,6 +324,84 @@ async function handle(
         ...(typeof body.apiKeyEnv === 'string' && body.apiKeyEnv.trim()
           ? { apiKeyEnv: body.apiKeyEnv.trim() }
           : {}),
+        models: modelsInput,
+      })
+      json(res, 200, { config })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  if (req.method === 'POST' && parts[1] === 'model-config' && parts[2] === 'providers'
+    && parts[3] && parts[4] === 'probe' && parts.length === 5) {
+    const body = await readOptionalJson(req)
+    try {
+      const result = await app.probeModelProvider({
+        provider: parts[3]!,
+        ...(typeof body.apiKey === 'string' && body.apiKey.trim()
+          ? { apiKey: body.apiKey.trim() }
+          : {}),
+        ...(typeof body.baseUrl === 'string' && body.baseUrl.trim()
+          ? { baseUrl: body.baseUrl.trim() }
+          : {}),
+      })
+      json(res, 200, result)
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  if (req.method === 'POST' && parts[1] === 'model-config' && parts[2] === 'providers'
+    && parts[3] && parts[4] === 'models' && parts.length === 5) {
+    const body = await readOptionalJson(req)
+    const rawModels = Array.isArray(body.models) ? body.models : []
+    if (rawModels.length === 0) {
+      json(res, 400, { error: 'models is required' })
+      return
+    }
+    const modelsInput: Array<{
+      id: string
+      name?: string
+      contextWindow?: number
+      maxOutputTokens?: number
+    }> = []
+    for (const entry of rawModels) {
+      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+        json(res, 400, { error: 'models must be objects' })
+        return
+      }
+      const record = entry as Record<string, unknown>
+      const modelId = typeof record.id === 'string' ? record.id.trim() : ''
+      if (!modelId) {
+        json(res, 400, { error: 'model id is required' })
+        return
+      }
+      const contextWindow = record.contextWindow
+      const maxOutputTokens = record.maxOutputTokens
+      if (contextWindow !== undefined && contextWindow !== null
+        && (typeof contextWindow !== 'number' || !Number.isFinite(contextWindow))) {
+        json(res, 400, { error: 'contextWindow must be a number' })
+        return
+      }
+      if (maxOutputTokens !== undefined && maxOutputTokens !== null
+        && (typeof maxOutputTokens !== 'number' || !Number.isFinite(maxOutputTokens))) {
+        json(res, 400, { error: 'maxOutputTokens must be a number' })
+        return
+      }
+      modelsInput.push({
+        id: modelId,
+        ...(typeof record.name === 'string' && record.name.trim()
+          ? { name: record.name.trim() }
+          : {}),
+        ...(typeof contextWindow === 'number' ? { contextWindow } : {}),
+        ...(typeof maxOutputTokens === 'number' ? { maxOutputTokens } : {}),
+      })
+    }
+    try {
+      const config = await app.addProviderModels({
+        provider: parts[3]!,
         models: modelsInput,
       })
       json(res, 200, { config })
