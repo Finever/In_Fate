@@ -23,7 +23,7 @@ function provider(id: string): AppConfig['providers'][number] {
   }
 }
 
-test('删除服务商：内置拒绝、被 agent 使用拒绝、自建可删', async () => {
+test('删除服务商：未知拒绝、被 agent 使用拒绝、自建可删', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'if-model-remove-'))
   const dataRoot = join(dir, 'data')
   const configPath = join(dir, 'if.json')
@@ -43,7 +43,6 @@ test('删除服务商：内置拒绝、被 agent 使用拒绝、自建可删', a
 
   const app = buildBundle(config, new Container(), { configPath })
   try {
-    await assert.rejects(() => app.removeModelProvider('deepseek'), /内置/)
     await assert.rejects(() => app.removeModelProvider('missing'), /unknown provider/)
 
     const afterFake2 = await app.removeModelProvider('fake2')
@@ -60,7 +59,7 @@ test('删除服务商：内置拒绝、被 agent 使用拒绝、自建可删', a
     rmSync(join(dataRoot, 'agents', 'main', 'settings.json'), { force: true })
     const afterFake1 = await app.removeModelProvider('fake1')
     assert.equal(afterFake1.providers.some(item => item.id === 'fake1'), false)
-    assert.equal(afterFake1.providers.some(item => item.id === 'deepseek'), true)
+    assert.equal(afterFake1.providers.length, 0)
     const disk2 = JSON.parse(readFileSync(configPath, 'utf8')) as {
       providers: Array<{ id: string }>
     }

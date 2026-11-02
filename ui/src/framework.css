@@ -4172,3 +4172,32 @@ body.fw-resizing {
 .fw-model-provider-grid > .fw-panel-empty {
   grid-column: 1 / -1;
 }
+
+/* ---------- 设置：启用状态与格式 ---------- */
+
+.fw-settings-provider-head {
+  flex-wrap: wrap;
+}
+.fw-settings-provider-format {
+  color: var(--faint);
+  font: 9px var(--mono);
+}
+.fw-settings-enabled,
+.fw-settings-model-enabled {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--faint);
+  font-size: 9.5px;
+}
+.fw-settings-enabled input,
+.fw-settings-model-enabled input {
+  accent-color: var(--accent);
+}
+.fw-settings-model.is-disabled {
+  opacity: .55;
+}
+
+.fw-model-provider-grid .fw-settings-provider.is-disabled {
+  opacity: .58;
+}

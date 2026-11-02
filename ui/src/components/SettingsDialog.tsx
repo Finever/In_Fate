@@ -23,6 +23,16 @@ function formatTokens(value: number | undefined): string {
   return value === undefined ? '未配置' : Math.round(value).toLocaleString('en-US')
 }
 
+function formatLabel(family: string): string {
+  switch (family) {
+    case 'openai-chat-completions': return 'OpenAI 兼容 · Chat Completions'
+    case 'openai-responses': return 'OpenAI Responses'
+    case 'anthropic-messages': return 'Anthropic Messages'
+    case 'google-generate-content': return 'Google Generate Content'
+    default: return family || '未知格式'
+  }
+}
+
 function pricingSummary(pricing: ModelPricing | undefined): string {
   if (!pricing) return '未配置单价'
   const rate = (value: number | undefined): string =>
@@ -55,7 +65,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [newModel, setNewModel] = useState('')
   const [addingModels, setAddingModels] = useState(false)
   const [providerQuery, setProviderQuery] = useState('')
-  const [providerFilter, setProviderFilter] = useState<'all' | 'configured'>('all')
+  const [providerFilter, setProviderFilter] = useState<'enabled' | 'disabled' | 'all'>('enabled')
+  const [showDisabledModels, setShowDisabledModels] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
@@ -102,23 +113,33 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     setSelectedModels(new Set())
     setNewModel('')
     setAddingModels(false)
+    setShowDisabledModels(false)
     setDeleting(false)
   }, [providerId])
 
   const provider = config?.providers.find(item => item.id === providerId)
   const draft = provider ? drafts[provider.id] : undefined
   const providerList = config?.providers ?? []
+  const activeProviderCount = providerList.filter(item => item.enabled !== false).length
   const providerNeedle = providerQuery.trim().toLowerCase()
   const visibleProviders = providerList
     .filter(item => {
-      if (providerFilter === 'configured' && !item.hasApiKey) return false
+      if (providerFilter === 'enabled' && item.enabled === false) return false
+      if (providerFilter === 'disabled' && item.enabled !== false) return false
       return !providerNeedle
         || item.name.toLowerCase().includes(providerNeedle)
         || item.id.toLowerCase().includes(providerNeedle)
     })
     .sort((a, b) =>
-      Number(b.hasApiKey) - Number(a.hasApiKey)
+      Number(b.enabled) - Number(a.enabled)
+      || Number(b.hasApiKey) - Number(a.hasApiKey)
       || a.name.localeCompare(b.name, 'zh'))
+  const visibleModels = provider
+    ? provider.models.filter(model => showDisabledModels || model.enabled !== false)
+    : []
+  const enabledModelCount = provider
+    ? provider.models.filter(model => model.enabled !== false).length
+    : 0
   const editingProvider = editing
     ? config?.providers.find(item => item.id === editing.providerId)
     : undefined
@@ -246,6 +267,38 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     await addModels([id])
   }
 
+  async function setProviderEnabled(enabled: boolean): Promise<void> {
+    if (!provider) return
+    setSaving(true)
+    setError(undefined)
+    setNotice(undefined)
+    try {
+      const next = await api.saveModelConfig({ provider: provider.id, enabled })
+      applyConfig(next)
+      setNotice(enabled ? '服务商已启用' : '服务商已停用')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function setModelEnabled(modelId: string, enabled: boolean): Promise<void> {
+    if (!provider) return
+    setSaving(true)
+    setError(undefined)
+    setNotice(undefined)
+    try {
+      const next = await api.saveModelCard({ provider: provider.id, model: modelId, enabled })
+      applyConfig(next)
+      setNotice(enabled ? '模型已启用' : '模型已停用')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function deleteProvider(): Promise<void> {
     if (!provider || !provider.removable) return
     if (!window.confirm(`删除服务商「${provider.name}」？\n配置里的端点、模型和 key 会一起删掉。`)) return
@@ -320,7 +373,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                   </span>
                   <span className="fw-settings-category-text">
                     <b>模型服务</b>
-                    <small>{config ? `${config.providers.length} 个服务商` : '载入中'}</small>
+                    <small>{config ? `${activeProviderCount} 个启用` : '载入中'}</small>
                   </span>
                 </button>
                 <button
@@ -376,17 +429,24 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                           <div className="fw-model-filter">
                             <button
                               type="button"
+                              className={providerFilter === 'enabled' ? 'is-active' : ''}
+                              onClick={() => setProviderFilter('enabled')}
+                            >
+                              启用
+                            </button>
+                            <button
+                              type="button"
+                              className={providerFilter === 'disabled' ? 'is-active' : ''}
+                              onClick={() => setProviderFilter('disabled')}
+                            >
+                              已停用
+                            </button>
+                            <button
+                              type="button"
                               className={providerFilter === 'all' ? 'is-active' : ''}
                               onClick={() => setProviderFilter('all')}
                             >
                               全部
-                            </button>
-                            <button
-                              type="button"
-                              className={providerFilter === 'configured' ? 'is-active' : ''}
-                              onClick={() => setProviderFilter('configured')}
-                            >
-                              已配置 key
                             </button>
                           </div>
                           <small>{visibleProviders.length} / {providerList.length}</small>
@@ -398,7 +458,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                               <button
                                 key={item.id}
                                 type="button"
-                                className={`fw-settings-provider${active ? ' is-active' : ''}`}
+                                className={`fw-settings-provider${active ? ' is-active' : ''}${item.enabled === false ? ' is-disabled' : ''}`}
                                 onClick={() => chooseProvider(item.id)}
                                 disabled={saving || Boolean(editing)}
                               >
@@ -408,8 +468,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                                 <span className="fw-settings-provider-text">
                                   <b>{item.name}</b>
                                   <small>
-                                    {item.models.length} 个模型
+                                    {item.models.filter(model => model.enabled !== false).length} 个模型
                                     {!item.hasApiKey ? ' · 未配置 key' : ''}
+                                    {item.enabled === false ? ' · 已停用' : ''}
                                   </small>
                                 </span>
                               </button>
@@ -426,20 +487,27 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                       <>
                         <div className="fw-settings-provider-head">
                           <h3>{provider.name}</h3>
-                          {!provider.removable && (
-                            <span className="fw-settings-provider-builtin">内置</span>
-                          )}
+                          <span className="fw-settings-provider-format">
+                            {formatLabel(provider.endpointFamily)}
+                          </span>
                           <span className="fw-model-head-spacer" />
-                          {provider.removable && (
-                            <button
-                              type="button"
-                              className="fw-settings-provider-delete"
-                              onClick={() => void deleteProvider()}
+                          <label className="fw-settings-enabled">
+                            <input
+                              type="checkbox"
+                              checked={provider.enabled}
+                              onChange={event => void setProviderEnabled(event.target.checked)}
                               disabled={saving || deleting}
-                            >
-                              {deleting ? '删除中…' : '删除服务商'}
-                            </button>
-                          )}
+                            />
+                            启用
+                          </label>
+                          <button
+                            type="button"
+                            className="fw-settings-provider-delete"
+                            onClick={() => void deleteProvider()}
+                            disabled={saving || deleting}
+                          >
+                            {deleting ? '删除中…' : '删除服务商'}
+                          </button>
                         </div>
 
                     <div className="fw-settings-fields">
@@ -471,8 +539,21 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                     <section className="fw-settings-models">
                       <div className="fw-settings-models-head">
                         <span>模型</span>
-                        <small>{provider.models.length} 个</small>
+                        <small>
+                          {enabledModelCount === provider.models.length
+                            ? `${provider.models.length} 个`
+                            : `${enabledModelCount} / ${provider.models.length} 个`}
+                        </small>
                         <span className="fw-model-head-spacer" />
+                        {provider.models.some(model => model.enabled === false) && (
+                          <button
+                            type="button"
+                            className="fw-settings-probe"
+                            onClick={() => setShowDisabledModels(value => !value)}
+                          >
+                            {showDisabledModels ? '隐藏已停用' : '显示已停用'}
+                          </button>
+                        )}
                         <button
                           type="button"
                           className="fw-settings-probe"
@@ -550,10 +631,18 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                           还没有模型；点「读取模型列表」或手动添加。
                         </div>
                       )}
+                      {provider.models.length > 0 && visibleModels.length === 0 && (
+                        <div className="fw-settings-models-empty">
+                          没有启用的模型；点「显示已停用」查看。
+                        </div>
+                      )}
 
                       <div className="fw-settings-model-list">
-                        {provider.models.map(model => (
-                          <div className="fw-settings-model" key={model.id}>
+                        {visibleModels.map(model => (
+                          <div
+                            className={`fw-settings-model${model.enabled === false ? ' is-disabled' : ''}`}
+                            key={model.id}
+                          >
                             <span className="fw-settings-model-body">
                               <span className="fw-settings-model-name">
                                 {model.name ?? model.id}
@@ -572,6 +661,15 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                                 )}
                               </span>
                             </span>
+                            <label className="fw-settings-model-enabled">
+                              <input
+                                type="checkbox"
+                                checked={model.enabled !== false}
+                                onChange={event => void setModelEnabled(model.id, event.target.checked)}
+                                disabled={saving}
+                              />
+                              启用
+                            </label>
                             <button
                               type="button"
                               className="fw-settings-model-edit"

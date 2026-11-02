@@ -281,6 +281,8 @@ export interface App {
   saveModelConfig(input: ModelConfigUpdate): Promise<ModelConfigView>
   /** 添加一个新的 OpenAI 兼容服务商；有 configPath 时写回配置文件。 */
   addModelProvider(input: ModelProviderInput): Promise<ModelConfigView>
+  /** 添加时的内置模板（不会自动注册成 provider）。 */
+  modelProviderTemplates(): readonly ProviderConfig[]
   /** 用 provider 的 key / baseUrl 调 GET /models，返回模型 id。 */
   probeModelProvider(input: ModelProbeInput): Promise<{ models: readonly string[] }>
   /** 给已有 provider 追加模型；重复 id 跳过。 */
@@ -362,10 +364,12 @@ export interface ModelConfigProviderView {
     readonly contextWindow?: number
     readonly maxOutputTokens?: number
     readonly pricing?: ModelPricing
+    readonly enabled: boolean
   }>
   readonly hasApiKey: boolean
   readonly apiKeyEnv?: string
-  /** 内置服务商不可删。 */
+  readonly enabled: boolean
+  /** 配置里的 provider 都可以删；模板不会进这里。 */
   readonly removable: boolean
 }
 
@@ -379,6 +383,7 @@ export interface ModelConfigUpdate {
   /** 空字符串表示不改；不传也保持原值。 */
   readonly apiKey?: string
   readonly baseUrl?: string
+  readonly enabled?: boolean
 }
 
 export interface ModelCardUpdate {
@@ -387,6 +392,7 @@ export interface ModelCardUpdate {
   readonly contextWindow?: number | null
   readonly maxOutputTokens?: number | null
   readonly pricing?: ModelPricing | null
+  readonly enabled?: boolean
 }
 
 export interface ModelProviderModelInput {
@@ -403,6 +409,8 @@ export interface ModelProviderInput {
   readonly baseUrl: string
   readonly apiKey?: string
   readonly apiKeyEnv?: string
+  /** 端点/格式；当前只实现 openai-chat-completions。 */
+  readonly format?: string
   readonly models: readonly ModelProviderModelInput[]
 }
 
@@ -483,6 +491,7 @@ interface RawModelEntry {
   contextWindow?: number
   maxOutputTokens?: number
   pricing?: ModelPricing
+  enabled?: boolean
 }
 
 interface RawProviderEntry {
@@ -491,6 +500,7 @@ interface RawProviderEntry {
   description?: string
   apiKey?: string
   apiKeyEnv?: string
+  enabled?: boolean
   defaultChatEndpoint?: string
   endpoints?: Record<string, {
     baseUrl?: string
@@ -714,15 +724,9 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     return store
   }
 
-  // 模型：配置提供，代码不猜；内置服务商只补缺，不覆盖用户配置。
-  const configuredProviders = [...config.providers]
-  for (const builtin of BUILTIN_PROVIDERS) {
-    if (!configuredProviders.some(provider => provider.id === builtin.id)) {
-      configuredProviders.push(builtin)
-    }
-  }
+  // 模型：只注册配置里真实存在的来源；内置模板只在添加时参考。
   const models = new Registry()
-  for (const provider of configuredProviders) models.register(provider)
+  for (const provider of config.providers) models.register(provider)
   container.register('models', models)
 
   const providerOverrides = new Map<string, { apiKey?: string; baseUrl?: string }>()
@@ -792,6 +796,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     ...(provider.description ? { description: provider.description } : {}),
     ...((apiKey ?? provider.apiKey) ? { apiKey: apiKey ?? provider.apiKey } : {}),
     ...(provider.apiKeyEnv ? { apiKeyEnv: provider.apiKeyEnv } : {}),
+    ...(provider.enabled !== undefined ? { enabled: provider.enabled } : {}),
     ...(provider.defaultChatEndpoint
       ? { defaultChatEndpoint: provider.defaultChatEndpoint }
       : {}),
@@ -816,6 +821,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         ? { maxOutputTokens: model.maxOutputTokens }
         : {}),
       ...(model.pricing ? { pricing: model.pricing } : {}),
+      ...(model.enabled !== undefined ? { enabled: model.enabled } : {}),
     })),
   })
 
@@ -856,6 +862,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
               ? { maxOutputTokens: merged.maxOutputTokens }
               : {}),
             ...(merged.pricing ? { pricing: merged.pricing } : {}),
+            enabled: merged.enabled !== false,
           }
         }),
         hasApiKey: Boolean(
@@ -864,7 +871,8 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
           || (provider.apiKeyEnv && process.env[provider.apiKeyEnv]),
         ),
         ...(provider.apiKeyEnv ? { apiKeyEnv: provider.apiKeyEnv } : {}),
-        removable: !BUILTIN_PROVIDERS.some(builtin => builtin.id === provider.id),
+        enabled: provider.enabled !== false,
+        removable: true,
       }
     }),
   })
@@ -880,6 +888,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     await writeConfigFile(raw => {
       const rawProvider = ensureRawProvider(raw, provider)
       if (next.apiKey) rawProvider.apiKey = next.apiKey
+      if (input.enabled !== undefined) rawProvider.enabled = input.enabled
       if (next.baseUrl) {
         const family = rawProvider.defaultChatEndpoint
           ?? provider.defaultChatEndpoint
@@ -897,6 +906,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       }
     })
     providerOverrides.set(provider.id, next)
+    if (input.enabled !== undefined) models.setEnabled(provider.id, input.enabled)
     return modelConfigView()
   }
 
@@ -940,6 +950,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         if (input.pricing === null) delete rawModel.pricing
         else rawModel.pricing = input.pricing
       }
+      if (input.enabled !== undefined) rawModel.enabled = input.enabled
     })
     modelOverrides.set(key, {
       ...current,
@@ -949,6 +960,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         : {}),
       ...(input.pricing !== undefined ? { pricing: input.pricing } : {}),
     })
+    if (input.enabled !== undefined) models.setModelEnabled(provider.id, input.model, input.enabled)
     return modelConfigView()
   }
 
@@ -961,6 +973,10 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     if (!name) throw new Error('provider name is required')
     const baseUrl = input.baseUrl.trim()
     if (!baseUrl) throw new Error('baseUrl is required')
+    const format = input.format?.trim() || 'openai-chat-completions'
+    if (format !== 'openai-chat-completions') {
+      throw new Error(`暂不支持这个端点格式：${format}`)
+    }
     if (models.list().some(provider => provider.id === id)) {
       throw new Error(`provider already exists: ${id}`)
     }
@@ -995,10 +1011,10 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       ...(input.description?.trim() ? { description: input.description.trim() } : {}),
       ...(input.apiKey?.trim() ? { apiKey: input.apiKey.trim() } : {}),
       ...(input.apiKeyEnv?.trim() ? { apiKeyEnv: input.apiKeyEnv.trim() } : {}),
-      defaultChatEndpoint: 'openai-chat-completions',
+      defaultChatEndpoint: format as ProviderConfig['defaultChatEndpoint'],
       endpoints: {
-        'openai-chat-completions': {
-          adapterFamily: 'openai-chat-completions',
+        [format]: {
+          adapterFamily: format,
           baseUrl,
         },
       },
@@ -1072,9 +1088,6 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
 
   const removeModelProvider = async (id: string): Promise<ModelConfigView> => {
     models.get(id)
-    if (BUILTIN_PROVIDERS.some(builtin => builtin.id === id)) {
-      throw new Error(`内置服务商不能删除：${id}`)
-    }
     for (const settings of agentSettings.list()) {
       if (settings.models?.main?.provider === id) {
         throw new Error(`agent ${settings.agentId} 正在使用这个服务商，先改掉它的主模型`)
@@ -2351,6 +2364,9 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
 
     saveModelConfig,
     addModelProvider,
+    modelProviderTemplates() {
+      return BUILTIN_PROVIDERS
+    },
     addProviderModels,
     removeModelProvider,
     probeModelProvider,

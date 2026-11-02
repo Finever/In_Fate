@@ -131,12 +131,15 @@ export function StatusPanel({
     }
   }, [agentId])
 
-  const modelOptions = useMemo(() => config?.providers.flatMap(provider =>
-    provider.models.map(model => ({
-      provider: provider.id,
-      model: model.id,
-      label: `${provider.name} / ${model.name ?? model.id}`,
-    }))) ?? [], [config])
+  const modelOptions = useMemo(() => config?.providers
+    .filter(provider => provider.enabled !== false)
+    .flatMap(provider => provider.models
+      .filter(model => model.enabled !== false)
+      .map(model => ({
+        provider: provider.id,
+        model: model.id,
+        label: `${provider.name} / ${model.name ?? model.id}`,
+      }))) ?? [], [config])
 
   const selectedModel = modelProvider && modelId
     ? { provider: modelProvider, model: modelId }

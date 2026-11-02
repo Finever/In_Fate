@@ -7,6 +7,7 @@ import type {
   ModelConfig,
   ModelProviderInput,
   ModelProviderModelInput,
+  ModelProviderTemplate,
   SaveModelCardInput,
   SaveModelConfigInput,
   LogSearchResult,
@@ -205,6 +206,13 @@ export const api = {
     return body.config
   },
 
+  async modelProviderTemplates(): Promise<ModelProviderTemplate[]> {
+    const body = await request<{ providers: ModelProviderTemplate[] }>(
+      '/api/model-config/templates',
+    )
+    return body.providers
+  },
+
   async removeModelProvider(provider: string): Promise<ModelConfig> {
     const body = await request<{ config: ModelConfig }>(
       `/api/model-config/providers/${encodeURIComponent(provider)}`,
@@ -247,6 +255,7 @@ export const api = {
             ? { maxOutputTokens: input.maxOutputTokens }
             : {}),
           ...(input.pricing !== undefined ? { pricing: input.pricing } : {}),
+          ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
         }),
       },
     )

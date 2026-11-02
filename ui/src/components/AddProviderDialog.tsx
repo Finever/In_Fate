@@ -1,6 +1,29 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
-import type { ModelConfig, ModelProviderInput } from '../types'
+import type { ModelConfig, ModelProviderInput, ModelProviderTemplate } from '../types'
+
+const FORMATS = [
+  {
+    value: 'openai-chat-completions',
+    label: 'OpenAI 兼容 · Chat Completions',
+    supported: true,
+  },
+  {
+    value: 'openai-responses',
+    label: 'OpenAI Responses（未接入）',
+    supported: false,
+  },
+  {
+    value: 'anthropic-messages',
+    label: 'Anthropic Messages（未接入）',
+    supported: false,
+  },
+  {
+    value: 'google-generate-content',
+    label: 'Google Generate Content（未接入）',
+    supported: false,
+  },
+] as const
 
 function parseModels(text: string): ModelProviderInput['models'] {
   return text
@@ -29,15 +52,33 @@ export function AddProviderDialog({
   onClose: () => void
   onCreated: (config: ModelConfig, providerId: string) => void
 }) {
+  const [templates, setTemplates] = useState<ModelProviderTemplate[]>([])
+  const [templateId, setTemplateId] = useState('')
+  const [templateError, setTemplateError] = useState<string>()
   const [id, setId] = useState('')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
+  const [providerFormat, setProviderFormat] = useState('openai-chat-completions')
   const [apiKey, setApiKey] = useState('')
   const [apiKeyEnv, setApiKeyEnv] = useState('')
   const [modelsText, setModelsText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
+
+  useEffect(() => {
+    let cancelled = false
+    void api.modelProviderTemplates()
+      .then(next => {
+        if (!cancelled) setTemplates(next)
+      })
+      .catch(reason => {
+        if (!cancelled) setTemplateError(reason instanceof Error ? reason.message : String(reason))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
@@ -52,8 +93,27 @@ export function AddProviderDialog({
     id.trim()
     && name.trim()
     && baseUrl.trim()
+    && providerFormat === 'openai-chat-completions'
     && models.every(model => model.id),
   )
+
+  function applyTemplate(nextId: string): void {
+    setTemplateId(nextId)
+    const template = templates.find(item => item.id === nextId)
+    if (!template) return
+    const family = template.defaultChatEndpoint
+      ?? Object.keys(template.endpoints)[0]
+      ?? 'openai-chat-completions'
+    setId(template.id)
+    setName(template.name)
+    setDescription(template.description ?? '')
+    setBaseUrl(template.endpoints[family]?.baseUrl ?? '')
+    setProviderFormat(family)
+    setApiKeyEnv(template.apiKeyEnv ?? '')
+    setApiKey('')
+    setModelsText(template.models.map(model => model.id).join('\n'))
+    setError(undefined)
+  }
 
   async function submit(): Promise<void> {
     if (!valid || busy) return
@@ -64,6 +124,7 @@ export function AddProviderDialog({
         id: id.trim(),
         name: name.trim(),
         baseUrl: baseUrl.trim(),
+        format: providerFormat,
         ...(description.trim() ? { description: description.trim() } : {}),
         ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
         ...(apiKeyEnv.trim() ? { apiKeyEnv: apiKeyEnv.trim() } : {}),
@@ -105,8 +166,27 @@ export function AddProviderDialog({
         </header>
 
         <p className="fw-provider-add-hint">
-          内置服务商已经自动列出；这里用于添加别的 OpenAI 兼容来源。
+          内置服务商只出现在这里当模板，不会自动出现在设置列表里。
         </p>
+
+        <label className="fw-field">
+          <span>从模板</span>
+          <select
+            value={templateId}
+            onChange={event => applyTemplate(event.target.value)}
+            disabled={busy}
+          >
+            <option value="">自定义</option>
+            {templates.map(template => (
+              <option key={template.id} value={template.id}>{template.name}</option>
+            ))}
+          </select>
+          <small>
+            {templateError
+              ? `模板读取失败：${templateError}`
+              : '选模板会自动填好端点、格式和 key 环境变量，仍可改。'}
+          </small>
+        </label>
 
         <label className="fw-field">
           <span>id</span>
@@ -129,6 +209,26 @@ export function AddProviderDialog({
             placeholder="显示在设置里的名字"
             disabled={busy}
           />
+        </label>
+
+        <label className="fw-field">
+          <span>格式</span>
+          <select
+            value={providerFormat}
+            onChange={event => setProviderFormat(event.target.value)}
+            disabled={busy}
+          >
+            {FORMATS.map(format => (
+              <option
+                key={format.value}
+                value={format.value}
+                disabled={!format.supported}
+              >
+                {format.label}
+              </option>
+            ))}
+          </select>
+          <small>当前运行时只实现了 OpenAI 兼容 Chat Completions；其它格式的适配器还没接。</small>
         </label>
 
         <label className="fw-field">

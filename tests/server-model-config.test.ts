@@ -146,7 +146,7 @@ test('模型配置：provider 凭据、模型卡与价格写回，view 不回传
   }
 })
 
-test('内置服务商默认出现；添加服务商写入配置并拒绝重复 id', async () => {
+test('内置只做模板；添加服务商写入配置并拒绝重复 id', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'if-server-model-add-'))
   const dataRoot = join(dir, 'data')
   const configPath = join(dir, 'if.json')
@@ -167,8 +167,15 @@ test('内置服务商默认出现；添加服务商写入配置并拒绝重复 i
     }
     const ids = initialBody.config.providers.map(provider => provider.id)
     assert.equal(ids.includes('fake'), true)
-    assert.equal(ids.includes('deepseek'), true)
-    assert.equal(ids.includes('openai'), true)
+    assert.equal(ids.includes('deepseek'), false)
+    assert.equal(ids.includes('openai'), false)
+
+    const templates = await fetch(`${handle.url}/api/model-config/templates`, { headers })
+    assert.equal(templates.status, 200)
+    const templateBody = await templates.json() as { providers: Array<{ id: string }> }
+    const templateIds = templateBody.providers.map(provider => provider.id)
+    assert.equal(templateIds.includes('deepseek'), true)
+    assert.equal(templateIds.includes('openai'), true)
 
     const created = await fetch(`${handle.url}/api/model-config/providers`, {
       method: 'POST',
@@ -220,6 +227,23 @@ test('内置服务商默认出现；添加服务商写入配置并拒绝重复 i
       }),
     })
     assert.equal(duplicate.status, 400)
+
+    const fromTemplate = await fetch(`${handle.url}/api/model-config/providers`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        id: 'deepseek',
+        name: 'DeepSeek',
+        baseUrl: 'https://api.deepseek.com/v1',
+        format: 'openai-chat-completions',
+        models: [],
+      }),
+    })
+    assert.equal(fromTemplate.status, 200)
+    const fromTemplateBody = await fromTemplate.json() as {
+      config: { providers: Array<{ id: string }> }
+    }
+    assert.equal(fromTemplateBody.config.providers.some(provider => provider.id === 'deepseek'), true)
 
     const builtinDuplicate = await fetch(`${handle.url}/api/model-config/providers`, {
       method: 'POST',

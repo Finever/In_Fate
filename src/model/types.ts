@@ -63,6 +63,8 @@ export interface ModelCard {
   readonly inputModalities?: readonly string[]
   readonly outputModalities?: readonly string[]
   readonly pricing?: ModelPricing
+  /** false = 停用；不填按启用算 */
+  readonly enabled?: boolean
 }
 
 export interface ProviderConfig {
@@ -76,6 +78,8 @@ export interface ProviderConfig {
   readonly apiKey?: string
   /** 从环境变量读密钥 */
   readonly apiKeyEnv?: string
+  /** false = 停用；不填按启用算 */
+  readonly enabled?: boolean
 }
 
 export interface ToolSpec {

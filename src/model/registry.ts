@@ -41,6 +41,20 @@ export class ModelRegistry {
     this.providers.delete(id)
   }
 
+  setEnabled(id: string, enabled: boolean): void {
+    const provider = this.get(id)
+    this.providers.set(id, { ...provider, enabled })
+  }
+
+  setModelEnabled(id: string, modelId: string, enabled: boolean): void {
+    const provider = this.get(id)
+    this.providers.set(id, {
+      ...provider,
+      models: provider.models.map(model =>
+        model.id === modelId ? { ...model, enabled } : model),
+    })
+  }
+
   /** 给已有 provider 追加模型；重复 id 跳过。 */
   addModels(id: string, models: readonly ModelCard[]): void {
     const provider = this.get(id)
@@ -56,8 +70,10 @@ export class ModelRegistry {
 
   resolve(providerId: string, modelId: string, apiFamily?: string): ResolvedModel {
     const provider = this.get(providerId)
+    if (provider.enabled === false) throw new Error(`provider is disabled: ${providerId}`)
     const model = provider.models.find(item => item.id === modelId)
     if (!model) throw new Error(`unknown model: ${providerId}/${modelId}`)
+    if (model.enabled === false) throw new Error(`model is disabled: ${providerId}/${modelId}`)
 
     const family = apiFamily ?? provider.defaultChatEndpoint ?? 'openai-chat-completions'
     const endpoint = provider.endpoints[family]

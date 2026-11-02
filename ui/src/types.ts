@@ -211,9 +211,11 @@ export interface ModelConfigProvider {
     contextWindow?: number
     maxOutputTokens?: number
     pricing?: ModelPricing
+    enabled: boolean
   }>
   hasApiKey: boolean
   apiKeyEnv?: string
+  enabled: boolean
   removable: boolean
 }
 
@@ -226,6 +228,7 @@ export interface SaveModelConfigInput {
   provider: string
   apiKey?: string
   baseUrl?: string
+  enabled?: boolean
 }
 
 export interface SaveModelCardInput {
@@ -234,6 +237,7 @@ export interface SaveModelCardInput {
   contextWindow?: number | null
   maxOutputTokens?: number | null
   pricing?: ModelPricing | null
+  enabled?: boolean
 }
 
 export interface ModelProviderModelInput {
@@ -250,7 +254,23 @@ export interface ModelProviderInput {
   baseUrl: string
   apiKey?: string
   apiKeyEnv?: string
+  format?: string
   models: ModelProviderModelInput[]
+}
+
+export interface ModelProviderTemplate {
+  id: string
+  name: string
+  description?: string
+  apiKeyEnv?: string
+  defaultChatEndpoint?: string
+  endpoints: Record<string, { baseUrl: string; adapterFamily?: string }>
+  models: Array<{
+    id: string
+    name?: string
+    contextWindow?: number
+    maxOutputTokens?: number
+  }>
 }
 
 export interface AgentPresetSummary {

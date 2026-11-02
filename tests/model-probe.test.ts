@@ -57,6 +57,14 @@ test('读取 provider 模型列表并手动追加模型', async () => {
     const probed = await app.probeModelProvider({ provider: 'fake' })
     assert.deepEqual(probed.models, ['m1', 'm2'])
 
+    await assert.rejects(() => app.addModelProvider({
+      id: 'native',
+      name: 'Native',
+      baseUrl: 'http://127.0.0.1:1/v1',
+      format: 'anthropic-messages',
+      models: [],
+    }), /暂不支持/)
+
     const withModel = await app.addProviderModels({
       provider: 'fake',
       models: [

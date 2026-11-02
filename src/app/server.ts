@@ -241,6 +241,12 @@ async function handle(
     return
   }
 
+  if (req.method === 'GET' && parts[1] === 'model-config' && parts[2] === 'templates'
+    && parts.length === 3) {
+    json(res, 200, { providers: app.modelProviderTemplates() })
+    return
+  }
+
   if (req.method === 'POST' && parts[1] === 'model-config' && parts.length === 2) {
     const body = await readOptionalJson(req)
     const provider = typeof body.provider === 'string' ? body.provider.trim() : ''
@@ -248,11 +254,16 @@ async function handle(
       json(res, 400, { error: 'provider is required' })
       return
     }
+    if (body.enabled !== undefined && typeof body.enabled !== 'boolean') {
+      json(res, 400, { error: 'enabled must be a boolean' })
+      return
+    }
     try {
       const config = await app.saveModelConfig({
         provider,
         ...(typeof body.apiKey === 'string' ? { apiKey: body.apiKey } : {}),
         ...(typeof body.baseUrl === 'string' ? { baseUrl: body.baseUrl } : {}),
+        ...(typeof body.enabled === 'boolean' ? { enabled: body.enabled } : {}),
       })
       json(res, 200, { config })
     } catch (error) {
@@ -323,6 +334,9 @@ async function handle(
           : {}),
         ...(typeof body.apiKeyEnv === 'string' && body.apiKeyEnv.trim()
           ? { apiKeyEnv: body.apiKeyEnv.trim() }
+          : {}),
+        ...(typeof body.format === 'string' && body.format.trim()
+          ? { format: body.format.trim() }
           : {}),
         models: modelsInput,
       })
@@ -427,6 +441,10 @@ async function handle(
     const body = await readOptionalJson(req)
     const contextWindow = body.contextWindow
     const maxOutputTokens = body.maxOutputTokens
+    if (body.enabled !== undefined && typeof body.enabled !== 'boolean') {
+      json(res, 400, { error: 'enabled must be a boolean' })
+      return
+    }
     if (contextWindow !== undefined && contextWindow !== null
       && (typeof contextWindow !== 'number' || !Number.isFinite(contextWindow))) {
       json(res, 400, { error: 'contextWindow must be a number or null' })
@@ -455,6 +473,7 @@ async function handle(
         ...(body.pricing !== undefined
           ? { pricing: body.pricing as never }
           : {}),
+        ...(typeof body.enabled === 'boolean' ? { enabled: body.enabled } : {}),
       })
       json(res, 200, { config })
     } catch (error) {
