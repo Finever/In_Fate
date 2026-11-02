@@ -7,8 +7,12 @@ import type {
   ModelConfig,
   SaveModelCardInput,
   SaveModelConfigInput,
+  LogSearchResult,
+  LogTree,
+  LogViewPage,
   MemoryDocument,
   MemoryFileSummary,
+  MemoryIndexList,
   MemoryProposal,
   MemorySearchHit,
   MemoryValidationIssue,
@@ -300,6 +304,40 @@ export const api = {
   async memoryIndex(): Promise<MemoryFileSummary[]> {
     const body = await request<{ files: MemoryFileSummary[] }>('/api/memory/index')
     return body.files
+  },
+
+  async memoryIndexList(): Promise<MemoryIndexList> {
+    const body = await request<{ index: MemoryIndexList }>('/api/memory/indexlist')
+    return body.index
+  },
+
+  async reindexMemory(): Promise<MemoryIndexList> {
+    const body = await request<{ index: MemoryIndexList }>('/api/memory/reindex', {
+      method: 'POST',
+      body: '{}',
+    })
+    return body.index
+  },
+
+  async memoryLogTree(): Promise<LogTree> {
+    return request<LogTree>('/api/memory/log/tree')
+  },
+
+  async memoryLogPage(
+    day: string,
+    sid: string,
+    options: { offset?: number; limit?: number; jumpN?: number } = {},
+  ): Promise<LogViewPage> {
+    const params = new URLSearchParams({ day, sid })
+    if (options.offset !== undefined) params.set('offset', String(options.offset))
+    if (options.limit !== undefined) params.set('limit', String(options.limit))
+    if (options.jumpN !== undefined) params.set('n', String(options.jumpN))
+    return request<LogViewPage>(`/api/memory/log/file?${params.toString()}`)
+  },
+
+  async memoryLogSearch(query: string, limit = 200): Promise<LogSearchResult> {
+    const params = new URLSearchParams({ q: query, limit: String(limit) })
+    return request<LogSearchResult>(`/api/memory/log/search?${params.toString()}`)
   },
 
   async saveMemoryDocument(

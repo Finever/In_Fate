@@ -10,6 +10,8 @@ import type {
   MemoryValidationIssue,
 } from '../types'
 import { Icon } from './Icon'
+import { MemoryIndexView } from './MemoryIndexView'
+import { MemoryLogView } from './MemoryLogView'
 
 const PAGE_SIZE = 20
 const SEARCH_LIMIT = 50
@@ -51,9 +53,18 @@ interface EntryEditorProps {
   onChange: (patch: Partial<MemoryEntry>) => void
   onMove: (delta: number) => void
   onRemove: () => void
+  onOpenLog?: (addr: string) => void
 }
 
-function EntryEditor({ entry, index, total, onChange, onMove, onRemove }: EntryEditorProps) {
+function EntryEditor({
+  entry,
+  index,
+  total,
+  onChange,
+  onMove,
+  onRemove,
+  onOpenLog,
+}: EntryEditorProps) {
   const quotes = entry.quotes ?? []
 
   function setQuotes(next: MemoryQuote[]): void {
@@ -180,6 +191,15 @@ function EntryEditor({ entry, index, total, onChange, onMove, onRemove }: EntryE
               />
               <button
                 type="button"
+                className="fw-mem-icon"
+                onClick={() => onOpenLog?.(quote['log-addr'] ?? '')}
+                disabled={!quote['log-addr']}
+                title="在日志里打开"
+              >
+                ↗
+              </button>
+              <button
+                type="button"
                 className="fw-mem-icon is-danger"
                 onClick={() => setQuotes(quotes.filter((_, i) => i !== quoteIndex))}
                 title="删除原话"
@@ -207,6 +227,8 @@ function EntryEditor({ entry, index, total, onChange, onMove, onRemove }: EntryE
 export function MemoryBrowser({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => void }) {
   const [files, setFiles] = useState<MemoryFileSummary[]>([])
   const [indexLoading, setIndexLoading] = useState(true)
+  const [view, setView] = useState<'entries' | 'index' | 'log'>('entries')
+  const [logTarget, setLogTarget] = useState<{ addr: string; key: number }>()
   const [selected, setSelected] = useState<string>()
   const [draft, setDraft] = useState<MemoryDocument>()
   const [dirty, setDirty] = useState(false)
@@ -383,55 +405,83 @@ export function MemoryBrowser({ onDirtyChange }: { onDirtyChange?: (dirty: boole
     }
   }
 
+  function openLog(addr: string): void {
+    if (!addr) return
+    setLogTarget(current => ({ addr, key: (current?.key ?? 0) + 1 }))
+    setView('log')
+  }
+
   const entries = draft ? draft.entries.slice(0, visible) : []
   const remaining = draft ? draft.entries.length - entries.length : 0
 
   return (
     <div className="fw-mem">
-      <form
-        className="fw-mem-search"
-        onSubmit={event => {
-          event.preventDefault()
-          void runSearch()
-        }}
-      >
-        <input
-          autoFocus
-          value={query}
-          onChange={event => setQuery(event.target.value)}
-          placeholder="搜索所有域里的条目 / 原话"
-          aria-label="搜索全局记忆"
-        />
-        <button type="submit" disabled={searching || !query.trim()}>
-          {searching ? '搜索中…' : '搜索'}
-        </button>
-        {searchMode && (
+      <div className="fw-mem-tabs">
+        {([
+          ['entries', '条目'],
+          ['index', '索引'],
+          ['log', '日志'],
+        ] as const).map(([id, label]) => (
           <button
+            key={id}
             type="button"
-            className="fw-mem-clear"
-            onClick={() => {
-              setSearchMode(false)
-              setHits([])
+            className={view === id ? 'is-active' : ''}
+            onClick={() => setView(id)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {view === 'entries' && (
+        <>
+          <form
+            className="fw-mem-search"
+            onSubmit={event => {
+              event.preventDefault()
+              void runSearch()
             }}
           >
-            清除
-          </button>
-        )}
-      </form>
+            <input
+              autoFocus
+              value={query}
+              onChange={event => setQuery(event.target.value)}
+              placeholder="搜索所有域里的条目 / 原话"
+              aria-label="搜索全局记忆"
+            />
+            <button type="submit" disabled={searching || !query.trim()}>
+              {searching ? '搜索中…' : '搜索'}
+            </button>
+            {searchMode && (
+              <button
+                type="button"
+                className="fw-mem-clear"
+                onClick={() => {
+                  setSearchMode(false)
+                  setHits([])
+                }}
+              >
+                清除
+              </button>
+            )}
+          </form>
 
-      {error && <div className="fw-dialog-error fw-mem-error">{error}</div>}
-      {issues.length > 0 && (
-        <div className="fw-mem-issues">
-          {issues.slice(0, 8).map((issue, index) => (
-            <div key={`${issue.path}-${index}`} className={`is-${issue.level}`}>
-              <code>{issue.path}</code>
-              {issue.message}
+          {error && <div className="fw-dialog-error fw-mem-error">{error}</div>}
+          {issues.length > 0 && (
+            <div className="fw-mem-issues">
+              {issues.slice(0, 8).map((issue, index) => (
+                <div key={`${issue.path}-${index}`} className={`is-${issue.level}`}>
+                  <code>{issue.path}</code>
+                  {issue.message}
+                </div>
+              ))}
+              {issues.length > 8 && <div>还有 {issues.length - 8} 条…</div>}
             </div>
-          ))}
-          {issues.length > 8 && <div>还有 {issues.length - 8} 条…</div>}
-        </div>
+          )}
+        </>
       )}
 
+      {view === 'entries' ? (
       <div className="fw-mem-layout">
         <aside className="fw-mem-tree" aria-label="记忆文件">
           <div className="fw-mem-tree-head">
@@ -556,6 +606,7 @@ export function MemoryBrowser({ onDirtyChange }: { onDirtyChange?: (dirty: boole
                     onChange={patch => updateEntry(index, patch)}
                     onMove={delta => moveEntry(index, delta)}
                     onRemove={() => removeEntry(index)}
+                    onOpenLog={openLog}
                   />
                 </div>
               ))}
@@ -587,6 +638,16 @@ export function MemoryBrowser({ onDirtyChange }: { onDirtyChange?: (dirty: boole
           )}
         </div>
       </div>
+      ) : view === 'index' ? (
+        <MemoryIndexView
+          onOpenFile={target => {
+            setView('entries')
+            void selectFile(target)
+          }}
+        />
+      ) : (
+        <MemoryLogView openTarget={logTarget} />
+      )}
     </div>
   )
 }

@@ -357,6 +357,70 @@ async function handle(
     return
   }
 
+  if (req.method === 'GET' && parts[1] === 'memory' && parts[2] === 'indexlist' && parts.length === 3) {
+    try {
+      json(res, 200, { index: app.memoryIndexList() })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  if (req.method === 'POST' && parts[1] === 'memory' && parts[2] === 'reindex' && parts.length === 3) {
+    try {
+      json(res, 200, { index: app.reindexMemory() })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  if (req.method === 'GET' && parts[1] === 'memory' && parts[2] === 'log' && parts[3] === 'tree') {
+    try {
+      json(res, 200, app.memoryLogTree())
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  if (req.method === 'GET' && parts[1] === 'memory' && parts[2] === 'log' && parts[3] === 'file') {
+    const day = url.searchParams.get('day') ?? ''
+    const sid = url.searchParams.get('sid') ?? ''
+    if (!day || !sid) {
+      json(res, 400, { error: 'day and sid are required' })
+      return
+    }
+    const offset = numberParam(url, 'offset')
+    const limit = numberParam(url, 'limit')
+    const jumpN = numberParam(url, 'n')
+    try {
+      json(res, 200, app.memoryLogPage(day, sid, {
+        ...(offset !== undefined ? { offset } : {}),
+        ...(limit !== undefined ? { limit } : {}),
+        ...(jumpN !== undefined ? { jumpN } : {}),
+      }))
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  if (req.method === 'GET' && parts[1] === 'memory' && parts[2] === 'log' && parts[3] === 'search') {
+    const query = url.searchParams.get('q') ?? ''
+    if (!query.trim()) {
+      json(res, 200, { hits: [], total: 0 })
+      return
+    }
+    const limit = numberParam(url, 'limit')
+    try {
+      json(res, 200, app.memoryLogSearch(query, limit ?? 200))
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
   if (req.method === 'PUT' && parts[1] === 'memory' && parts[2] === 'document' && parts.length === 3) {
     let body: { target?: unknown; document?: unknown }
     try {

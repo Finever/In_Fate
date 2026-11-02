@@ -52,6 +52,15 @@ import { MemoryIdentityStore } from '../memory/identity.ts'
 import { MemoryProposalStore, type MemoryAcceptResult, type MemoryProposal, type ProposalStatus } from '../memory/proposals.ts'
 import { MemoryStore, type MemoryDocument, type MemoryEntry, type MemoryFileSummary, type MemorySearchHit } from '../memory/store.ts'
 import type { Issue } from '../memory/validate.ts'
+import { generateIndex, writeIndex, type IndexList } from '../memory/index.ts'
+import {
+  listLogTree,
+  readLogPage,
+  searchLogs,
+  type LogSearchResult,
+  type LogTree,
+  type LogViewPage,
+} from '../memory/log-view.ts'
 import { createMemoryTools } from '../memory/tools.ts'
 import { readFileSync, renameSync, writeFileSync } from 'node:fs'
 import type { ModelRegistry, ResolvedModel } from '../model/registry.ts'
@@ -305,6 +314,20 @@ export interface App {
   memorySearch(query: string, limit?: number): MemorySearchHit[]
   /** 全局 detail 记忆文件索引（域 / 文件 / 条数）。 */
   memoryIndex(): MemoryFileSummary[]
+  /** indexlist 索引（只读，自动生成）。 */
+  memoryIndexList(): IndexList
+  /** 重算并写回 detail/indexlist.json。 */
+  reindexMemory(): IndexList
+  /** 日志树（天 → 会话）。 */
+  memoryLogTree(): LogTree
+  /** 日志分页；jumpN 给前后文与 focus。 */
+  memoryLogPage(
+    day: string,
+    sid: string,
+    options?: { offset?: number; limit?: number; jumpN?: number },
+  ): LogViewPage
+  /** 全库搜日志。 */
+  memoryLogSearch(query: string, limit?: number): LogSearchResult
   /** 读一个 detail 记忆文档。 */
   memoryRead(target: string): MemoryDocument
   /** 人类 UI 整文件保存；校验不过抛 MemoryValidationError。 */
@@ -2027,6 +2050,31 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
 
     memoryIndex() {
       return memoryStore?.listDocuments() ?? []
+    },
+
+    memoryIndexList() {
+      if (!memoryStore) throw new Error('memory is not configured')
+      return generateIndex({ memoryRoot: memoryStore.root })
+    },
+
+    reindexMemory() {
+      if (!memoryStore) throw new Error('memory is not configured')
+      return writeIndex({ memoryRoot: memoryStore.root })
+    },
+
+    memoryLogTree() {
+      if (!memoryStore) throw new Error('memory is not configured')
+      return listLogTree(memoryStore.root)
+    },
+
+    memoryLogPage(day, sid, options) {
+      if (!memoryStore) throw new Error('memory is not configured')
+      return readLogPage(memoryStore.root, day, sid, options)
+    },
+
+    memoryLogSearch(query, limit = 200) {
+      if (!memoryStore) throw new Error('memory is not configured')
+      return searchLogs(memoryStore.root, query, limit)
     },
 
     memoryRead(target) {

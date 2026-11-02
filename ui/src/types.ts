@@ -109,6 +109,67 @@ export interface MemoryValidationIssue {
   message: string
 }
 
+export interface MemoryIndexItem {
+  path: string
+  what: string
+  n?: number
+  updated?: string
+}
+
+export interface MemoryIndexList {
+  kind: 'indexlist'
+  generated: string
+  root: string
+  items: MemoryIndexItem[]
+}
+
+export interface LogTreeFile {
+  sid: string
+  size: number
+  mtime: number
+}
+
+export interface LogTreeDay {
+  day: string
+  files: LogTreeFile[]
+}
+
+export interface LogTree {
+  days: LogTreeDay[]
+}
+
+export interface LogViewRow {
+  n?: number
+  who: string
+  kind: 'msg' | 'tool'
+  ts: string
+  body: string
+}
+
+export interface LogViewPage {
+  total: number
+  offset: number
+  rows: LogViewRow[]
+  focus: number | null
+  meta?: Record<string, string>
+}
+
+export interface LogSearchHit {
+  day: string
+  sid: string
+  n?: number
+  who: string
+  ts: string
+  text: string
+  trunc: boolean
+  addr: string
+}
+
+export interface LogSearchResult {
+  hits: LogSearchHit[]
+  total: number
+}
+
 export interface ModelRef {
   provider: string
   model: string
