@@ -285,12 +285,14 @@ export interface App {
   addModelProvider(input: ModelProviderInput): Promise<ModelConfigView>
   /** 添加时的内置模板（不会自动注册成 provider）。 */
   modelProviderTemplates(): readonly ProviderConfig[]
-  /** 追加一个 API key；密钥只进配置，不出现在视图里。 */
+  /** 追加一个 API key；可带标签。 */
   addModelApiKey(input: ModelApiKeyInput): Promise<ModelConfigView>
   /** 删除一个 API key。 */
   removeModelApiKey(input: ModelApiKeyRemoveInput): Promise<ModelConfigView>
-  /** 启用/停用单个 API key。 */
-  setModelApiKeyEnabled(input: ModelApiKeyToggleInput): Promise<ModelConfigView>
+  /** 修改 API key 的标签或启用状态。 */
+  updateModelApiKey(input: ModelApiKeyUpdateInput): Promise<ModelConfigView>
+  /** 只有用户明确点击「显示」时才取完整 key。 */
+  revealModelApiKey(input: ModelApiKeyRemoveInput): string
   /** 用 provider 的 key / baseUrl 调模型列表接口，返回模型 id。 */
   probeModelProvider(input: ModelProbeInput): Promise<{ models: readonly string[] }>
   /** 给已有 provider 追加模型；重复 id 跳过。 */
@@ -363,9 +365,13 @@ export interface App {
 
 export interface ModelApiKeyView {
   readonly id: string
+  /** 用户起的标签；没起就不显示 */
+  readonly name?: string
   /** 脱敏后的展示串；不是完整密钥 */
   readonly preview: string
   readonly isEnabled: boolean
+  /** 旧版单密钥，只读展示；可以删除或显示 */
+  readonly legacy?: boolean
 }
 
 export interface ModelConfigProviderView {
@@ -410,6 +416,7 @@ export interface ModelConfigUpdate {
 export interface ModelApiKeyInput {
   readonly provider: string
   readonly key: string
+  readonly name?: string
   readonly isEnabled?: boolean
 }
 
@@ -418,10 +425,12 @@ export interface ModelApiKeyRemoveInput {
   readonly keyId: string
 }
 
-export interface ModelApiKeyToggleInput {
+export interface ModelApiKeyUpdateInput {
   readonly provider: string
   readonly keyId: string
-  readonly isEnabled: boolean
+  /** 传空字符串表示去掉标签 */
+  readonly name?: string
+  readonly isEnabled?: boolean
 }
 
 export interface ModelCardUpdate {
@@ -447,6 +456,8 @@ export interface ModelProviderInput {
   /** 默认端点的 baseUrl；也在 endpoints 里时以这里为准 */
   readonly baseUrl: string
   readonly apiKey?: string
+  /** 新 key 的标签；只在 apiKey 非空时有意义 */
+  readonly apiKeyName?: string
   readonly apiKeyEnv?: string
   /** 默认端点格式：openai-chat-completions / openai-responses / anthropic-messages / google-generate-content */
   readonly format?: string
@@ -539,6 +550,7 @@ interface RawModelEntry {
 
 interface RawApiKeyEntry {
   id?: string
+  name?: string
   key?: string
   isEnabled?: boolean
 }
@@ -852,6 +864,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       ? {
         apiKeys: provider.apiKeys.map(entry => ({
           id: entry.id,
+          ...(entry.name ? { name: entry.name } : {}),
           key: entry.key,
           ...(entry.isEnabled !== undefined ? { isEnabled: entry.isEnabled } : {}),
         })),
@@ -907,6 +920,27 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     return `${trimmed.slice(0, 4)}…${trimmed.slice(-4)}`
   }
 
+  interface KeyEntryView extends ApiKeyConfig {
+    readonly legacy?: boolean
+  }
+
+  const keyEntriesOf = (provider: ProviderConfig): KeyEntryView[] => {
+    const entries: KeyEntryView[] = (provider.apiKeys ?? [])
+      .filter(entry => entry.key.trim().length > 0)
+      .map(entry => ({ ...entry }))
+    const legacy = providerOverrides.get(provider.id)?.apiKey ?? provider.apiKey
+    if (legacy?.trim() && !entries.some(entry => entry.key === legacy)) {
+      entries.push({
+        id: 'legacy',
+        name: '旧单密钥',
+        key: legacy,
+        isEnabled: true,
+        legacy: true,
+      })
+    }
+    return entries
+  }
+
   const modelConfigView = (): ModelConfigView => ({
     timeZone: config.profile.timeZone,
     providers: models.list().map((provider: ProviderConfig) => {
@@ -915,14 +949,13 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       const endpointFamily = provider.defaultChatEndpoint
         ?? endpointFamilies[0]
         ?? ''
-      const apiKeys = (provider.apiKeys ?? [])
-        .filter(entry => entry.key.trim().length > 0)
-        .map(entry => ({
-          id: entry.id,
-          preview: previewApiKey(entry.key),
-          isEnabled: entry.isEnabled !== false,
-        }))
-      const legacyKey = override?.apiKey ?? provider.apiKey
+      const apiKeys = keyEntriesOf(provider).map(entry => ({
+        id: entry.id,
+        ...(entry.name ? { name: entry.name } : {}),
+        preview: previewApiKey(entry.key),
+        isEnabled: entry.isEnabled !== false,
+        ...(entry.legacy ? { legacy: true } : {}),
+      }))
       const envKey = provider.apiKeyEnv ? process.env[provider.apiKeyEnv] : undefined
       return {
         id: provider.id,
@@ -954,8 +987,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
           }
         }),
         apiKeys,
-        hasApiKey: apiKeys.some(entry => entry.isEnabled)
-          || Boolean(legacyKey || envKey),
+        hasApiKey: apiKeys.some(entry => entry.isEnabled) || Boolean(envKey),
         ...(provider.apiKeyEnv ? { apiKeyEnv: provider.apiKeyEnv } : {}),
         enabled: provider.enabled !== false,
         removable: true,
@@ -1118,11 +1150,20 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       }
     })
 
+    const apiKey = input.apiKey?.trim()
+    const apiKeys: ApiKeyConfig[] | undefined = apiKey
+      ? [{
+        id: `key-${randomUUID().slice(0, 8)}`,
+        ...(input.apiKeyName?.trim() ? { name: input.apiKeyName.trim() } : {}),
+        key: apiKey,
+        isEnabled: true,
+      }]
+      : undefined
     const provider: ProviderConfig = {
       id,
       name,
       ...(input.description?.trim() ? { description: input.description.trim() } : {}),
-      ...(input.apiKey?.trim() ? { apiKey: input.apiKey.trim() } : {}),
+      ...(apiKeys ? { apiKeys } : {}),
       ...(input.apiKeyEnv?.trim() ? { apiKeyEnv: input.apiKeyEnv.trim() } : {}),
       defaultChatEndpoint: format as ProviderConfig['defaultChatEndpoint'],
       endpoints,
@@ -1138,7 +1179,6 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     })
     models.register(provider)
     providerOverrides.set(id, {
-      ...(provider.apiKey ? { apiKey: provider.apiKey } : {}),
       baseUrls: Object.fromEntries(
         Object.entries(endpoints).map(([family, endpoint]) => [family, endpoint.baseUrl]),
       ),
@@ -1158,6 +1198,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       }
       rawProvider.apiKeys = keys.map(entry => ({
         id: entry.id,
+        ...(entry.name ? { name: entry.name } : {}),
         key: entry.key,
         ...(entry.isEnabled !== undefined ? { isEnabled: entry.isEnabled } : {}),
       }))
@@ -1170,11 +1211,12 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     const key = input.key.trim()
     if (!key) throw new Error('API key is required')
     const keys = [...(provider.apiKeys ?? [])]
-    if (keys.some(entry => entry.key === key)) {
+    if (keyEntriesOf(provider).some(entry => entry.key === key)) {
       throw new Error('这个密钥已经存在')
     }
     keys.push({
       id: `key-${randomUUID().slice(0, 8)}`,
+      ...(input.name?.trim() ? { name: input.name.trim() } : {}),
       key,
       isEnabled: input.isEnabled ?? true,
     })
@@ -1184,27 +1226,63 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
 
   const removeModelApiKey = async (input: ModelApiKeyRemoveInput): Promise<ModelConfigView> => {
     const provider = models.get(input.provider)
-    const keys = (provider.apiKeys ?? []).filter(entry => entry.id !== input.keyId)
-    if (keys.length === (provider.apiKeys ?? []).length) {
-      throw new Error(`unknown api key: ${input.keyId}`)
+    const target = keyEntriesOf(provider).find(entry => entry.id === input.keyId)
+    if (!target) throw new Error(`unknown api key: ${input.keyId}`)
+
+    if (target.legacy) {
+      const current = providerOverrides.get(provider.id)
+      if (current?.apiKey !== undefined) {
+        const { apiKey: _removed, ...rest } = current
+        if (Object.keys(rest).length > 0) providerOverrides.set(provider.id, rest)
+        else providerOverrides.delete(provider.id)
+      }
+      await writeConfigFile(raw => {
+        const rawProvider = ensureRawProvider(raw, provider)
+        delete rawProvider.apiKey
+      })
+      models.setLegacyApiKey(provider.id, undefined)
+      return modelConfigView()
     }
+
+    const keys = (provider.apiKeys ?? []).filter(entry => entry.id !== input.keyId)
     await persistApiKeys(provider, keys)
     return modelConfigView()
   }
 
-  const setModelApiKeyEnabled = async (
-    input: ModelApiKeyToggleInput,
+  const updateModelApiKey = async (
+    input: ModelApiKeyUpdateInput,
   ): Promise<ModelConfigView> => {
+    if (input.name === undefined && input.isEnabled === undefined) {
+      throw new Error('nothing to update')
+    }
     const provider = models.get(input.provider)
-    let found = false
+    const target = keyEntriesOf(provider).find(entry => entry.id === input.keyId)
+    if (!target) throw new Error(`unknown api key: ${input.keyId}`)
+    if (target.legacy) {
+      throw new Error('旧单密钥不能改名或单独停用；删除后重新添加即可')
+    }
+
     const keys = (provider.apiKeys ?? []).map(entry => {
       if (entry.id !== input.keyId) return entry
-      found = true
-      return { ...entry, isEnabled: input.isEnabled }
+      if (input.name === undefined) {
+        return { ...entry, isEnabled: input.isEnabled }
+      }
+      const { name: _old, ...rest } = entry
+      return {
+        ...rest,
+        ...(input.name.trim() ? { name: input.name.trim() } : {}),
+        ...(input.isEnabled !== undefined ? { isEnabled: input.isEnabled } : {}),
+      }
     })
-    if (!found) throw new Error(`unknown api key: ${input.keyId}`)
     await persistApiKeys(provider, keys)
     return modelConfigView()
+  }
+
+  const revealModelApiKey = (input: ModelApiKeyRemoveInput): string => {
+    const provider = models.get(input.provider)
+    const target = keyEntriesOf(provider).find(entry => entry.id === input.keyId)
+    if (!target) throw new Error(`unknown api key: ${input.keyId}`)
+    return target.key
   }
 
   const addProviderModels = async (
@@ -2565,7 +2643,8 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     },
     addModelApiKey,
     removeModelApiKey,
-    setModelApiKeyEnabled,
+    updateModelApiKey,
+    revealModelApiKey,
     addProviderModels,
     removeModelProvider,
     probeModelProvider,

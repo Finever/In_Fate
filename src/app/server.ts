@@ -355,6 +355,9 @@ async function handle(
         ...(typeof body.apiKey === 'string' && body.apiKey.trim()
           ? { apiKey: body.apiKey.trim() }
           : {}),
+        ...(typeof body.apiKeyName === 'string' && body.apiKeyName.trim()
+          ? { apiKeyName: body.apiKeyName.trim() }
+          : {}),
         ...(typeof body.apiKeyEnv === 'string' && body.apiKeyEnv.trim()
           ? { apiKeyEnv: body.apiKeyEnv.trim() }
           : {}),
@@ -383,10 +386,17 @@ async function handle(
       json(res, 400, { error: 'isEnabled must be a boolean' })
       return
     }
+    if (body.name !== undefined && typeof body.name !== 'string') {
+      json(res, 400, { error: 'name must be a string' })
+      return
+    }
     try {
       const config = await app.addModelApiKey({
         provider: parts[3]!,
         key,
+        ...(typeof body.name === 'string' && body.name.trim()
+          ? { name: body.name.trim() }
+          : {}),
         ...(typeof body.isEnabled === 'boolean' ? { isEnabled: body.isEnabled } : {}),
       })
       json(res, 200, { config })
@@ -396,18 +406,41 @@ async function handle(
     return
   }
 
+  if (req.method === 'GET' && parts[1] === 'model-config' && parts[2] === 'providers'
+    && parts[3] && parts[4] === 'api-keys' && parts[5] && parts.length === 6) {
+    try {
+      const key = app.revealModelApiKey({
+        provider: parts[3]!,
+        keyId: parts[5]!,
+      })
+      json(res, 200, { key })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
   if (req.method === 'PATCH' && parts[1] === 'model-config' && parts[2] === 'providers'
     && parts[3] && parts[4] === 'api-keys' && parts[5] && parts.length === 6) {
     const body = await readOptionalJson(req)
-    if (typeof body.isEnabled !== 'boolean') {
+    if (body.isEnabled !== undefined && typeof body.isEnabled !== 'boolean') {
       json(res, 400, { error: 'isEnabled must be a boolean' })
       return
     }
+    if (body.name !== undefined && typeof body.name !== 'string') {
+      json(res, 400, { error: 'name must be a string' })
+      return
+    }
+    if (body.isEnabled === undefined && body.name === undefined) {
+      json(res, 400, { error: 'name or isEnabled is required' })
+      return
+    }
     try {
-      const config = await app.setModelApiKeyEnabled({
+      const config = await app.updateModelApiKey({
         provider: parts[3]!,
         keyId: parts[5]!,
-        isEnabled: body.isEnabled,
+        ...(typeof body.name === 'string' ? { name: body.name } : {}),
+        ...(typeof body.isEnabled === 'boolean' ? { isEnabled: body.isEnabled } : {}),
       })
       json(res, 200, { config })
     } catch (error) {

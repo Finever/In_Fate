@@ -49,6 +49,7 @@ export function AddProviderDialog({
   const [baseUrl, setBaseUrl] = useState('')
   const [providerFormat, setProviderFormat] = useState('openai-chat-completions')
   const [apiKey, setApiKey] = useState('')
+  const [apiKeyName, setApiKeyName] = useState('')
   const [apiKeyEnv, setApiKeyEnv] = useState('')
   const [modelsText, setModelsText] = useState('')
   const [busy, setBusy] = useState(false)
@@ -103,6 +104,7 @@ export function AddProviderDialog({
     setProviderFormat(family)
     setApiKeyEnv(template.apiKeyEnv ?? '')
     setApiKey('')
+    setApiKeyName('')
     setModelsText(template.models.map(model => model.id).join('\n'))
     setError(undefined)
   }
@@ -132,6 +134,7 @@ export function AddProviderDialog({
         ...(endpoints ? { endpoints } : {}),
         ...(description.trim() ? { description: description.trim() } : {}),
         ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+        ...(apiKey.trim() && apiKeyName.trim() ? { apiKeyName: apiKeyName.trim() } : {}),
         ...(apiKeyEnv.trim() ? { apiKeyEnv: apiKeyEnv.trim() } : {}),
         models,
       })
@@ -279,6 +282,17 @@ export function AddProviderDialog({
             autoComplete="off"
             spellCheck={false}
             disabled={busy}
+          />
+        </label>
+
+        <label className="fw-field">
+          <span>Key 标签（可空）</span>
+          <input
+            value={apiKeyName}
+            onChange={event => setApiKeyName(event.target.value)}
+            placeholder="例如 主力、备用"
+            spellCheck={false}
+            disabled={busy || !apiKey.trim()}
           />
         </label>
 

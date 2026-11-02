@@ -1672,19 +1672,103 @@ body.fw-resizing {
 }
 .fw-settings-key {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   padding: 7px 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(255, 255, 255, .015);
 }
-.fw-settings-key-preview {
+.fw-settings-key.is-legacy {
+  border-style: dashed;
+}
+.fw-settings-key-body {
   min-width: 0;
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fw-settings-key-head {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.fw-settings-key-name {
+  min-width: 0;
+  overflow: hidden;
   color: var(--text);
-  font-family: var(--mono, monospace);
   font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fw-settings-key-tag {
+  padding: 0 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--faint);
+  font-size: 9px;
+}
+.fw-settings-key-link {
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 10px;
+  cursor: pointer;
+}
+.fw-settings-key-link:disabled {
+  opacity: .4;
+  cursor: default;
+}
+.fw-settings-key-value {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fw-settings-key-value code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--faint);
+  font-family: var(--mono, monospace);
+  font-size: 10.5px;
+}
+.fw-settings-key-value code.is-revealed {
+  color: var(--text);
+}
+.fw-settings-key-rename {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.fw-settings-key-rename input {
+  min-width: 0;
+  flex: 1;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg-deep, rgba(0, 0, 0, .18));
+  color: var(--text);
+  font-size: 10.5px;
+  outline: none;
+}
+.fw-settings-key-rename input:focus {
+  border-color: var(--accent);
+}
+.fw-settings-key-rename button {
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 9.5px;
+}
+.fw-settings-key-rename button:hover {
+  color: var(--text);
 }
 .fw-settings-key-enabled {
   display: inline-flex;
@@ -1721,6 +1805,10 @@ body.fw-resizing {
   font-family: var(--mono, monospace);
   font-size: 11px;
   outline: none;
+}
+.fw-settings-key-add .fw-settings-key-name-input {
+  flex: 0 1 120px;
+  font-family: inherit;
 }
 .fw-settings-key-add input:focus {
   border-color: var(--accent);

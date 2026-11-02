@@ -202,8 +202,10 @@ export interface ModelPricing {
 
 export interface ModelApiKeyView {
   id: string
+  name?: string
   preview: string
   isEnabled: boolean
+  legacy?: boolean
 }
 
 export interface ModelConfigProvider {
@@ -263,6 +265,7 @@ export interface ModelProviderInput {
   description?: string
   baseUrl: string
   apiKey?: string
+  apiKeyName?: string
   apiKeyEnv?: string
   format?: string
   endpoints?: Record<string, { baseUrl: string }>

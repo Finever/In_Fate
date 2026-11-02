@@ -203,13 +203,27 @@ export const api = {
   async addModelApiKey(
     provider: string,
     key: string,
-    isEnabled = true,
+    input: { name?: string; isEnabled?: boolean } = {},
   ): Promise<ModelConfig> {
     const body = await request<{ config: ModelConfig }>(
       `/api/model-config/providers/${encodeURIComponent(provider)}/api-keys`,
-      { method: 'POST', body: JSON.stringify({ key, isEnabled }) },
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          key,
+          ...(input.name?.trim() ? { name: input.name.trim() } : {}),
+          ...(input.isEnabled !== undefined ? { isEnabled: input.isEnabled } : {}),
+        }),
+      },
     )
     return body.config
+  },
+
+  async revealModelApiKey(provider: string, keyId: string): Promise<string> {
+    const body = await request<{ key: string }>(
+      `/api/model-config/providers/${encodeURIComponent(provider)}/api-keys/${encodeURIComponent(keyId)}`,
+    )
+    return body.key
   },
 
   async removeModelApiKey(provider: string, keyId: string): Promise<ModelConfig> {
@@ -220,14 +234,14 @@ export const api = {
     return body.config
   },
 
-  async setModelApiKeyEnabled(
+  async updateModelApiKey(
     provider: string,
     keyId: string,
-    isEnabled: boolean,
+    input: { name?: string; isEnabled?: boolean },
   ): Promise<ModelConfig> {
     const body = await request<{ config: ModelConfig }>(
       `/api/model-config/providers/${encodeURIComponent(provider)}/api-keys/${encodeURIComponent(keyId)}`,
-      { method: 'PATCH', body: JSON.stringify({ isEnabled }) },
+      { method: 'PATCH', body: JSON.stringify(input) },
     )
     return body.config
   },

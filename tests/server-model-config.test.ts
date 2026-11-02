@@ -185,6 +185,7 @@ test('内置只做模板；添加服务商写入配置并拒绝重复 id', async
         name: 'Custom Provider',
         baseUrl: 'http://127.0.0.1:9/v1',
         apiKey: 'secret-key',
+        apiKeyName: '默认',
         apiKeyEnv: 'CUSTOM_API_KEY',
         models: [
           { id: 'x', name: 'X', contextWindow: 32_000, maxOutputTokens: 4_096 },
@@ -203,7 +204,7 @@ test('内置只做模板；添加服务商写入配置并拒绝重复 id', async
     const disk = JSON.parse(readFileSync(configPath, 'utf8')) as {
       providers: Array<{
         id: string
-        apiKey?: string
+        apiKeys?: Array<{ id: string; name?: string; key?: string; isEnabled?: boolean }>
         apiKeyEnv?: string
         endpoints?: Record<string, { baseUrl?: string }>
         models?: Array<{ id: string; contextWindow?: number }>
@@ -211,7 +212,9 @@ test('内置只做模板；添加服务商写入配置并拒绝重复 id', async
     }
     const raw = disk.providers.find(provider => provider.id === 'custom')
     assert.ok(raw)
-    assert.equal(raw?.apiKey, 'secret-key')
+    assert.equal(raw?.apiKeys?.[0]?.key, 'secret-key')
+    assert.equal(raw?.apiKeys?.[0]?.name, '默认')
+    assert.equal(raw?.apiKeys?.[0]?.isEnabled, true)
     assert.equal(raw?.apiKeyEnv, 'CUSTOM_API_KEY')
     assert.equal(raw?.endpoints?.['openai-chat-completions']?.baseUrl, 'http://127.0.0.1:9/v1')
     assert.equal(raw?.models?.find(model => model.id === 'x')?.contextWindow, 32_000)

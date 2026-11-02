@@ -69,6 +69,8 @@ export interface ModelCard {
 
 export interface ApiKeyConfig {
   readonly id: string
+  /** 用户可读标签，例如「主力」「备用」 */
+  readonly name?: string
   readonly key: string
   /** false = 停用；不填按启用算 */
   readonly isEnabled?: boolean

@@ -52,7 +52,7 @@ test('多 API key：添加、停用、删除，视图只给脱敏预览', async 
     const first = await fetch(keysUrl, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ key: 'sk-first-secret', isEnabled: true }),
+      body: JSON.stringify({ key: 'sk-first-secret', name: '主力', isEnabled: true }),
     })
     assert.equal(first.status, 200)
     const firstText = await first.text()
@@ -61,34 +61,54 @@ test('多 API key：添加、停用、删除，视图只给脱敏预览', async 
       config: {
         providers: Array<{
           hasApiKey: boolean
-          apiKeys: Array<{ id: string; preview: string; isEnabled: boolean }>
+          apiKeys: Array<{ id: string; name?: string; preview: string; isEnabled: boolean }>
         }>
       }
     }
     const firstKeys = firstBody.config.providers[0]!.apiKeys
     assert.equal(firstBody.config.providers[0]!.hasApiKey, true)
     assert.equal(firstKeys.length, 1)
+    assert.equal(firstKeys[0]!.name, '主力')
     assert.equal(firstKeys[0]!.isEnabled, true)
     assert.doesNotMatch(firstKeys[0]!.preview, /secret/)
     const firstId = firstKeys[0]!.id
 
+    const revealed = await fetch(`${keysUrl}/${firstId}`, { headers })
+    assert.equal(revealed.status, 200)
+    assert.deepEqual(await revealed.json(), { key: 'sk-first-secret' })
+
     const second = await fetch(keysUrl, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ key: 'sk-second-secret' }),
+      body: JSON.stringify({ key: 'sk-second-secret', name: '备用' }),
     })
     assert.equal(second.status, 200)
     const secondBody = await second.json() as {
       config: {
         providers: Array<{
           hasApiKey: boolean
-          apiKeys: Array<{ id: string; preview: string; isEnabled: boolean }>
+          apiKeys: Array<{ id: string; name?: string; preview: string; isEnabled: boolean }>
         }>
       }
     }
     const keys = secondBody.config.providers[0]!.apiKeys
     assert.equal(keys.length, 2)
+    assert.equal(keys.find(key => key.id === firstId)?.name, '主力')
     assert.equal(keys.filter(key => key.isEnabled).length, 2)
+
+    const renamed = await fetch(`${keysUrl}/${firstId}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ name: '主号' }),
+    })
+    assert.equal(renamed.status, 200)
+    const renamedBody = await renamed.json() as {
+      config: { providers: Array<{ apiKeys: Array<{ id: string; name?: string }> }> }
+    }
+    assert.equal(
+      renamedBody.config.providers[0]!.apiKeys.find(key => key.id === firstId)?.name,
+      '主号',
+    )
 
     const duplicate = await fetch(keysUrl, {
       method: 'POST',
@@ -133,12 +153,80 @@ test('多 API key：添加、停用、删除，视图只给脱敏预览', async 
 
     const disk = JSON.parse(readFileSync(configPath, 'utf8')) as {
       providers: Array<{
-        apiKeys?: Array<{ id: string; key: string; isEnabled?: boolean }>
+        apiKeys?: Array<{ id: string; name?: string; key: string; isEnabled?: boolean }>
       }>
     }
     assert.equal(disk.providers[0]!.apiKeys?.length, 1)
     assert.equal(disk.providers[0]!.apiKeys?.[0]!.key, 'sk-first-secret')
+    assert.equal(disk.providers[0]!.apiKeys?.[0]!.name, '主号')
     assert.equal(disk.providers[0]!.apiKeys?.[0]!.isEnabled, false)
+  } finally {
+    await handle.close()
+    await app.dispose()
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+  }
+})
+
+test('旧单密钥：列表里可见、可显示、可删除，但不能改名或单独停用', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'if-server-model-legacy-key-'))
+  const dataRoot = join(dir, 'data')
+  const configPath = join(dir, 'if.json')
+  mkdirSync(dataRoot, { recursive: true })
+  const config = configFor(dataRoot)
+  const legacyConfig: AppConfig = {
+    ...config,
+    providers: [{
+      ...config.providers[0]!,
+      apiKey: 'legacy-secret',
+    }],
+  }
+  writeFileSync(configPath, `${JSON.stringify(legacyConfig, null, 2)}\n`, 'utf8')
+
+  const app = buildBundle(legacyConfig, new Container(), { configPath })
+  const handle = await startServer(app, { port: 0, token: 'test-token' })
+  const headers = { authorization: 'Bearer test-token' }
+  const keysUrl = `${handle.url}/api/model-config/providers/fake/api-keys`
+
+  try {
+    const view = await fetch(`${handle.url}/api/model-config`, { headers })
+    const viewText = await view.text()
+    assert.doesNotMatch(viewText, /legacy-secret/)
+    const viewBody = JSON.parse(viewText) as {
+      config: {
+        providers: Array<{
+          hasApiKey: boolean
+          apiKeys: Array<{ id: string; name?: string; preview: string; legacy?: boolean }>
+        }>
+      }
+    }
+    const legacy = viewBody.config.providers[0]!.apiKeys[0]!
+    assert.equal(legacy.id, 'legacy')
+    assert.equal(legacy.name, '旧单密钥')
+    assert.equal(legacy.legacy, true)
+    assert.equal(viewBody.config.providers[0]!.hasApiKey, true)
+
+    const revealed = await fetch(`${keysUrl}/legacy`, { headers })
+    assert.deepEqual(await revealed.json(), { key: 'legacy-secret' })
+
+    const rename = await fetch(`${keysUrl}/legacy`, {
+      method: 'PATCH',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ name: '改个名' }),
+    })
+    assert.equal(rename.status, 400)
+
+    const removed = await fetch(`${keysUrl}/legacy`, { method: 'DELETE', headers })
+    assert.equal(removed.status, 200)
+    const removedBody = await removed.json() as {
+      config: { providers: Array<{ hasApiKey: boolean; apiKeys: unknown[] }> }
+    }
+    assert.equal(removedBody.config.providers[0]!.apiKeys.length, 0)
+    assert.equal(removedBody.config.providers[0]!.hasApiKey, false)
+
+    const disk = JSON.parse(readFileSync(configPath, 'utf8')) as {
+      providers: Array<{ apiKey?: string }>
+    }
+    assert.equal(disk.providers[0]!.apiKey, undefined)
   } finally {
     await handle.close()
     await app.dispose()

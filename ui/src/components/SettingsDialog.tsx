@@ -10,10 +10,16 @@ interface ProviderDraft {
   baseUrl: string
   format: string
   apiKey: string
+  keyName: string
 }
 
 function initialDraft(provider: ModelConfigProvider): ProviderDraft {
-  return { baseUrl: provider.baseUrl, format: provider.endpointFamily, apiKey: '' }
+  return {
+    baseUrl: provider.baseUrl,
+    format: provider.endpointFamily,
+    apiKey: '',
+    keyName: '',
+  }
 }
 
 function providerMark(name: string): string {
@@ -70,6 +76,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [showDisabledModels, setShowDisabledModels] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [keySaving, setKeySaving] = useState(false)
+  const [revealedKeys, setRevealedKeys] = useState<Record<string, string>>({})
+  const [renamingKeyId, setRenamingKeyId] = useState<string>()
+  const [keyNameDraft, setKeyNameDraft] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -117,6 +126,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     setAddingModels(false)
     setShowDisabledModels(false)
     setDeleting(false)
+    setRevealedKeys({})
+    setRenamingKeyId(undefined)
+    setKeyNameDraft('')
   }, [providerId])
 
   const provider = config?.providers.find(item => item.id === providerId)
@@ -199,7 +211,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             ?? item.baseUrl
           updated[item.id] = { ...existing, format, baseUrl, apiKey: '' }
         } else if (clearKeyFor === item.id) {
-          updated[item.id] = { ...existing, apiKey: '' }
+          updated[item.id] = { ...existing, apiKey: '', keyName: '' }
         } else {
           updated[item.id] = existing
         }
@@ -241,7 +253,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     setError(undefined)
     setNotice(undefined)
     try {
-      const next = await api.addModelApiKey(provider.id, key)
+      const next = await api.addModelApiKey(provider.id, key, {
+        ...(draft.keyName.trim() ? { name: draft.keyName.trim() } : {}),
+      })
       applyConfig(next, undefined, provider.id)
       setNotice('API key 已添加；请求会按启用顺序轮换')
     } catch (reason) {
@@ -257,9 +271,57 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     setError(undefined)
     setNotice(undefined)
     try {
-      const next = await api.setModelApiKeyEnabled(provider.id, keyId, isEnabled)
+      const next = await api.updateModelApiKey(provider.id, keyId, { isEnabled })
       applyConfig(next)
       setNotice(isEnabled ? 'API key 已启用' : 'API key 已停用')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setKeySaving(false)
+    }
+  }
+
+  async function toggleRevealKey(keyId: string): Promise<void> {
+    if (!provider) return
+    if (revealedKeys[keyId]) {
+      setRevealedKeys(current => {
+        const next = { ...current }
+        delete next[keyId]
+        return next
+      })
+      return
+    }
+    setKeySaving(true)
+    setError(undefined)
+    try {
+      const key = await api.revealModelApiKey(provider.id, keyId)
+      setRevealedKeys(current => ({ ...current, [keyId]: key }))
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setKeySaving(false)
+    }
+  }
+
+  function startRenameKey(keyId: string, currentName: string | undefined): void {
+    setRenamingKeyId(keyId)
+    setKeyNameDraft(currentName ?? '')
+    setError(undefined)
+  }
+
+  async function saveKeyName(keyId: string): Promise<void> {
+    if (!provider || keySaving) return
+    setKeySaving(true)
+    setError(undefined)
+    setNotice(undefined)
+    try {
+      const next = await api.updateModelApiKey(provider.id, keyId, {
+        name: keyNameDraft.trim(),
+      })
+      applyConfig(next)
+      setRenamingKeyId(undefined)
+      setKeyNameDraft('')
+      setNotice('key 标签已保存')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
@@ -276,6 +338,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     try {
       const next = await api.removeModelApiKey(provider.id, keyId)
       applyConfig(next)
+      setRevealedKeys(current => {
+        const updated = { ...current }
+        delete updated[keyId]
+        return updated
+      })
       setNotice('API key 已删除')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
@@ -632,23 +699,94 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                       {provider.apiKeys.length === 0 ? (
                         <div className="fw-settings-keys-empty">
                           还没有添加 key。
-                          {provider.hasApiKey ? ' 已有旧配置或环境变量里的 key，会与列表里的密钥一起轮换。' : ''}
+                          {provider.apiKeyEnv ? ` 会使用环境变量 ${provider.apiKeyEnv}。` : ''}
                         </div>
                       ) : (
                         <div className="fw-settings-key-list">
                           {provider.apiKeys.map(entry => (
-                            <div className="fw-settings-key" key={entry.id}>
-                              <span className="fw-settings-key-preview">{entry.preview}</span>
-                              <label className="fw-settings-key-enabled">
-                                <input
-                                  type="checkbox"
-                                  checked={entry.isEnabled}
-                                  onChange={event =>
-                                    void setApiKeyEnabled(entry.id, event.target.checked)}
-                                  disabled={keySaving}
-                                />
-                                启用
-                              </label>
+                            <div
+                              className={`fw-settings-key${entry.legacy ? ' is-legacy' : ''}`}
+                              key={entry.id}
+                            >
+                              <div className="fw-settings-key-body">
+                                <div className="fw-settings-key-head">
+                                  <span className="fw-settings-key-name">
+                                    {entry.name || '未命名'}
+                                  </span>
+                                  {entry.legacy && (
+                                    <span className="fw-settings-key-tag">旧</span>
+                                  )}
+                                  {!entry.legacy && renamingKeyId !== entry.id && (
+                                    <button
+                                      type="button"
+                                      className="fw-settings-key-link"
+                                      onClick={() => startRenameKey(entry.id, entry.name)}
+                                      disabled={keySaving}
+                                    >
+                                      改名
+                                    </button>
+                                  )}
+                                  {renamingKeyId === entry.id && (
+                                    <span className="fw-settings-key-rename">
+                                      <input
+                                        autoFocus
+                                        value={keyNameDraft}
+                                        onChange={event => setKeyNameDraft(event.target.value)}
+                                        placeholder="标签，例如 主力"
+                                        spellCheck={false}
+                                        disabled={keySaving}
+                                        onKeyDown={event => {
+                                          if (event.key === 'Enter') {
+                                            event.preventDefault()
+                                            void saveKeyName(entry.id)
+                                          } else if (event.key === 'Escape') {
+                                            setRenamingKeyId(undefined)
+                                          }
+                                        }}
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => void saveKeyName(entry.id)}
+                                        disabled={keySaving}
+                                      >
+                                        保存
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setRenamingKeyId(undefined)}
+                                        disabled={keySaving}
+                                      >
+                                        取消
+                                      </button>
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="fw-settings-key-value">
+                                  <code className={revealedKeys[entry.id] ? 'is-revealed' : ''}>
+                                    {revealedKeys[entry.id] ?? entry.preview}
+                                  </code>
+                                  <button
+                                    type="button"
+                                    className="fw-settings-key-link"
+                                    onClick={() => void toggleRevealKey(entry.id)}
+                                    disabled={keySaving}
+                                  >
+                                    {revealedKeys[entry.id] ? '隐藏' : '显示'}
+                                  </button>
+                                </div>
+                              </div>
+                              {!entry.legacy && (
+                                <label className="fw-settings-key-enabled">
+                                  <input
+                                    type="checkbox"
+                                    checked={entry.isEnabled}
+                                    onChange={event =>
+                                      void setApiKeyEnabled(entry.id, event.target.checked)}
+                                    disabled={keySaving}
+                                  />
+                                  启用
+                                </label>
+                              )}
                               <button
                                 type="button"
                                 className="fw-settings-key-remove"
@@ -663,6 +801,14 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                       )}
 
                       <div className="fw-settings-key-add">
+                        <input
+                          className="fw-settings-key-name-input"
+                          value={draft.keyName}
+                          onChange={event => updateDraft({ keyName: event.target.value })}
+                          placeholder="标签（可空）"
+                          spellCheck={false}
+                          disabled={saving || keySaving}
+                        />
                         <input
                           type="password"
                           value={draft.apiKey}

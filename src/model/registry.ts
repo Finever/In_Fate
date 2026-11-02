@@ -57,6 +57,12 @@ export class ModelRegistry {
     })
   }
 
+  setLegacyApiKey(id: string, apiKey: string | undefined): void {
+    const provider = this.get(id)
+    const { apiKey: _removed, ...rest } = provider
+    this.providers.set(id, apiKey ? { ...rest, apiKey } : rest)
+  }
+
   setApiKeys(id: string, apiKeys: ProviderConfig['apiKeys']): void {
     const provider = this.get(id)
     if (apiKeys?.length) {
