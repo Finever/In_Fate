@@ -3845,12 +3845,14 @@ body.fw-resizing {
 /* ---------- 设置：添加服务商 ---------- */
 
 .fw-settings-add-provider {
-  width: 100%;
+  width: auto;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 7px;
-  margin-top: 5px;
-  padding: 7px 9px;
+  margin-top: 0;
+  height: 30px;
+  padding: 0 10px;
   border: 1px dashed var(--line-strong);
   border-radius: 8px;
   background: none;
@@ -3870,4 +3872,91 @@ body.fw-resizing {
   color: var(--faint);
   font-size: 10px;
   line-height: 1.6;
+}
+
+/* ---------- 设置：顶层分类与服务商网格 ---------- */
+
+.fw-settings-category {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  text-align: left;
+}
+.fw-settings-category:hover {
+  background: rgba(255, 255, 255, .03);
+  color: var(--text);
+}
+.fw-settings-category.is-active {
+  border-color: var(--line-strong);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.fw-settings-category-mark {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, .05);
+  color: var(--muted);
+}
+.fw-settings-category.is-active .fw-settings-category-mark {
+  background: var(--accent);
+  color: #fff;
+}
+.fw-settings-category-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.fw-settings-category-text b {
+  font-size: 11.5px;
+  font-weight: 500;
+}
+.fw-settings-category-text small {
+  color: var(--faint);
+  font-size: 9.5px;
+}
+
+.fw-model-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.fw-model-head h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+.fw-model-head small {
+  color: var(--faint);
+  font-size: 9.5px;
+}
+.fw-model-provider-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 6px;
+  max-height: 210px;
+  overflow-y: auto;
+  margin-bottom: 14px;
+  padding: 2px 2px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.fw-model-provider-grid .fw-settings-provider {
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, .015);
+}
+.fw-model-provider-grid .fw-settings-provider.is-active {
+  border-color: var(--accent);
 }

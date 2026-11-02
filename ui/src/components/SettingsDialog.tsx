@@ -101,6 +101,16 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     setNotice(undefined)
   }
 
+  function openModels(): void {
+    if (memoryDirty && !window.confirm('全局记忆有未保存的改动，切回模型服务会丢失。继续？')) return
+    setView('models')
+    setError(undefined)
+    setNotice(undefined)
+    if (!config?.providers.some(item => item.id === providerId)) {
+      setProviderId(config?.providers[0]?.id ?? '')
+    }
+  }
+
   function updateDraft(patch: Partial<ProviderDraft>): void {
     if (!provider) return
     setDrafts(current => ({
@@ -192,48 +202,24 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           <>
             <div className="fw-settings-body">
               <aside className="fw-settings-nav">
-                {config && (
-                  <>
-                    <div className="fw-settings-nav-title">模型服务</div>
-                    {config.providers.map(item => {
-                      const active = view === 'models' && item.id === providerId
-                      return (
-                        <button
-                          key={item.id}
-                          type="button"
-                          className={`fw-settings-provider${active ? ' is-active' : ''}`}
-                          onClick={() => chooseProvider(item.id)}
-                          disabled={saving || Boolean(editing)}
-                        >
-                          <span className="fw-settings-provider-mark">
-                            {providerMark(item.name)}
-                          </span>
-                          <span className="fw-settings-provider-text">
-                            <b>{item.name}</b>
-                            <small>
-                              {item.models.length} 个模型
-                              {!item.hasApiKey ? ' · 未配置 key' : ''}
-                            </small>
-                          </span>
-                        </button>
-                      )
-                    })}
-                    <button
-                      type="button"
-                      className="fw-settings-add-provider"
-                      onClick={() => setAddProviderOpen(true)}
-                      disabled={saving || Boolean(editing)}
-                    >
-                      <Icon name="plus" size={13} />
-                      添加服务商
-                    </button>
-                  </>
-                )}
-
-                <div className="fw-settings-nav-title">记忆</div>
+                <div className="fw-settings-nav-title">设置</div>
                 <button
                   type="button"
-                  className={`fw-settings-provider${view === 'memory' ? ' is-active' : ''}`}
+                  className={`fw-settings-category${view === 'models' ? ' is-active' : ''}`}
+                  onClick={openModels}
+                  disabled={saving || Boolean(editing)}
+                >
+                  <span className="fw-settings-category-mark">
+                    <Icon name="layers" size={13} />
+                  </span>
+                  <span className="fw-settings-category-text">
+                    <b>模型服务</b>
+                    <small>{config ? `${config.providers.length} 个服务商` : '载入中'}</small>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className={`fw-settings-category${view === 'memory' ? ' is-active' : ''}`}
                   onClick={() => {
                     setView('memory')
                     setError(undefined)
@@ -241,10 +227,10 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                   }}
                   disabled={saving || Boolean(editing)}
                 >
-                  <span className="fw-settings-provider-mark">
+                  <span className="fw-settings-category-mark">
                     <Icon name="search" size={13} />
                   </span>
-                  <span className="fw-settings-provider-text">
+                  <span className="fw-settings-category-text">
                     <b>全局记忆</b>
                     <small>detail 记忆库</small>
                   </span>
@@ -254,11 +240,57 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               <div className={`fw-settings-main${view === 'memory' ? ' is-memory' : ''}`}>
                 {view === 'memory' ? (
                   <MemoryBrowser onDirtyChange={setMemoryDirty} />
-                ) : provider && draft ? (
+                ) : (
                   <>
-                    <div className="fw-settings-provider-head">
-                      <h3>{provider.name}</h3>
+                    <div className="fw-model-head">
+                      <div>
+                        <h3>模型服务</h3>
+                        <small>{config ? `${config.providers.length} 个服务商` : '没有配置'}</small>
+                      </div>
+                      <button
+                        type="button"
+                        className="fw-settings-add-provider"
+                        onClick={() => setAddProviderOpen(true)}
+                        disabled={saving || Boolean(editing)}
+                      >
+                        <Icon name="plus" size={13} />
+                        添加服务商
+                      </button>
                     </div>
+
+                    {config && (
+                      <div className="fw-model-provider-grid">
+                        {config.providers.map(item => {
+                          const active = item.id === providerId
+                          return (
+                            <button
+                              key={item.id}
+                              type="button"
+                              className={`fw-settings-provider${active ? ' is-active' : ''}`}
+                              onClick={() => chooseProvider(item.id)}
+                              disabled={saving || Boolean(editing)}
+                            >
+                              <span className="fw-settings-provider-mark">
+                                {providerMark(item.name)}
+                              </span>
+                              <span className="fw-settings-provider-text">
+                                <b>{item.name}</b>
+                                <small>
+                                  {item.models.length} 个模型
+                                  {!item.hasApiKey ? ' · 未配置 key' : ''}
+                                </small>
+                              </span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
+
+                    {provider && draft ? (
+                      <>
+                        <div className="fw-settings-provider-head">
+                          <h3>{provider.name}</h3>
+                        </div>
 
                     <div className="fw-settings-fields">
                       <label className="fw-field">
@@ -329,9 +361,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                         ))}
                       </div>
                     </section>
+                      </>
+                    ) : (
+                      <div className="fw-panel-error">{error ?? '没有可用的模型配置。'}</div>
+                    )}
                   </>
-                ) : (
-                  <div className="fw-panel-error">{error ?? '没有可用的模型配置。'}</div>
                 )}
               </div>
             </div>
