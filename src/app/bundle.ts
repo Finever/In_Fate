@@ -1295,7 +1295,14 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       || models.resolveApiKeys(provider)[0]
 
     const endpointFormat = normalizeEndpointFamily(family)
-    const url = apiUrl(baseUrl, '/models', endpointFormat === 'google-generate-content' ? 'v1beta' : 'v1')
+    // Chat Completions 与对话请求同一约定：baseUrl 自带版本段。
+    const url = endpointFormat === 'openai-chat-completions'
+      ? `${baseUrl.replace(/\/+$/, '')}/models`
+      : apiUrl(
+        baseUrl,
+        '/models',
+        endpointFormat === 'google-generate-content' ? 'v1beta' : 'v1',
+      )
     const headers: Record<string, string> = {
       accept: 'application/json',
       ...(endpointFormat === 'anthropic-messages'
