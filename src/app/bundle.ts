@@ -65,6 +65,7 @@ import { createMemoryTools } from '../memory/tools.ts'
 import { readFileSync, renameSync, writeFileSync } from 'node:fs'
 import type { ModelRegistry, ResolvedModel } from '../model/registry.ts'
 import type { ModelCard, ModelPricing, ProviderConfig } from '../model/types.ts'
+import { BUILTIN_PROVIDERS } from '../model/builtin.ts'
 import { validatePricing } from '../model/pricing.ts'
 import { ModelRegistry as Registry } from '../model/registry.ts'
 import { ModelGate, type ModelPriority } from '../model/gate.ts'
@@ -278,6 +279,8 @@ export interface App {
   modelConfig(): ModelConfigView
   /** 更新 provider 的端点或 API key；有 configPath 时写回配置文件。 */
   saveModelConfig(input: ModelConfigUpdate): Promise<ModelConfigView>
+  /** 添加一个新的 OpenAI 兼容服务商；有 configPath 时写回配置文件。 */
+  addModelProvider(input: ModelProviderInput): Promise<ModelConfigView>
   /** 更新单个模型的上下文/输出/价格；有 configPath 时写回配置文件。 */
   saveModelCard(input: ModelCardUpdate): Promise<ModelConfigView>
 
@@ -378,6 +381,21 @@ export interface ModelCardUpdate {
   readonly pricing?: ModelPricing | null
 }
 
+export interface ModelProviderInput {
+  readonly id: string
+  readonly name: string
+  readonly description?: string
+  readonly baseUrl: string
+  readonly apiKey?: string
+  readonly apiKeyEnv?: string
+  readonly models: readonly {
+    readonly id: string
+    readonly name?: string
+    readonly contextWindow?: number
+    readonly maxOutputTokens?: number
+  }[]
+}
+
 export interface AgentPresetSummary {
   readonly id: string
   readonly description: string
@@ -434,6 +452,11 @@ export interface BuildOptions {
 
 interface RawModelEntry {
   id?: string
+  name?: string
+  apiModelId?: string
+  capabilities?: string[]
+  inputModalities?: string[]
+  outputModalities?: string[]
   contextWindow?: number
   maxOutputTokens?: number
   pricing?: ModelPricing
@@ -441,9 +464,17 @@ interface RawModelEntry {
 
 interface RawProviderEntry {
   id?: string
+  name?: string
+  description?: string
   apiKey?: string
+  apiKeyEnv?: string
   defaultChatEndpoint?: string
-  endpoints?: Record<string, { baseUrl?: string }>
+  endpoints?: Record<string, {
+    baseUrl?: string
+    adapterFamily?: string
+    headers?: Record<string, string>
+    reasoningFormat?: string
+  }>
   models?: RawModelEntry[]
 }
 
@@ -660,9 +691,15 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     return store
   }
 
-  // 模型：配置提供，代码不猜。设置里改过的 provider 用覆盖层，不重建整个 registry。
+  // 模型：配置提供，代码不猜；内置服务商只补缺，不覆盖用户配置。
+  const configuredProviders = [...config.providers]
+  for (const builtin of BUILTIN_PROVIDERS) {
+    if (!configuredProviders.some(provider => provider.id === builtin.id)) {
+      configuredProviders.push(builtin)
+    }
+  }
   const models = new Registry()
-  for (const provider of config.providers) models.register(provider)
+  for (const provider of configuredProviders) models.register(provider)
   container.register('models', models)
 
   const providerOverrides = new Map<string, { apiKey?: string; baseUrl?: string }>()
@@ -726,6 +763,52 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     }, { timeoutMs: 5_000 })
   }
 
+  const providerToRaw = (provider: ProviderConfig, apiKey?: string): RawProviderEntry => ({
+    id: provider.id,
+    name: provider.name,
+    ...(provider.description ? { description: provider.description } : {}),
+    ...((apiKey ?? provider.apiKey) ? { apiKey: apiKey ?? provider.apiKey } : {}),
+    ...(provider.apiKeyEnv ? { apiKeyEnv: provider.apiKeyEnv } : {}),
+    ...(provider.defaultChatEndpoint
+      ? { defaultChatEndpoint: provider.defaultChatEndpoint }
+      : {}),
+    endpoints: Object.fromEntries(Object.entries(provider.endpoints).map(([family, endpoint]) => [
+      family,
+      {
+        baseUrl: endpoint.baseUrl,
+        ...(endpoint.adapterFamily ? { adapterFamily: endpoint.adapterFamily } : {}),
+        ...(endpoint.headers ? { headers: { ...endpoint.headers } } : {}),
+        ...(endpoint.reasoningFormat ? { reasoningFormat: endpoint.reasoningFormat } : {}),
+      },
+    ])),
+    models: provider.models.map(model => ({
+      id: model.id,
+      ...(model.name ? { name: model.name } : {}),
+      ...(model.apiModelId ? { apiModelId: model.apiModelId } : {}),
+      ...(model.capabilities ? { capabilities: [...model.capabilities] } : {}),
+      ...(model.inputModalities ? { inputModalities: [...model.inputModalities] } : {}),
+      ...(model.outputModalities ? { outputModalities: [...model.outputModalities] } : {}),
+      ...(model.contextWindow !== undefined ? { contextWindow: model.contextWindow } : {}),
+      ...(model.maxOutputTokens !== undefined
+        ? { maxOutputTokens: model.maxOutputTokens }
+        : {}),
+      ...(model.pricing ? { pricing: model.pricing } : {}),
+    })),
+  })
+
+  const ensureRawProvider = (
+    raw: RawConfigFile,
+    provider: ProviderConfig,
+  ): RawProviderEntry => {
+    raw.providers ??= []
+    let entry = raw.providers.find(item => item.id === provider.id)
+    if (!entry) {
+      entry = providerToRaw(provider)
+      raw.providers.push(entry)
+    }
+    return entry
+  }
+
   const modelConfigView = (): ModelConfigView => ({
     timeZone: config.profile.timeZone,
     providers: models.list().map((provider: ProviderConfig) => {
@@ -771,15 +854,20 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     providerOverrides.set(provider.id, next)
 
     await writeConfigFile(raw => {
-      const rawProvider = raw.providers?.find(item => item.id === input.provider)
-      if (!rawProvider) throw new Error(`config provider not found: ${input.provider}`)
+      const rawProvider = ensureRawProvider(raw, provider)
       if (next.apiKey) rawProvider.apiKey = next.apiKey
       if (next.baseUrl) {
         const family = rawProvider.defaultChatEndpoint
+          ?? provider.defaultChatEndpoint
+          ?? Object.keys(provider.endpoints)[0]
           ?? Object.keys(rawProvider.endpoints ?? {})[0]
-        const endpoint = family ? rawProvider.endpoints?.[family] : undefined
-        if (!family || !endpoint) {
-          throw new Error(`config provider has no endpoint: ${input.provider}`)
+        if (!family) throw new Error(`config provider has no endpoint: ${input.provider}`)
+        rawProvider.endpoints ??= {}
+        const endpoint = rawProvider.endpoints[family]
+          ?? (rawProvider.endpoints[family] = {})
+        if (!endpoint.adapterFamily) {
+          endpoint.adapterFamily = provider.endpoints[family]?.adapterFamily
+            ?? 'openai-chat-completions'
         }
         endpoint.baseUrl = next.baseUrl
       }
@@ -809,10 +897,13 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     const current = modelOverrides.get(key) ?? {}
 
     await writeConfigFile(raw => {
-      const rawProvider = raw.providers?.find(item => item.id === input.provider)
-      if (!rawProvider) throw new Error(`config provider not found: ${input.provider}`)
-      const rawModel = rawProvider.models?.find(model => model.id === input.model)
-      if (!rawModel) throw new Error(`config model not found: ${input.provider}/${input.model}`)
+      const rawProvider = ensureRawProvider(raw, provider)
+      rawProvider.models ??= []
+      let rawModel = rawProvider.models.find(model => model.id === input.model)
+      if (!rawModel) {
+        rawModel = { id: input.model }
+        rawProvider.models.push(rawModel)
+      }
       if (input.contextWindow !== undefined) {
         if (input.contextWindow === null) delete rawModel.contextWindow
         else rawModel.contextWindow = input.contextWindow
@@ -833,6 +924,75 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         ? { maxOutputTokens: input.maxOutputTokens }
         : {}),
       ...(input.pricing !== undefined ? { pricing: input.pricing } : {}),
+    })
+    return modelConfigView()
+  }
+
+  const addModelProvider = async (input: ModelProviderInput): Promise<ModelConfigView> => {
+    const id = input.id.trim()
+    if (!/^[a-z][a-z0-9_-]*$/.test(id)) {
+      throw new Error('provider id must match ^[a-z][a-z0-9_-]*$')
+    }
+    const name = input.name.trim()
+    if (!name) throw new Error('provider name is required')
+    const baseUrl = input.baseUrl.trim()
+    if (!baseUrl) throw new Error('baseUrl is required')
+    if (models.list().some(provider => provider.id === id)) {
+      throw new Error(`provider already exists: ${id}`)
+    }
+
+    const seen = new Set<string>()
+    const modelCards: ModelCard[] = (input.models ?? []).map(model => {
+      const modelId = model.id.trim()
+      if (!modelId) throw new Error('model id is required')
+      if (seen.has(modelId)) throw new Error(`duplicate model: ${modelId}`)
+      seen.add(modelId)
+      if (model.contextWindow !== undefined
+        && (!Number.isFinite(model.contextWindow) || model.contextWindow <= 0)) {
+        throw new Error(`invalid contextWindow for ${modelId}`)
+      }
+      if (model.maxOutputTokens !== undefined
+        && (!Number.isFinite(model.maxOutputTokens) || model.maxOutputTokens <= 0)) {
+        throw new Error(`invalid maxOutputTokens for ${modelId}`)
+      }
+      return {
+        id: modelId,
+        ...(model.name?.trim() ? { name: model.name.trim() } : {}),
+        ...(model.contextWindow !== undefined ? { contextWindow: model.contextWindow } : {}),
+        ...(model.maxOutputTokens !== undefined
+          ? { maxOutputTokens: model.maxOutputTokens }
+          : {}),
+      }
+    })
+    if (modelCards.length === 0) throw new Error('provider needs at least one model')
+
+    const provider: ProviderConfig = {
+      id,
+      name,
+      ...(input.description?.trim() ? { description: input.description.trim() } : {}),
+      ...(input.apiKey?.trim() ? { apiKey: input.apiKey.trim() } : {}),
+      ...(input.apiKeyEnv?.trim() ? { apiKeyEnv: input.apiKeyEnv.trim() } : {}),
+      defaultChatEndpoint: 'openai-chat-completions',
+      endpoints: {
+        'openai-chat-completions': {
+          adapterFamily: 'openai-chat-completions',
+          baseUrl,
+        },
+      },
+      models: modelCards,
+    }
+
+    await writeConfigFile(raw => {
+      raw.providers ??= []
+      if (raw.providers.some(item => item.id === id)) {
+        throw new Error(`provider already exists: ${id}`)
+      }
+      raw.providers.push(providerToRaw(provider))
+    })
+    models.register(provider)
+    providerOverrides.set(id, {
+      ...(provider.apiKey ? { apiKey: provider.apiKey } : {}),
+      baseUrl,
     })
     return modelConfigView()
   }
@@ -2033,6 +2193,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     },
 
     saveModelConfig,
+    addModelProvider,
     saveModelCard,
 
     memoryRole(sessionId) {

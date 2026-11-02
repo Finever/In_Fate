@@ -1502,8 +1502,8 @@ body.fw-resizing {
 /* ---------- 设置 ---------- */
 
 .fw-settings-dialog {
-  width: min(760px, 100%);
-  height: min(620px, calc(100dvh - 40px));
+  width: min(1080px, 100%);
+  height: min(720px, calc(100dvh - 40px));
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -3155,9 +3155,6 @@ body.fw-resizing {
 
 /* ---------- 设置：全局记忆编辑器 ---------- */
 
-.fw-settings-dialog.is-memory {
-  width: min(1080px, 100%);
-}
 .fw-mem-layout {
   min-height: 0;
   flex: 1;
@@ -3843,4 +3840,34 @@ body.fw-resizing {
   padding: 6px 2px;
   color: var(--faint);
   font-size: 9.5px;
+}
+
+/* ---------- 设置：添加服务商 ---------- */
+
+.fw-settings-add-provider {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 5px;
+  padding: 7px 9px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 8px;
+  background: none;
+  color: var(--faint);
+  font-size: 10.5px;
+  text-align: left;
+}
+.fw-settings-add-provider:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.fw-settings-add-provider:disabled {
+  opacity: .45;
+}
+.fw-provider-add-hint {
+  margin: 0 0 12px;
+  color: var(--faint);
+  font-size: 10px;
+  line-height: 1.6;
 }

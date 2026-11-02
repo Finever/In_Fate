@@ -261,6 +261,82 @@ async function handle(
     return
   }
 
+  if (req.method === 'POST' && parts[1] === 'model-config' && parts[2] === 'providers'
+    && parts.length === 3) {
+    const body = await readOptionalJson(req)
+    const id = typeof body.id === 'string' ? body.id.trim() : ''
+    const name = typeof body.name === 'string' ? body.name.trim() : ''
+    const baseUrl = typeof body.baseUrl === 'string' ? body.baseUrl.trim() : ''
+    if (!id || !name || !baseUrl) {
+      json(res, 400, { error: 'id, name and baseUrl are required' })
+      return
+    }
+    const rawModels = Array.isArray(body.models) ? body.models : []
+    if (rawModels.length === 0) {
+      json(res, 400, { error: 'at least one model is required' })
+      return
+    }
+    const modelsInput: Array<{
+      id: string
+      name?: string
+      contextWindow?: number
+      maxOutputTokens?: number
+    }> = []
+    for (const entry of rawModels) {
+      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+        json(res, 400, { error: 'models must be objects' })
+        return
+      }
+      const record = entry as Record<string, unknown>
+      const modelId = typeof record.id === 'string' ? record.id.trim() : ''
+      if (!modelId) {
+        json(res, 400, { error: 'model id is required' })
+        return
+      }
+      const contextWindow = record.contextWindow
+      const maxOutputTokens = record.maxOutputTokens
+      if (contextWindow !== undefined && contextWindow !== null
+        && (typeof contextWindow !== 'number' || !Number.isFinite(contextWindow))) {
+        json(res, 400, { error: 'contextWindow must be a number' })
+        return
+      }
+      if (maxOutputTokens !== undefined && maxOutputTokens !== null
+        && (typeof maxOutputTokens !== 'number' || !Number.isFinite(maxOutputTokens))) {
+        json(res, 400, { error: 'maxOutputTokens must be a number' })
+        return
+      }
+      modelsInput.push({
+        id: modelId,
+        ...(typeof record.name === 'string' && record.name.trim()
+          ? { name: record.name.trim() }
+          : {}),
+        ...(typeof contextWindow === 'number' ? { contextWindow } : {}),
+        ...(typeof maxOutputTokens === 'number' ? { maxOutputTokens } : {}),
+      })
+    }
+    try {
+      const config = await app.addModelProvider({
+        id,
+        name,
+        baseUrl,
+        ...(typeof body.description === 'string' && body.description.trim()
+          ? { description: body.description.trim() }
+          : {}),
+        ...(typeof body.apiKey === 'string' && body.apiKey.trim()
+          ? { apiKey: body.apiKey.trim() }
+          : {}),
+        ...(typeof body.apiKeyEnv === 'string' && body.apiKeyEnv.trim()
+          ? { apiKeyEnv: body.apiKeyEnv.trim() }
+          : {}),
+        models: modelsInput,
+      })
+      json(res, 200, { config })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
   if (req.method === 'PUT' && parts[1] === 'model-config' && parts[2] === 'models'
     && parts[3] && parts[4] && parts.length === 5) {
     const body = await readOptionalJson(req)

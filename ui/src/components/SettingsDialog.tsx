@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api'
 import type { ModelConfig, ModelConfigProvider, ModelPricing } from '../types'
+import { AddProviderDialog } from './AddProviderDialog'
 import { Icon } from './Icon'
 import { MemoryBrowser } from './MemoryBrowser'
 import { ModelEditorDialog } from './ModelEditorDialog'
@@ -42,6 +43,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [providerId, setProviderId] = useState('')
   const [drafts, setDrafts] = useState<Record<string, ProviderDraft>>({})
   const [editing, setEditing] = useState<{ providerId: string; modelId: string }>()
+  const [addProviderOpen, setAddProviderOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string>()
@@ -208,11 +210,23 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                           </span>
                           <span className="fw-settings-provider-text">
                             <b>{item.name}</b>
-                            <small>{item.models.length} 个模型</small>
+                            <small>
+                              {item.models.length} 个模型
+                              {!item.hasApiKey ? ' · 未配置 key' : ''}
+                            </small>
                           </span>
                         </button>
                       )
                     })}
+                    <button
+                      type="button"
+                      className="fw-settings-add-provider"
+                      onClick={() => setAddProviderOpen(true)}
+                      disabled={saving || Boolean(editing)}
+                    >
+                      <Icon name="plus" size={13} />
+                      添加服务商
+                    </button>
                   </>
                 )}
 
@@ -355,6 +369,20 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               </div>
             </footer>
           </>
+        )}
+
+        {addProviderOpen && (
+          <AddProviderDialog
+            onClose={() => setAddProviderOpen(false)}
+            onCreated={(next, providerId) => {
+              applyConfig(next)
+              setProviderId(providerId)
+              setView('models')
+              setError(undefined)
+              setNotice('模型服务商已添加')
+              setAddProviderOpen(false)
+            }}
+          />
         )}
 
         {editingProvider && editingModel && config && (

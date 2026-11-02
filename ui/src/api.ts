@@ -5,6 +5,7 @@ import type {
   MainAgentIdentity,
   MainAgentInfo,
   ModelConfig,
+  ModelProviderInput,
   SaveModelCardInput,
   SaveModelConfigInput,
   LogSearchResult,
@@ -191,6 +192,14 @@ export const api = {
         ...(input.apiKey !== undefined ? { apiKey: input.apiKey } : {}),
         ...(input.baseUrl !== undefined ? { baseUrl: input.baseUrl } : {}),
       }),
+    })
+    return body.config
+  },
+
+  async addModelProvider(input: ModelProviderInput): Promise<ModelConfig> {
+    const body = await request<{ config: ModelConfig }>('/api/model-config/providers', {
+      method: 'POST',
+      body: JSON.stringify(input),
     })
     return body.config
   },

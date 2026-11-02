@@ -55,7 +55,7 @@ test('模型配置：provider 凭据、模型卡与价格写回，view 不回传
     const initial = await fetch(`${handle.url}/api/model-config`, { headers })
     assert.equal(initial.status, 200)
     const initialText = await initial.text()
-    assert.doesNotMatch(initialText, /apiKey/)
+    assert.doesNotMatch(initialText, /"apiKey"\s*:/)
     assert.doesNotMatch(initialText, /defaultModel/)
     const initialBody = JSON.parse(initialText) as {
       config: {
@@ -139,6 +139,99 @@ test('模型配置：provider 凭据、模型卡与价格写回，view 不回传
       body: JSON.stringify({ contextWindow: 1000 }),
     })
     assert.equal(invalid.status, 400)
+  } finally {
+    await handle.close()
+    await app.dispose()
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+  }
+})
+
+test('内置服务商默认出现；添加服务商写入配置并拒绝重复 id', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'if-server-model-add-'))
+  const dataRoot = join(dir, 'data')
+  const configPath = join(dir, 'if.json')
+  mkdirSync(dataRoot, { recursive: true })
+  writeFileSync(configPath, `${JSON.stringify(configFor(dataRoot), null, 2)}\n`, 'utf8')
+
+  const app = buildBundle(configFor(dataRoot), new Container(), { configPath })
+  const handle = await startServer(app, { port: 0, token: 'test-token' })
+  const headers = {
+    authorization: 'Bearer test-token',
+    'content-type': 'application/json',
+  }
+  try {
+    const initial = await fetch(`${handle.url}/api/model-config`, { headers })
+    assert.equal(initial.status, 200)
+    const initialBody = await initial.json() as {
+      config: { providers: Array<{ id: string }> }
+    }
+    const ids = initialBody.config.providers.map(provider => provider.id)
+    assert.equal(ids.includes('fake'), true)
+    assert.equal(ids.includes('deepseek'), true)
+    assert.equal(ids.includes('openai'), true)
+
+    const created = await fetch(`${handle.url}/api/model-config/providers`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        id: 'custom',
+        name: 'Custom Provider',
+        baseUrl: 'http://127.0.0.1:9/v1',
+        apiKey: 'secret-key',
+        apiKeyEnv: 'CUSTOM_API_KEY',
+        models: [
+          { id: 'x', name: 'X', contextWindow: 32_000, maxOutputTokens: 4_096 },
+        ],
+      }),
+    })
+    assert.equal(created.status, 200)
+    const createdBody = await created.json() as {
+      config: { providers: Array<{ id: string; hasApiKey: boolean; baseUrl: string }> }
+    }
+    const added = createdBody.config.providers.find(provider => provider.id === 'custom')
+    assert.ok(added)
+    assert.equal(added?.hasApiKey, true)
+    assert.equal(added?.baseUrl, 'http://127.0.0.1:9/v1')
+
+    const disk = JSON.parse(readFileSync(configPath, 'utf8')) as {
+      providers: Array<{
+        id: string
+        apiKey?: string
+        apiKeyEnv?: string
+        endpoints?: Record<string, { baseUrl?: string }>
+        models?: Array<{ id: string; contextWindow?: number }>
+      }>
+    }
+    const raw = disk.providers.find(provider => provider.id === 'custom')
+    assert.ok(raw)
+    assert.equal(raw?.apiKey, 'secret-key')
+    assert.equal(raw?.apiKeyEnv, 'CUSTOM_API_KEY')
+    assert.equal(raw?.endpoints?.['openai-chat-completions']?.baseUrl, 'http://127.0.0.1:9/v1')
+    assert.equal(raw?.models?.find(model => model.id === 'x')?.contextWindow, 32_000)
+
+    const duplicate = await fetch(`${handle.url}/api/model-config/providers`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        id: 'custom',
+        name: 'Custom Again',
+        baseUrl: 'http://127.0.0.1:10/v1',
+        models: [{ id: 'x' }],
+      }),
+    })
+    assert.equal(duplicate.status, 400)
+
+    const builtinDuplicate = await fetch(`${handle.url}/api/model-config/providers`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        id: 'deepseek',
+        name: 'DeepSeek Again',
+        baseUrl: 'http://127.0.0.1:11/v1',
+        models: [{ id: 'x' }],
+      }),
+    })
+    assert.equal(builtinDuplicate.status, 400)
   } finally {
     await handle.close()
     await app.dispose()
