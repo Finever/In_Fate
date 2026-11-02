@@ -10,6 +10,7 @@ import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
+import { writeIndex } from './index.ts'
 
 const exec = promisify(execFile)
 
@@ -35,8 +36,16 @@ export class MemoryCommitter {
     if (options.onError) this.onError = options.onError
   }
 
+  /** 记忆库的 git 根：优先 memory root，其次 detail（现有库的常见布局）。 */
+  private gitRoot(): string | undefined {
+    if (existsSync(join(this.root, '.git'))) return this.root
+    const detail = join(this.root, 'detail')
+    if (existsSync(join(detail, '.git'))) return detail
+    return undefined
+  }
+
   markDirty(target: string): void {
-    if (!this.enabled || !existsSync(join(this.root, '.git'))) return
+    if (!this.enabled || !this.gitRoot()) return
     this.dirty.add(target)
     if (this.timer) clearTimeout(this.timer)
     this.timer = setTimeout(() => {
@@ -55,7 +64,8 @@ export class MemoryCommitter {
       await this.running
       if (this.dirty.size === 0) return
     }
-    if (!this.enabled || this.dirty.size === 0 || !existsSync(join(this.root, '.git'))) {
+    const gitRoot = this.gitRoot()
+    if (!this.enabled || this.dirty.size === 0 || !gitRoot) {
       this.dirty.clear()
       return
     }
@@ -64,13 +74,19 @@ export class MemoryCommitter {
     this.dirty.clear()
     this.running = (async () => {
       try {
-        const paths = ['detail']
-        if (existsSync(join(this.root, 'proposals'))) paths.push('proposals')
-        await exec('git', ['-C', this.root, 'add', '--', ...paths], {
+        try {
+          writeIndex({ memoryRoot: this.root })
+        } catch (error) {
+          this.onError?.(error)
+        }
+        const paths = gitRoot === this.root
+          ? ['detail', ...(existsSync(join(this.root, 'proposals')) ? ['proposals'] : [])]
+          : ['.']
+        await exec('git', ['-C', gitRoot, 'add', '--', ...paths], {
           windowsHide: true,
         })
         await exec('git', [
-          '-C', this.root,
+          '-C', gitRoot,
           'commit',
           '-m',
           `memory: 自动提交 ${targets.slice(0, 6).join(', ')}${targets.length > 6 ? '…' : ''}`,

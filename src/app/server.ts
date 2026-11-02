@@ -13,6 +13,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { AddressInfo } from 'node:net'
 import { extname, join, resolve, sep } from 'node:path'
 import type { MemoryRole } from '../memory/access.ts'
+import { MemoryValidationError, type MemoryDocument } from '../memory/store.ts'
 import type { App } from './bundle.ts'
 
 export interface ServeOptions {
@@ -348,6 +349,45 @@ async function handle(
     }
     const role = app.grantMemory(body.sessionId, body.role as MemoryRole)
     json(res, 200, { sessionId: body.sessionId, role })
+    return
+  }
+
+  if (req.method === 'GET' && parts[1] === 'memory' && parts[2] === 'index' && parts.length === 3) {
+    json(res, 200, { files: app.memoryIndex() })
+    return
+  }
+
+  if (req.method === 'PUT' && parts[1] === 'memory' && parts[2] === 'document' && parts.length === 3) {
+    let body: { target?: unknown; document?: unknown }
+    try {
+      body = JSON.parse(await readBody(req)) as { target?: unknown; document?: unknown }
+    } catch {
+      json(res, 400, { error: 'invalid JSON' })
+      return
+    }
+    if (
+      typeof body.target !== 'string'
+      || typeof body.document !== 'object'
+      || body.document === null
+      || Array.isArray(body.document)
+    ) {
+      json(res, 400, { error: 'target and document are required' })
+      return
+    }
+    try {
+      const result = await app.saveMemoryDocument(body.target, body.document as MemoryDocument)
+      json(res, 200, result)
+    } catch (error) {
+      if (error instanceof MemoryValidationError) {
+        json(res, 400, {
+          error: '记忆文件校验失败',
+          issues: error.result.errors,
+          warnings: error.result.warnings,
+        })
+      } else {
+        json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+      }
+    }
     return
   }
 

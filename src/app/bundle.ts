@@ -50,7 +50,8 @@ import { MemoryAccess, type MemoryRole } from '../memory/access.ts'
 import { MemoryCommitter } from '../memory/committer.ts'
 import { MemoryIdentityStore } from '../memory/identity.ts'
 import { MemoryProposalStore, type MemoryAcceptResult, type MemoryProposal, type ProposalStatus } from '../memory/proposals.ts'
-import { MemoryStore, type MemoryDocument, type MemoryEntry, type MemorySearchHit } from '../memory/store.ts'
+import { MemoryStore, type MemoryDocument, type MemoryEntry, type MemoryFileSummary, type MemorySearchHit } from '../memory/store.ts'
+import type { Issue } from '../memory/validate.ts'
 import { createMemoryTools } from '../memory/tools.ts'
 import { readFileSync, renameSync, writeFileSync } from 'node:fs'
 import type { ModelRegistry, ResolvedModel } from '../model/registry.ts'
@@ -302,8 +303,15 @@ export interface App {
   grantMemory(sessionId: string, role: MemoryRole): MemoryRole
   /** 全局 detail 记忆搜索。 */
   memorySearch(query: string, limit?: number): MemorySearchHit[]
+  /** 全局 detail 记忆文件索引（域 / 文件 / 条数）。 */
+  memoryIndex(): MemoryFileSummary[]
   /** 读一个 detail 记忆文档。 */
   memoryRead(target: string): MemoryDocument
+  /** 人类 UI 整文件保存；校验不过抛 MemoryValidationError。 */
+  saveMemoryDocument(
+    target: string,
+    doc: MemoryDocument,
+  ): Promise<{ document: MemoryDocument; warnings: readonly Issue[] }>
   memoryProposals(status?: ProposalStatus): MemoryProposal[]
   acceptMemoryProposal(proposalId: string): Promise<MemoryAcceptResult>
   rejectMemoryProposal(proposalId: string): MemoryProposal
@@ -2017,9 +2025,18 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       return memoryStore?.search(query, limit) ?? []
     },
 
+    memoryIndex() {
+      return memoryStore?.listDocuments() ?? []
+    },
+
     memoryRead(target) {
       if (!memoryStore) throw new Error('memory is not configured')
       return memoryStore.read(target)
+    },
+
+    async saveMemoryDocument(target, doc) {
+      if (!memoryStore) throw new Error('memory is not configured')
+      return memoryStore.saveDocument(target, doc)
     },
 
     memoryProposals(status) {

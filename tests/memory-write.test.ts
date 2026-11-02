@@ -307,3 +307,61 @@ test('identity proposal：applying 期间目标被外部改过就拒绝自动处
     ctx.close()
   }
 })
+
+test('detail 记忆：文件索引与整文件保存', async () => {
+  const ctx = fixture()
+  try {
+    const first = await ctx.store.add('detail:test/notes', {
+      content: 'alpha 事实',
+      tag: '确信',
+    })
+    const list = ctx.store.listDocuments()
+    assert.equal(list.length, 1)
+    assert.equal(list[0]?.domain, 'test')
+    assert.equal(list[0]?.filename, 'notes')
+    assert.equal(list[0]?.target, 'detail:test/notes')
+    assert.equal(list[0]?.entries, 1)
+
+    const doc = ctx.store.read('detail:test/notes')
+    const saved = await ctx.store.saveDocument('detail:test/notes', {
+      ...doc,
+      introduction: '改过的简介',
+      entries: [
+        { ...doc.entries[0]!, content: 'alpha 改过', tag: '可信' },
+        {
+          id: 'notes-0099',
+          'rec-time': '2026-10-24 12:01',
+          'rev-time': null,
+          at: null,
+          tag: '有疑',
+          content: '新增条目',
+          quotes: [],
+        },
+      ],
+    })
+    assert.equal(saved.document.entries.length, 2)
+    assert.equal(saved.document.introduction, '改过的简介')
+    const reread = ctx.store.read('detail:test/notes')
+    assert.equal(reread.entries[1]?.content, '新增条目')
+    assert.equal(ctx.store.listDocuments()[0]?.entries, 2)
+
+    await assert.rejects(
+      ctx.store.saveDocument('detail:test/notes', {
+        ...reread,
+        entries: [{ ...reread.entries[0]!, content: '' }],
+      }),
+      /validation failed/,
+    )
+    await assert.rejects(
+      ctx.store.saveDocument('detail:test/notes', {
+        ...reread,
+        filename: 'other',
+      }),
+      /filename mismatch/,
+    )
+    assert.equal(ctx.store.read('detail:test/notes').entries.length, 2)
+    assert.equal(first.id, 'notes-0001')
+  } finally {
+    ctx.close()
+  }
+})

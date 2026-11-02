@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api'
 import type { ModelConfig, ModelConfigProvider, ModelPricing } from '../types'
 import { Icon } from './Icon'
@@ -38,6 +38,7 @@ function pricingSummary(pricing: ModelPricing | undefined): string {
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [config, setConfig] = useState<ModelConfig>()
   const [view, setView] = useState<'models' | 'memory'>('models')
+  const [memoryDirty, setMemoryDirty] = useState(false)
   const [providerId, setProviderId] = useState('')
   const [drafts, setDrafts] = useState<Record<string, ProviderDraft>>({})
   const [editing, setEditing] = useState<{ providerId: string; modelId: string }>()
@@ -70,13 +71,18 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     }
   }, [])
 
+  const requestClose = useCallback((): void => {
+    if (memoryDirty && !window.confirm('全局记忆有未保存的改动，确定关闭设置？')) return
+    onClose()
+  }, [memoryDirty, onClose])
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape' && !saving && !editing) onClose()
+      if (event.key === 'Escape' && !saving && !editing) requestClose()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [editing, onClose, saving])
+  }, [editing, requestClose, saving])
 
   const provider = config?.providers.find(item => item.id === providerId)
   const draft = provider ? drafts[provider.id] : undefined
@@ -86,6 +92,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const editingModel = editingProvider?.models.find(model => model.id === editing?.modelId)
 
   function chooseProvider(nextId: string): void {
+    if (memoryDirty && !window.confirm('全局记忆有未保存的改动，切回模型服务会丢失。继续？')) return
     setView('models')
     setProviderId(nextId)
     setError(undefined)
@@ -149,11 +156,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     <div
       className="fw-modal-backdrop"
       onMouseDown={() => {
-        if (!saving && !editing) onClose()
+        if (!saving && !editing) requestClose()
       }}
     >
       <div
-        className="fw-settings-dialog"
+        className={`fw-settings-dialog${view === 'memory' ? ' is-memory' : ''}`}
         role="dialog"
         aria-modal="true"
         aria-label="设置"
@@ -164,7 +171,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           <button
             type="button"
             className="fw-icon-btn"
-            onClick={onClose}
+            onClick={requestClose}
             disabled={saving || Boolean(editing)}
             aria-label="关闭设置"
             title="关闭设置"
@@ -183,26 +190,6 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           <>
             <div className="fw-settings-body">
               <aside className="fw-settings-nav">
-                <div className="fw-settings-nav-title">全局</div>
-                <button
-                  type="button"
-                  className={`fw-settings-provider${view === 'memory' ? ' is-active' : ''}`}
-                  onClick={() => {
-                    setView('memory')
-                    setError(undefined)
-                    setNotice(undefined)
-                  }}
-                  disabled={saving || Boolean(editing)}
-                >
-                  <span className="fw-settings-provider-mark">
-                    <Icon name="search" size={13} />
-                  </span>
-                  <span className="fw-settings-provider-text">
-                    <b>全局记忆</b>
-                    <small>detail 记忆库</small>
-                  </span>
-                </button>
-
                 {config && (
                   <>
                     <div className="fw-settings-nav-title">模型服务</div>
@@ -228,11 +215,31 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                     })}
                   </>
                 )}
+
+                <div className="fw-settings-nav-title">记忆</div>
+                <button
+                  type="button"
+                  className={`fw-settings-provider${view === 'memory' ? ' is-active' : ''}`}
+                  onClick={() => {
+                    setView('memory')
+                    setError(undefined)
+                    setNotice(undefined)
+                  }}
+                  disabled={saving || Boolean(editing)}
+                >
+                  <span className="fw-settings-provider-mark">
+                    <Icon name="search" size={13} />
+                  </span>
+                  <span className="fw-settings-provider-text">
+                    <b>全局记忆</b>
+                    <small>detail 记忆库</small>
+                  </span>
+                </button>
               </aside>
 
               <div className={`fw-settings-main${view === 'memory' ? ' is-memory' : ''}`}>
                 {view === 'memory' ? (
-                  <MemoryBrowser />
+                  <MemoryBrowser onDirtyChange={setMemoryDirty} />
                 ) : provider && draft ? (
                   <>
                     <div className="fw-settings-provider-head">
@@ -318,7 +325,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             <footer className="fw-settings-footer">
               <div className="fw-settings-feedback">
                 {view === 'memory' ? (
-                  <span className="fw-settings-hint">全局 detail 记忆库 · 只读</span>
+                  <span className="fw-settings-hint">全局 detail 记忆库 · 保存前校验</span>
                 ) : (
                   <>
                     {error && <div className="fw-dialog-error">{error}</div>}
@@ -330,7 +337,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                 <button
                   type="button"
                   className="fw-dialog-cancel"
-                  onClick={onClose}
+                  onClick={requestClose}
                   disabled={saving}
                 >
                   关闭

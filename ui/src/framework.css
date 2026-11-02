@@ -3152,3 +3152,369 @@ body.fw-resizing {
   font: 9px var(--mono);
   font-style: normal;
 }
+
+/* ---------- 设置：全局记忆编辑器 ---------- */
+
+.fw-settings-dialog.is-memory {
+  width: min(1080px, 100%);
+}
+.fw-mem-layout {
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: 10px;
+}
+.fw-mem-tree {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .012);
+}
+.fw-mem-tree-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 6px 8px;
+  color: var(--faint);
+  font-size: 10px;
+}
+.fw-mem-tree-loading {
+  padding: 8px 6px;
+}
+.fw-mem-domain {
+  margin-top: 6px;
+}
+.fw-mem-domain-name {
+  padding: 5px 7px 3px;
+  color: var(--faint);
+  font: 9.5px var(--mono);
+  letter-spacing: .04em;
+}
+.fw-mem-file {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  text-align: left;
+  font-size: 10.5px;
+}
+.fw-mem-file:hover {
+  background: rgba(255, 255, 255, .03);
+  color: var(--text);
+}
+.fw-mem-file.is-active {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.fw-mem-file-name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fw-mem-file-count {
+  flex: none;
+  color: var(--faint);
+  font: 9px var(--mono);
+}
+.fw-mem-main {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.fw-mem-issues {
+  max-height: 120px;
+  overflow-y: auto;
+  padding: 7px 9px;
+  border: 1px solid rgba(224, 99, 111, .28);
+  border-radius: 8px;
+  background: rgba(224, 99, 111, .06);
+  font-size: 10px;
+  line-height: 1.6;
+}
+.fw-mem-issues .is-error {
+  color: var(--danger);
+}
+.fw-mem-issues .is-warning {
+  color: var(--warn);
+}
+.fw-mem-issues code {
+  margin-right: 6px;
+  color: var(--faint);
+  font: 9px var(--mono);
+}
+.fw-mem-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.fw-mem-editor-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.fw-mem-title {
+  min-width: 0;
+  flex: 1;
+}
+.fw-mem-title h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+}
+.fw-mem-title small {
+  color: var(--faint);
+  font: 9px var(--mono);
+}
+.fw-mem-editor-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.fw-mem-dirty {
+  padding: 1px 6px;
+  border: 1px solid rgba(242, 180, 95, .28);
+  border-radius: 999px;
+  color: var(--warn);
+  font-size: 9px;
+}
+.fw-mem-notice {
+  color: var(--mint);
+  font-size: 9.5px;
+}
+.fw-mem-btn {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 10.5px;
+}
+.fw-mem-meta-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 180px) minmax(0, 1fr);
+  gap: 8px;
+}
+.fw-mem-meta-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--faint);
+  font-size: 9px;
+}
+.fw-mem-meta-fields input,
+.fw-mem-meta-fields textarea {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  outline: none;
+  background: var(--bg);
+  color: var(--text);
+  font: 10.5px/1.6 var(--sans);
+}
+.fw-mem-intro-field textarea {
+  min-height: 52px;
+  resize: vertical;
+}
+.fw-mem-entry-edit {
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, .012);
+}
+.fw-mem-entry-edit-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.fw-mem-entry-id {
+  color: var(--faint);
+  font: 9px var(--mono);
+}
+.fw-mem-entry-edit-head select {
+  height: 24px;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 9.5px;
+}
+.fw-mem-mini {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--faint);
+  font: 8.5px var(--mono);
+}
+.fw-mem-mini input {
+  width: 108px;
+  height: 24px;
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font: 9px var(--mono);
+}
+.fw-mem-rev {
+  color: var(--faint);
+  font: 8.5px var(--mono);
+}
+.fw-mem-grow {
+  flex: 1;
+}
+.fw-mem-icon {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+.fw-mem-icon:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+.fw-mem-icon:disabled {
+  opacity: .35;
+}
+.fw-mem-icon.is-danger {
+  color: var(--danger);
+}
+.fw-mem-content-input {
+  width: 100%;
+  min-height: 64px;
+  margin-top: 6px;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  outline: none;
+  background: var(--bg);
+  color: var(--text);
+  font: 10.5px/1.65 var(--mono);
+  resize: vertical;
+  field-sizing: content;
+}
+.fw-mem-content-input:focus,
+.fw-mem-quote-edit textarea:focus,
+.fw-mem-addr:focus,
+.fw-mem-meta-fields input:focus {
+  border-color: rgba(143, 123, 255, .5);
+}
+.fw-mem-quote-box {
+  margin-top: 8px;
+}
+.fw-mem-quote-box-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+  color: var(--faint);
+  font-size: 9px;
+}
+.fw-mem-quote-box-head span {
+  color: var(--faint);
+}
+.fw-mem-quote-edit {
+  margin-top: 5px;
+  padding: 6px 7px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, .015);
+}
+.fw-mem-quote-edit textarea {
+  width: 100%;
+  min-height: 40px;
+  padding: 5px 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  outline: none;
+  background: var(--bg);
+  color: var(--text);
+  font: 10px/1.55 var(--sans);
+  resize: vertical;
+  field-sizing: content;
+}
+.fw-mem-quote-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 5px;
+}
+.fw-mem-qtags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.fw-mem-qtag {
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: none;
+  color: var(--faint);
+  font-size: 8.5px;
+}
+.fw-mem-qtag.is-on {
+  border-color: rgba(143, 123, 255, .4);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.fw-mem-addr {
+  min-width: 150px;
+  flex: 1;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font: 9px var(--mono);
+}
+.fw-mem-addr.is-missing {
+  border-color: rgba(242, 180, 95, .35);
+}
+.fw-mem-quote-row > input {
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font: 9px var(--mono);
+}
+.fw-mem-add {
+  align-self: flex-start;
+  margin-top: 5px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font-size: 9.5px;
+}
+.fw-mem-add:hover {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+.fw-mem-add-entry {
+  margin-top: 2px;
+}

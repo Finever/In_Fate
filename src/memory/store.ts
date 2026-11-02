@@ -13,11 +13,13 @@ import {
   readFileSync,
   readdirSync,
   renameSync,
+  statSync,
   writeFileSync,
 } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { withFileLock } from '../core/lock.ts'
 import { assertWithin } from '../core/safe-path.ts'
+import { validateFile, type Issue, type ValidationResult } from './validate.ts'
 
 export type MemoryTag = '确信' | '可信' | '有疑'
 
@@ -76,6 +78,30 @@ export interface MemorySearchHit {
   readonly tag: MemoryTag
   readonly preview: string
   readonly filename: string
+}
+
+export interface MemoryFileSummary {
+  readonly domain: string
+  readonly project: string
+  readonly filename: string
+  readonly target: string
+  readonly introduction: string
+  readonly entries: number
+  readonly quotes: number
+  readonly bytes: number
+  readonly updatedAt: string
+}
+
+export class MemoryValidationError extends Error {
+  readonly result: ValidationResult
+
+  constructor(result: ValidationResult) {
+    super(`memory validation failed: ${
+      result.errors.map(issue => `${issue.path}: ${issue.message}`).join('; ')
+    }`)
+    this.name = 'MemoryValidationError'
+    this.result = result
+  }
 }
 
 const TAGS = new Set<MemoryTag>(['确信', '可信', '有疑'])
@@ -241,6 +267,67 @@ export class MemoryStore {
     const doc = readDocument(target.path)
     if (!doc) throw new Error(`memory target not found: ${target.target}`)
     return doc
+  }
+
+  /** 扫 detail 目录，给 UI 的文件树用；坏文件跳过，读文件时再报。 */
+  listDocuments(): MemoryFileSummary[] {
+    const detailRoot = join(this.root, 'detail')
+    if (!existsSync(detailRoot)) return []
+    const out: MemoryFileSummary[] = []
+    for (const domain of readdirSync(detailRoot, { withFileTypes: true })) {
+      if (!domain.isDirectory() || domain.name.startsWith('_')) continue
+      const dir = join(detailRoot, domain.name)
+      for (const file of readdirSync(dir, { withFileTypes: true })) {
+        if (!file.isFile() || !file.name.endsWith('.json')) continue
+        const path = join(dir, file.name)
+        try {
+          const doc = readDocument(path)
+          if (!doc) continue
+          const stat = statSync(path)
+          out.push({
+            domain: domain.name,
+            project: doc.project,
+            filename: doc.filename,
+            target: `detail:${domain.name}/${doc.filename}`,
+            introduction: doc.introduction,
+            entries: doc.entries.length,
+            quotes: doc.entries.reduce(
+              (sum, entry) => sum + (entry.quotes?.length ?? 0),
+              0,
+            ),
+            bytes: stat.size,
+            updatedAt: stat.mtime.toISOString(),
+          })
+        } catch {
+          // 坏文件不阻塞索引。
+        }
+      }
+    }
+    return out.sort((a, b) =>
+      a.domain.localeCompare(b.domain, 'zh')
+      || a.filename.localeCompare(b.filename, 'zh'))
+  }
+
+  /** 人类 UI 的整文件保存：同目标串行、跨进程文件锁，校验不过不落盘。 */
+  saveDocument(
+    value: string,
+    doc: MemoryDocument,
+  ): Promise<{ document: MemoryDocument; warnings: readonly Issue[] }> {
+    const target = this.target(value)
+    return this.writer.run(target.path, () => withFileLock(target.path, () => {
+      if (doc.filename !== target.file) {
+        throw new Error(`memory filename mismatch: ${doc.filename} vs ${target.file}`)
+      }
+      const result = validateFile(doc)
+      if (!result.ok) throw new MemoryValidationError(result)
+      const next: MemoryDocument = {
+        ...doc,
+        project: doc.project.trim() || target.domain,
+      }
+      writeDocument(target.path, next)
+      this.onWrite?.(target.target)
+      return { document: next, warnings: result.warnings }
+    }, { timeoutMs: 5_000 }))
   }
 
   search(query: string, limit = 20): MemorySearchHit[] {

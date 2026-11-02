@@ -8,8 +8,10 @@ import type {
   SaveModelCardInput,
   SaveModelConfigInput,
   MemoryDocument,
+  MemoryFileSummary,
   MemoryProposal,
   MemorySearchHit,
+  MemoryValidationIssue,
   SessionInfo,
   SessionInspection,
   SessionLifecycleRecord,
@@ -27,13 +29,21 @@ export class ApiError extends Error {
   readonly status: number
   readonly code?: string
   readonly agentId?: string
+  readonly issues?: MemoryValidationIssue[]
 
-  constructor(message: string, status = 0, code?: string, agentId?: string) {
+  constructor(
+    message: string,
+    status = 0,
+    code?: string,
+    agentId?: string,
+    issues?: MemoryValidationIssue[],
+  ) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.code = code
     this.agentId = agentId
+    this.issues = issues
   }
 }
 
@@ -67,19 +77,22 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     let detail = `${response.status} ${response.statusText}`
     let code: string | undefined
     let agentId: string | undefined
+    let issues: MemoryValidationIssue[] | undefined
     try {
       const body = await response.json() as {
         error?: string
         code?: string
         agentId?: string
+        issues?: MemoryValidationIssue[]
       }
       if (body.error) detail = body.error
       code = body.code
       agentId = body.agentId
+      if (Array.isArray(body.issues)) issues = body.issues
     } catch {
       // 非 JSON 错误
     }
-    throw new ApiError(detail, response.status, code, agentId)
+    throw new ApiError(detail, response.status, code, agentId, issues)
   }
   return response.json() as Promise<T>
 }
@@ -282,6 +295,21 @@ export const api = {
     const params = new URLSearchParams({ target })
     const body = await request<{ document: MemoryDocument }>(`/api/memory/read?${params.toString()}`)
     return body.document
+  },
+
+  async memoryIndex(): Promise<MemoryFileSummary[]> {
+    const body = await request<{ files: MemoryFileSummary[] }>('/api/memory/index')
+    return body.files
+  },
+
+  async saveMemoryDocument(
+    target: string,
+    document: MemoryDocument,
+  ): Promise<{ document: MemoryDocument; warnings: MemoryValidationIssue[] }> {
+    return request('/api/memory/document', {
+      method: 'PUT',
+      body: JSON.stringify({ target, document }),
+    })
   },
 
   async memoryProposals(status: 'pending' | 'accepted' | 'rejected' | 'all' = 'pending'): Promise<MemoryProposal[]> {

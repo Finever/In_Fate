@@ -91,6 +91,24 @@ export interface MemorySearchHit {
   filename: string
 }
 
+export interface MemoryFileSummary {
+  domain: string
+  project: string
+  filename: string
+  target: string
+  introduction: string
+  entries: number
+  quotes: number
+  bytes: number
+  updatedAt: string
+}
+
+export interface MemoryValidationIssue {
+  level: 'error' | 'warning'
+  path: string
+  message: string
+}
+
 export interface ModelRef {
   provider: string
   model: string
