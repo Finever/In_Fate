@@ -167,7 +167,7 @@ test('多 API key：添加、停用、删除，视图只给脱敏预览', async 
   }
 })
 
-test('旧单密钥：列表里可见、可显示、可删除，但不能改名或单独停用', async () => {
+test('旧单密钥：列表里可见、可显示，改名时迁进多 key 列表', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'if-server-model-legacy-key-'))
   const dataRoot = join(dir, 'data')
   const configPath = join(dir, 'if.json')
@@ -211,11 +211,35 @@ test('旧单密钥：列表里可见、可显示、可删除，但不能改名�
     const rename = await fetch(`${keysUrl}/legacy`, {
       method: 'PATCH',
       headers: { ...headers, 'content-type': 'application/json' },
-      body: JSON.stringify({ name: '改个名' }),
+      body: JSON.stringify({ name: '旧主力' }),
     })
-    assert.equal(rename.status, 400)
+    assert.equal(rename.status, 200)
+    const renamedBody = await rename.json() as {
+      config: {
+        providers: Array<{
+          hasApiKey: boolean
+          apiKeys: Array<{ id: string; name?: string; legacy?: boolean }>
+        }>
+      }
+    }
+    const migrated = renamedBody.config.providers[0]!.apiKeys[0]!
+    assert.equal(renamedBody.config.providers[0]!.apiKeys.length, 1)
+    assert.equal(migrated.name, '旧主力')
+    assert.equal(migrated.legacy, undefined)
+    assert.notEqual(migrated.id, 'legacy')
+    assert.equal(renamedBody.config.providers[0]!.hasApiKey, true)
 
-    const removed = await fetch(`${keysUrl}/legacy`, { method: 'DELETE', headers })
+    const diskAfterRename = JSON.parse(readFileSync(configPath, 'utf8')) as {
+      providers: Array<{
+        apiKey?: string
+        apiKeys?: Array<{ id: string; name?: string; key: string }>
+      }>
+    }
+    assert.equal(diskAfterRename.providers[0]!.apiKey, undefined)
+    assert.equal(diskAfterRename.providers[0]!.apiKeys?.[0]?.name, '旧主力')
+    assert.equal(diskAfterRename.providers[0]!.apiKeys?.[0]?.key, 'legacy-secret')
+
+    const removed = await fetch(`${keysUrl}/${migrated.id}`, { method: 'DELETE', headers })
     assert.equal(removed.status, 200)
     const removedBody = await removed.json() as {
       config: { providers: Array<{ hasApiKey: boolean; apiKeys: unknown[] }> }

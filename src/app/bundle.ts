@@ -1224,23 +1224,27 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     return modelConfigView()
   }
 
+  const clearLegacyApiKey = async (provider: ProviderConfig): Promise<void> => {
+    const current = providerOverrides.get(provider.id)
+    if (current?.apiKey !== undefined) {
+      const { apiKey: _removed, ...rest } = current
+      if (Object.keys(rest).length > 0) providerOverrides.set(provider.id, rest)
+      else providerOverrides.delete(provider.id)
+    }
+    await writeConfigFile(raw => {
+      const rawProvider = ensureRawProvider(raw, provider)
+      delete rawProvider.apiKey
+    })
+    models.setLegacyApiKey(provider.id, undefined)
+  }
+
   const removeModelApiKey = async (input: ModelApiKeyRemoveInput): Promise<ModelConfigView> => {
     const provider = models.get(input.provider)
     const target = keyEntriesOf(provider).find(entry => entry.id === input.keyId)
     if (!target) throw new Error(`unknown api key: ${input.keyId}`)
 
     if (target.legacy) {
-      const current = providerOverrides.get(provider.id)
-      if (current?.apiKey !== undefined) {
-        const { apiKey: _removed, ...rest } = current
-        if (Object.keys(rest).length > 0) providerOverrides.set(provider.id, rest)
-        else providerOverrides.delete(provider.id)
-      }
-      await writeConfigFile(raw => {
-        const rawProvider = ensureRawProvider(raw, provider)
-        delete rawProvider.apiKey
-      })
-      models.setLegacyApiKey(provider.id, undefined)
+      await clearLegacyApiKey(provider)
       return modelConfigView()
     }
 
@@ -1258,8 +1262,19 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     const provider = models.get(input.provider)
     const target = keyEntriesOf(provider).find(entry => entry.id === input.keyId)
     if (!target) throw new Error(`unknown api key: ${input.keyId}`)
+
     if (target.legacy) {
-      throw new Error('旧单密钥不能改名或单独停用；删除后重新添加即可')
+      // 改旧单密钥时顺手迁进多 key 列表，之后就能像普通 key 一样管理。
+      const name = input.name === undefined ? '旧单密钥' : input.name.trim()
+      const migrated: ApiKeyConfig = {
+        id: `key-${randomUUID().slice(0, 8)}`,
+        ...(name ? { name } : {}),
+        key: target.key,
+        isEnabled: input.isEnabled ?? true,
+      }
+      await persistApiKeys(provider, [...(provider.apiKeys ?? []), migrated])
+      await clearLegacyApiKey(provider)
+      return modelConfigView()
     }
 
     const keys = (provider.apiKeys ?? []).map(entry => {

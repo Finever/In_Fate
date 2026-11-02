@@ -461,7 +461,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
 
   const keyPlaceholder = provider?.apiKeyEnv
     ? `输入新 key（也可用环境变量 ${provider.apiKeyEnv}）`
-    : '输入新的 API key，添加后不回显'
+    : '输入新的 API key'
 
   return (
     <div
@@ -716,7 +716,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                                   {entry.legacy && (
                                     <span className="fw-settings-key-tag">旧</span>
                                   )}
-                                  {!entry.legacy && renamingKeyId !== entry.id && (
+                                  {renamingKeyId !== entry.id && (
                                     <button
                                       type="button"
                                       className="fw-settings-key-link"
@@ -775,18 +775,16 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                                   </button>
                                 </div>
                               </div>
-                              {!entry.legacy && (
-                                <label className="fw-settings-key-enabled">
-                                  <input
-                                    type="checkbox"
-                                    checked={entry.isEnabled}
-                                    onChange={event =>
-                                      void setApiKeyEnabled(entry.id, event.target.checked)}
-                                    disabled={keySaving}
-                                  />
-                                  启用
-                                </label>
-                              )}
+                              <label className="fw-settings-key-enabled">
+                                <input
+                                  type="checkbox"
+                                  checked={entry.isEnabled}
+                                  onChange={event =>
+                                    void setApiKeyEnabled(entry.id, event.target.checked)}
+                                  disabled={keySaving}
+                                />
+                                启用
+                              </label>
                               <button
                                 type="button"
                                 className="fw-settings-key-remove"
