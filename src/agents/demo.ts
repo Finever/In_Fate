@@ -87,8 +87,8 @@ presets.register({
 const profile = {
   ...defaultProfile(),
   principals: {
-    user: { id: 'u1', name: '触久' },
-    agents: [{ id: 'a1', name: '未凉', role: 'main' }],
+    user: { id: 'u1', name: 'Demo User' },
+    agents: [{ id: 'a1', name: 'Demo Agent', role: 'main' }],
   },
 }
 

@@ -7,7 +7,7 @@
  */
 
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { withFileLock } from '../core/lock.ts'
 import {
   AgentManifestStore,
@@ -95,6 +95,28 @@ export class AgentIdentityStore {
     const path = this.path(slotId)
     if (!existsSync(path)) throw new Error(`identity slot file not found: ${path}`)
     return readFileSync(path, 'utf8')
+  }
+
+  readOrEmpty(slotId: string): string {
+    const path = this.path(slotId)
+    return existsSync(path) ? readFileSync(path, 'utf8') : ''
+  }
+
+  /** 人类 UI 的整文件保存；先备份，再原子替换。 */
+  async writeSlot(slotId: string, content: string): Promise<{ path: string; backup: string }> {
+    const path = this.path(slotId)
+    return withFileLock(path, () => {
+      mkdirSync(this.archiveDir, { recursive: true })
+      const backup = existsSync(path)
+        ? join(this.archiveDir, `${slotId}-identity-${stamp(this.now())}.md`)
+        : ''
+      if (backup) copyFileSync(path, backup)
+      mkdirSync(dirname(path), { recursive: true })
+      const temp = `${path}.${process.pid}.tmp`
+      writeFileSync(temp, content, 'utf8')
+      renameSync(temp, path)
+      return { path, backup }
+    }, { timeoutMs: 5_000 })
   }
 
   preview(patch: SlotIdentityPatch): SlotIdentityPreview {

@@ -24,11 +24,11 @@ test('sessionFile 不会逃出 sessions 目录', () => {
   assert.throws(() => sessionFile(root, '../../outside'), IfPathError)
 })
 
-test('logAddr 拒绝路径穿越并保留合法 UUID', () => {
-  const parsed = parseAddress('2026-10-21-dd35552c-6c22-4d29-93d5-22cc287a21f3-34')
+test('logAddr 拒绝路径穿越并保留合法地址', () => {
+  const parsed = parseAddress('2026-10-21-demo-session-34')
   assert.deepEqual(parsed, {
     date: '2026-10-21',
-    session: 'dd35552c-6c22-4d29-93d5-22cc287a21f3',
+    session: 'demo-session',
     n: 34,
   })
   assert.throws(() => parseAddress('2026-10-21-../evil-1'))

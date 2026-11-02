@@ -51,7 +51,7 @@ export interface QuoteHit {
 export interface FindQuoteOptions {
   readonly memoryRoot: string
   readonly phrase: string
-  /** 只收这个人的话（原话只可能是他说的） */
+  /** 只收用户的话（原话只可能是用户说的） */
   readonly userName?: string
   readonly limit?: number
   /** 只扫指定日期（YYYY-MM-DD）；不传扫全部 */

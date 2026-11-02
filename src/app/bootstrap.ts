@@ -9,6 +9,7 @@
  * @module if/app/bootstrap
  */
 
+import { resolve } from 'node:path'
 import { ConfigError, type AppConfig } from './config.ts'
 import { buildBundle, type App, type BuildOptions } from './bundle.ts'
 import { Container } from './container.ts'
@@ -40,7 +41,9 @@ export function defaultConfigPath(): string {
 }
 
 export async function bootstrap(options: BootstrapOptions = {}): Promise<App> {
-  const config = options.config ?? loadConfig(options.configPath ?? defaultConfigPath())
+  const configPath = options.configPath
+    ?? (options.config ? undefined : defaultConfigPath())
+  const config = options.config ?? loadConfig(configPath!)
   // loadConfig 已按配置文件目录解析；这里再解析一次只影响直接传入的相对路径。
   const normalized = normalizePaths(config, options.baseDir ?? process.cwd())
 
@@ -49,6 +52,7 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<App> {
     return buildBundle(normalized, container, {
       ...(options.cwd ? { cwd: options.cwd } : {}),
       ...(options.now ? { now: options.now } : {}),
+      ...(configPath ? { configPath: resolve(configPath) } : {}),
     })
   } catch (error) {
     await container.dispose()

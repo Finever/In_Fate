@@ -100,6 +100,27 @@ test('分页不切断一轮，游标可向上/向下', () => {
   assert.equal(first.items.some(item => item.kind === 'tool'), true)
 })
 
+test('轮次耗时取用户消息到 turn.completed 的事件时间差', () => {
+  seq = 0
+  const events: Event[] = [
+    event('s', 'session.created', { formatVersion: 2 }),
+    { ...event('u1', 'message.user', { text: '问题' }), ts: '2026-10-22T00:00:00.000Z' },
+    { ...event('a1', 'message.assistant', { text: '回答' }), ts: '2026-10-22T00:00:10.000Z' },
+    {
+      ...event('t1', 'turn.completed', {
+        steps: 1,
+        usage: { input: 1, output: 1, cacheRead: 0 },
+        aborted: false,
+        hitLimit: false,
+      }),
+      ts: '2026-10-22T00:00:12.400Z',
+    },
+  ]
+  const page = projectUiTimeline('s1', events, { limit: 10 })
+  const turn = page.items.find(item => item.kind === 'turn')
+  assert.equal(turn?.turnUsage?.durationMs, 12_400)
+})
+
 test('payload 按字符切片并报告 eof', () => {
   const slice = slicePayload('abcdef', 2, 2)
   assert.equal(slice.data, 'cd')

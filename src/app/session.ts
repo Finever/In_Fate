@@ -27,6 +27,8 @@ export interface SessionInfo {
   /** user 或 agent:<preset>；只是溯源，不是权限。 */
   readonly createdBy?: string
   readonly createdFrom?: SessionOrigin
+  /** 所属主 agent；旧会话没有这个字段，回退到配置里的 mainAgentId。 */
+  readonly agentId?: string
   readonly reason?: string
   readonly kind?: 'user' | 'agent'
   /** 生命周期投影；没有 lifecycle 事件时是 active */
@@ -72,6 +74,7 @@ function firstLine(file: string, maxBytes = 16 * 1024): string {
 interface SessionOriginInfo {
   createdBy?: string
   createdFrom?: SessionOrigin
+  agentId?: string
   reason?: string
   kind: 'user' | 'agent'
 }
@@ -102,6 +105,9 @@ function readOrigin(file: string, name: string): SessionOriginInfo {
     return {
       ...(createdBy ? { createdBy } : {}),
       ...(createdFrom ? { createdFrom } : {}),
+      ...(typeof payload.agentId === 'string' && payload.agentId.trim()
+        ? { agentId: payload.agentId }
+        : {}),
       ...(typeof payload.reason === 'string' ? { reason: payload.reason } : {}),
       kind: createdBy === 'agent' || createdBy?.startsWith('agent:') || name.startsWith('agent-')
         ? 'agent'
@@ -323,6 +329,7 @@ export function sessionInfo(
     updatedAt: stat.mtime.toISOString(),
     ...(origin.createdBy ? { createdBy: origin.createdBy } : {}),
     ...(origin.createdFrom ? { createdFrom: origin.createdFrom } : {}),
+    ...(origin.agentId ? { agentId: origin.agentId } : {}),
     ...(origin.reason ? { reason: origin.reason } : {}),
     kind: origin.kind,
     lifecycle,
@@ -387,6 +394,7 @@ export function listSessions(dataRoot: string, options: ListSessionsOptions = {}
       updatedAt: stat.mtime.toISOString(),
       ...(origin.createdBy ? { createdBy: origin.createdBy } : {}),
       ...(origin.createdFrom ? { createdFrom: origin.createdFrom } : {}),
+      ...(origin.agentId ? { agentId: origin.agentId } : {}),
       ...(origin.reason ? { reason: origin.reason } : {}),
       kind: origin.kind,
       lifecycle,

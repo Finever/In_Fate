@@ -9,6 +9,7 @@ import type { AppConfig } from '../src/app/config.ts'
 import { buildBundle } from '../src/app/bundle.ts'
 import { Container } from '../src/app/container.ts'
 import { EventStore } from '../src/core/store.ts'
+import { seedAgentModel } from './support.ts'
 
 function sse(text: string): string {
   return `data: ${JSON.stringify({
@@ -73,6 +74,7 @@ async function listen(
 
 test('生命周期：归档隐藏、恢复显示、删除关闭连接并拒绝写入', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'if-lifecycle-app-'))
+  seedAgentModel(dir)
   const { server, port } = await listen((_req, res) => {
     res.writeHead(200, { 'content-type': 'text/event-stream' })
     res.end(sse('ok'))
@@ -126,6 +128,7 @@ test('生命周期：归档隐藏、恢复显示、删除关闭连接并拒绝�
 
 test('生命周期：正在跑的会话默认拒绝归档/删除，force 只挡后续唤醒', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'if-lifecycle-running-'))
+  seedAgentModel(dir)
   let release!: () => void
   const gate = new Promise<void>(resolve => {
     release = resolve

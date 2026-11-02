@@ -1,63 +1,56 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
 import { api, getToken, setToken } from './api'
-import { AgentsPanel } from './components/AgentsPanel'
-import { ApprovalsPanel } from './components/ApprovalsPanel'
-import { ChatPane } from './components/ChatPane'
-import { CommandPalette } from './components/CommandPalette'
-import { Icon } from './components/Icon'
-import { Inspector } from './components/Inspector'
-import { RightPanel } from './components/RightPanel'
-import { Sidebar } from './components/Sidebar'
-import { Button, ConfirmDialog, Spinner } from './components/Ui'
-import { useSession } from './hooks/useSession'
+import { AddMainAgentDialog } from './components/AddMainAgentDialog'
+import { AgentPanel } from './components/AgentPanel'
+import { FrameBoot, FrameCenter, FrameGate, FrameRight, FrameSidebar } from './components/Framework'
+import type { MainAgentListItem } from './components/Framework'
+import { SessionView } from './components/SessionView'
+import { SettingsDialog } from './components/SettingsDialog'
+import { TitleBar } from './components/TitleBar'
 import { useWorkspace } from './hooks/useWorkspace'
-import { sessionDisplayTitle } from './lib/sessions'
+import type { SessionInfo } from './types'
 
 const SELECTED_KEY = 'if-selected-session'
-const SIDEBAR_KEY = 'if-sidebar'
+const LEFT_KEY = 'if-left-width'
+const RIGHT_KEY = 'if-right-width'
+const LEFT_DEFAULT = 280
+const RIGHT_DEFAULT = 340
+const LEFT_MIN = 200
+const LEFT_MAX = 520
+const RIGHT_MIN = 260
+const RIGHT_MAX = 640
+const CENTER_MIN = 360
+const NARROW = 900
+const FALLBACK_AGENT = 'main'
 
-function TokenGate({ onReady }: { onReady: (token: string) => void }) {
-  const [value, setValue] = useState('')
-  return (
-    <div className="gate">
-      <div className="gate-card">
-        <span className="gate-mark">IF</span>
-        <h1>In_Fate</h1>
-        <p>输入 `if serve` 打印的 token。</p>
-        <input
-          value={value}
-          onChange={event => setValue(event.target.value)}
-          placeholder="token"
-          onKeyDown={event => {
-            if (event.key === 'Enter' && value.trim()) {
-              setToken(value.trim())
-              onReady(value.trim())
-            }
-          }}
-        />
-        <Button
-          variant="primary"
-          onClick={() => {
-            if (!value.trim()) return
-            setToken(value.trim())
-            onReady(value.trim())
-          }}
-        >
-          进入
-        </Button>
-      </div>
-    </div>
-  )
+function clampWidth(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
+}
+
+function storedWidth(key: string, fallback: number, min: number, max: number): number {
+  const raw = Number(localStorage.getItem(key))
+  return clampWidth(Number.isFinite(raw) && raw > 0 ? raw : fallback, min, max)
+}
+
+function sessionAgentId(session: SessionInfo): string {
+  return session.agentId ?? FALLBACK_AGENT
 }
 
 export default function App() {
   const [token, setTokenState] = useState(getToken())
-  if (!token) return <TokenGate onReady={setTokenState} />
+  if (!token) {
+    return (
+      <FrameGate
+        onReady={value => {
+          setToken(value)
+          setTokenState(value)
+        }}
+      />
+    )
+  }
   return <Desktop />
 }
-
-type ForceConfirm = { kind: 'archive' | 'delete'; id: string }
-type RightMode = 'details' | 'approvals' | 'agents'
 
 function Desktop() {
   const workspace = useWorkspace()
@@ -65,47 +58,60 @@ function Desktop() {
     const fromUrl = new URLSearchParams(window.location.search).get('session')
     return fromUrl ?? localStorage.getItem(SELECTED_KEY) ?? undefined
   })
-  const session = useSession(selectedId)
+  const [rightOpen, setRightOpen] = useState(false)
+  const [agentFilter, setAgentFilter] = useState('all')
+  const [leftWidth, setLeftWidth] = useState(() =>
+    storedWidth(LEFT_KEY, LEFT_DEFAULT, LEFT_MIN, LEFT_MAX))
+  const [rightWidth, setRightWidth] = useState(() =>
+    storedWidth(RIGHT_KEY, RIGHT_DEFAULT, RIGHT_MIN, RIGHT_MAX))
+  const [creating, setCreating] = useState(false)
+  const [addAgentOpen, setAddAgentOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [pendingAgentId, setPendingAgentId] = useState<string>()
+  const [actionError, setActionError] = useState<string>()
+  const dragRef = useRef<{
+    side: 'left' | 'right'
+    startX: number
+    startWidth: number
+    otherWidth: number
+  } | null>(null)
 
-  const [query, setQuery] = useState('')
-  const [sidebarOpen, setSidebarOpen] = useState(() => {
-    if (window.innerWidth <= 900) return false
-    return localStorage.getItem(SIDEBAR_KEY) !== 'closed'
-  })
-  const [showArchived, setShowArchived] = useState(false)
-  const [showDeleted, setShowDeleted] = useState(false)
-  const [rightPanel, setRightPanel] = useState<RightMode | undefined>(() => {
-    const panel = new URLSearchParams(window.location.search).get('panel')
-    return panel === 'details' || panel === 'approvals' || panel === 'agents' ? panel : undefined
-  })
-  const [commandOpen, setCommandOpen] = useState(false)
-  const [sending, setSending] = useState(false)
-  const [actionBusy, setActionBusy] = useState(false)
-  const [toast, setToast] = useState<{ kind: 'ok' | 'error'; text: string }>()
-  const [deleteConfirm, setDeleteConfirm] = useState<string>()
-  const [forceConfirm, setForceConfirm] = useState<ForceConfirm>()
+  const homeSessions = useMemo(
+    () => workspace.sessions.filter(item =>
+      item.lifecycle !== 'deleted' && item.kind !== 'agent'),
+    [workspace.sessions],
+  )
 
-  const selectedSession = workspace.sessions.find(item => item.id === selectedId)
+  const agentItems = useMemo<MainAgentListItem[]>(() => workspace.mainAgents
+    .map(agent => ({
+      id: agent.id,
+      name: agent.name,
+      sessionCount: homeSessions.filter(session =>
+        sessionAgentId(session) === agent.id).length,
+    })),
+  [homeSessions, workspace.mainAgents])
 
-  const visibleSessions = useMemo(() => workspace.sessions.filter(item => {
-    if (item.lifecycle === 'active') return true
-    if (item.lifecycle === 'archived') return showArchived
-    return showDeleted
-  }), [showArchived, showDeleted, workspace.sessions])
+  const filteredSessions = useMemo(() => {
+    if (agentFilter === 'all') return homeSessions
+    return homeSessions.filter(session => sessionAgentId(session) === agentFilter)
+  }, [agentFilter, homeSessions])
 
-  const sessionApprovals = useMemo(() => workspace.approvals.filter(item =>
-    item.sessionId === selectedId), [selectedId, workspace.approvals])
-
-  const agentsRunning = workspace.agents.filter(agent =>
-    agent.status === 'running' || agent.status === 'queued').length
-
-  const notify = useCallback((kind: 'ok' | 'error', text: string) => {
-    setToast({ kind, text })
-  }, [])
-
-  useEffect(() => {
-    if (workspace.error) setToast({ kind: 'error', text: workspace.error })
-  }, [workspace.error])
+  const selectedSession = filteredSessions.find(item => item.id === selectedId)
+  const panelAgentId = agentFilter !== 'all'
+    ? agentFilter
+    : selectedSession?.agentId
+      ?? workspace.mainAgents.find(agent => agent.id === FALLBACK_AGENT)?.id
+      ?? workspace.mainAgents[0]?.id
+  const panelAgent = workspace.mainAgents.find(agent => agent.id === panelAgentId)
+  const panelSessions = useMemo(
+    () => panelAgentId
+      ? homeSessions.filter(session => sessionAgentId(session) === panelAgentId)
+      : [],
+    [homeSessions, panelAgentId],
+  )
+  const selectedAgent = selectedSession
+    ? workspace.mainAgents.find(agent => agent.id === sessionAgentId(selectedSession))
+    : undefined
 
   useEffect(() => {
     if (selectedId) localStorage.setItem(SELECTED_KEY, selectedId)
@@ -113,314 +119,227 @@ function Desktop() {
   }, [selectedId])
 
   useEffect(() => {
-    localStorage.setItem(SIDEBAR_KEY, sidebarOpen ? 'open' : 'closed')
-  }, [sidebarOpen])
+    localStorage.setItem(LEFT_KEY, String(Math.round(leftWidth)))
+  }, [leftWidth])
+
+  useEffect(() => {
+    localStorage.setItem(RIGHT_KEY, String(Math.round(rightWidth)))
+  }, [rightWidth])
 
   useEffect(() => {
     if (workspace.loading) return
-    if (selectedId && !workspace.sessions.some(item => item.id === selectedId)) {
-      setSelectedId(undefined)
-    }
-  }, [selectedId, workspace.loading, workspace.sessions])
-
-  const refreshAll = useCallback(async (): Promise<void> => {
-    setActionBusy(true)
-    try {
-      await Promise.all([workspace.refresh(true), session.refresh()])
-    } finally {
-      setActionBusy(false)
-    }
-  }, [session, workspace])
-
-  const select = useCallback((id: string) => {
-    setSelectedId(id)
-    setRightPanel(undefined)
-    setCommandOpen(false)
-    if (window.innerWidth <= 900) setSidebarOpen(false)
-  }, [])
-
-  const create = useCallback(async (): Promise<void> => {
-    setActionBusy(true)
-    try {
-      const id = await api.createSession()
-      await workspace.refresh(true)
-      setSelectedId(id)
-      setQuery('')
-      setRightPanel(undefined)
-      setCommandOpen(false)
-      if (window.innerWidth <= 900) setSidebarOpen(false)
-      notify('ok', '已新建会话')
-    } catch (reason) {
-      notify('error', reason instanceof Error ? reason.message : String(reason))
-    } finally {
-      setActionBusy(false)
-    }
-  }, [notify, workspace])
+    if (agentFilter === 'all') return
+    if (workspace.mainAgents.some(agent => agent.id === agentFilter)) return
+    setAgentFilter('all')
+  }, [agentFilter, workspace.mainAgents])
 
   useEffect(() => {
-    const onKey = (event: KeyboardEvent): void => {
-      const mod = event.metaKey || event.ctrlKey
-      if (mod && event.key.toLowerCase() === 'k') {
-        event.preventDefault()
-        setCommandOpen(value => !value)
-        return
-      }
-      if (mod && event.key.toLowerCase() === 'n') {
-        event.preventDefault()
-        void create()
-        return
-      }
-      if (event.key === 'Escape') {
-        setCommandOpen(false)
-        setRightPanel(undefined)
-        if (window.innerWidth <= 900) setSidebarOpen(false)
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [create])
+    if (!pendingAgentId) return
+    if (!workspace.mainAgents.some(agent => agent.id === pendingAgentId)) return
+    setAgentFilter(pendingAgentId)
+    setPendingAgentId(undefined)
+    setRightOpen(true)
+  }, [pendingAgentId, workspace.mainAgents])
 
-  const send = useCallback(async (text: string): Promise<void> => {
-    if (!selectedId) throw new Error('没有选中会话')
-    setSending(true)
-    try {
-      await api.sendMessage(selectedId, text)
-      await Promise.all([session.refresh(), workspace.refresh(true)])
-    } catch (reason) {
-      notify('error', reason instanceof Error ? reason.message : String(reason))
-      throw reason
-    } finally {
-      setSending(false)
-    }
-  }, [notify, selectedId, session, workspace])
+  useEffect(() => {
+    if (workspace.loading) return
+    if (selectedId && filteredSessions.some(item => item.id === selectedId)) return
+    const first = filteredSessions.find(item => item.lifecycle === 'active')
+      ?? filteredSessions[0]
+    setSelectedId(first?.id)
+  }, [filteredSessions, selectedId, workspace.loading])
 
-  const mutateLifecycle = useCallback(async (
-    kind: 'archive' | 'unarchive' | 'delete',
-    id: string,
-    force = false,
-  ): Promise<void> => {
-    setActionBusy(true)
-    try {
-      if (kind === 'archive') await api.archiveSession(id)
-      else if (kind === 'unarchive') await api.unarchiveSession(id)
-      else await api.deleteSession(id, force ? { force: true } : {})
-      if (kind === 'delete' && id === selectedId) {
-        setSelectedId(undefined)
-        setRightPanel(undefined)
-      }
-      await Promise.all([
-        workspace.refresh(true),
-        id === selectedId ? session.refresh() : Promise.resolve(),
-      ])
-      notify('ok', kind === 'archive' ? '已归档' : kind === 'unarchive' ? '已恢复' : '已删除')
-    } catch (reason) {
-      const message = reason instanceof Error ? reason.message : String(reason)
-      if (/running|busy|ESESSIONBUSY/i.test(message) && !force) {
-        setForceConfirm({ kind: kind === 'unarchive' ? 'archive' : kind, id })
+  useEffect(() => {
+    const adapt = (): void => {
+      if (window.innerWidth <= NARROW) return
+      const openRight = rightOpen ? rightWidth : 0
+      const maxLeft = Math.max(
+        LEFT_MIN,
+        Math.min(LEFT_MAX, window.innerWidth - openRight - CENTER_MIN),
+      )
+      setLeftWidth(value => clampWidth(value, LEFT_MIN, maxLeft))
+      const maxRight = Math.max(
+        RIGHT_MIN,
+        Math.min(RIGHT_MAX, window.innerWidth - leftWidth - CENTER_MIN),
+      )
+      setRightWidth(value => clampWidth(value, RIGHT_MIN, maxRight))
+    }
+    window.addEventListener('resize', adapt)
+    return () => window.removeEventListener('resize', adapt)
+  }, [leftWidth, rightOpen, rightWidth])
+
+  useEffect(() => () => {
+    document.body.classList.remove('fw-resizing')
+  }, [])
+
+  const startResize = useCallback((
+    side: 'left' | 'right',
+    event: ReactPointerEvent<HTMLDivElement>,
+  ): void => {
+    if (event.button !== 0 || window.innerWidth <= NARROW) return
+    event.preventDefault()
+    dragRef.current = {
+      side,
+      startX: event.clientX,
+      startWidth: side === 'left' ? leftWidth : rightWidth,
+      otherWidth: side === 'left' ? (rightOpen ? rightWidth : 0) : leftWidth,
+    }
+    document.body.classList.add('fw-resizing')
+
+    const onMove = (moveEvent: PointerEvent): void => {
+      const drag = dragRef.current
+      if (!drag) return
+      const delta = moveEvent.clientX - drag.startX
+      if (drag.side === 'left') {
+        const max = Math.max(
+          LEFT_MIN,
+          Math.min(LEFT_MAX, window.innerWidth - drag.otherWidth - CENTER_MIN),
+        )
+        setLeftWidth(clampWidth(drag.startWidth + delta, LEFT_MIN, max))
       } else {
-        notify('error', message)
+        const max = Math.max(
+          RIGHT_MIN,
+          Math.min(RIGHT_MAX, window.innerWidth - drag.otherWidth - CENTER_MIN),
+        )
+        setRightWidth(clampWidth(drag.startWidth - delta, RIGHT_MIN, max))
       }
-    } finally {
-      setActionBusy(false)
     }
-  }, [notify, selectedId, session, workspace])
 
-  const closeLink = useCallback(async (linkId: string): Promise<void> => {
-    setActionBusy(true)
+    const finish = (): void => {
+      dragRef.current = null
+      document.body.classList.remove('fw-resizing')
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', finish)
+      window.removeEventListener('blur', finish)
+    }
+
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', finish)
+    window.addEventListener('blur', finish)
+  }, [leftWidth, rightOpen, rightWidth])
+
+  const toggleRight = useCallback((): void => {
+    setRightOpen(value => {
+      if (!value && window.innerWidth > NARROW) {
+        const maxLeft = Math.max(
+          LEFT_MIN,
+          Math.min(LEFT_MAX, window.innerWidth - rightWidth - CENTER_MIN),
+        )
+        setLeftWidth(current => clampWidth(current, LEFT_MIN, maxLeft))
+        const maxRight = Math.max(
+          RIGHT_MIN,
+          Math.min(RIGHT_MAX, window.innerWidth - leftWidth - CENTER_MIN),
+        )
+        setRightWidth(current => clampWidth(current, RIGHT_MIN, maxRight))
+      }
+      return !value
+    })
+  }, [leftWidth, rightWidth])
+
+  const create = useCallback(async (): Promise<void> => {
+    if (creating) return
+    setCreating(true)
+    setActionError(undefined)
     try {
-      await api.closeLink(linkId, 'ui')
+      const targetAgent = agentFilter !== 'all'
+        ? agentFilter
+        : selectedSession?.agentId
+          ?? workspace.mainAgents.find(agent => agent.id === FALLBACK_AGENT)?.id
+      const id = await api.createSession(targetAgent)
       await workspace.refresh(true)
-      notify('ok', '连接已关闭')
+      setSelectedId(id)
     } catch (reason) {
-      notify('error', reason instanceof Error ? reason.message : String(reason))
+      setActionError(reason instanceof Error ? reason.message : String(reason))
     } finally {
-      setActionBusy(false)
+      setCreating(false)
     }
-  }, [notify, workspace])
+  }, [agentFilter, creating, selectedSession, workspace])
 
-  const respondApproval = useCallback(async (id: string, approved: boolean): Promise<void> => {
-    setActionBusy(true)
-    try {
-      await api.respondApproval(id, approved)
-      await Promise.all([workspace.refresh(true), session.refresh()])
-      notify('ok', approved ? '已允许' : '已拒绝')
-    } catch (reason) {
-      notify('error', reason instanceof Error ? reason.message : String(reason))
-    } finally {
-      setActionBusy(false)
-    }
-  }, [notify, session, workspace])
+  const addMainAgent = useCallback(async (
+    input: { id: string; name: string },
+  ): Promise<void> => {
+    const agent = await api.createMainAgent(input)
+    setAddAgentOpen(false)
+    setPendingAgentId(agent.id)
+    setAgentFilter('all')
+    void workspace.refresh(true)
+  }, [workspace])
 
-  if (workspace.loading && workspace.sessions.length === 0) {
-    return (
-      <div className="boot">
-        <span className="brand-mark">IF</span>
-        <Spinner label="载入工作区…" />
-      </div>
-    )
-  }
+  if (workspace.loading && workspace.sessions.length === 0) return <FrameBoot />
 
-  const rightOpen = Boolean(rightPanel && (rightPanel !== 'details' || selectedSession))
-  const rightTitle = rightPanel === 'details'
-    ? '会话详情'
-    : rightPanel === 'approvals'
-      ? '待审批'
-      : '子 agent'
-  const selectedTitle = selectedSession ? sessionDisplayTitle(selectedSession) : 'In_Fate'
+  const shellStyle = {
+    '--fw-left-w': `${Math.round(leftWidth)}px`,
+    '--fw-right-w': `${Math.round(rightWidth)}px`,
+  } as CSSProperties
 
   return (
-    <div className={`app-shell${sidebarOpen ? ' sidebar-open' : ''}${rightOpen ? ' right-open' : ''}`}>
-      {sidebarOpen && (
-        <button
-          type="button"
-          className="sidebar-backdrop"
-          aria-label="关闭会话列表"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
+    <div
+      className={`fw-shell${rightOpen ? ' is-right-open' : ''}`}
+      style={shellStyle}
+    >
+      <TitleBar onSettings={() => setSettingsOpen(true)} />
+      <FrameSidebar
+        sessions={filteredSessions}
+        totalSessions={homeSessions.length}
+        agents={agentItems}
+        selectedAgentId={agentFilter}
+        selectedId={selectedId}
+        onSelect={id => {
+          setSelectedId(id)
+          setActionError(undefined)
+        }}
+        onSelectAgent={id => {
+          setPendingAgentId(undefined)
+          setAgentFilter(id)
+          setActionError(undefined)
+        }}
+        onAddAgent={() => setAddAgentOpen(true)}
+        onResizeStart={event => startResize('left', event)}
+      />
 
-      {sidebarOpen && (
-        <Sidebar
-          sessions={visibleSessions}
-          links={workspace.links}
-          selectedId={selectedId}
-          approvals={workspace.approvals.length}
-          agentsRunning={agentsRunning}
-          online={!workspace.error}
-          refreshing={workspace.refreshing || session.loading}
-          showArchived={showArchived}
-          showDeleted={showDeleted}
-          query={query}
-          busy={actionBusy}
-          onQuery={setQuery}
-          onSelect={select}
-          onCreate={() => void create()}
-          onRefresh={() => void refreshAll()}
-          onToggleArchived={() => setShowArchived(value => !value)}
-          onToggleDeleted={() => setShowDeleted(value => !value)}
-          onArchive={id => void mutateLifecycle('archive', id)}
-          onUnarchive={id => void mutateLifecycle('unarchive', id)}
-          onDelete={setDeleteConfirm}
-          onApprovals={() => setRightPanel('approvals')}
-          onAgents={() => setRightPanel('agents')}
-          onCommand={() => setCommandOpen(true)}
-          onCollapse={() => setSidebarOpen(false)}
-        />
-      )}
-
-      <ChatPane
+      <FrameCenter
         session={selectedSession}
-        title={selectedTitle}
-        inspection={session.inspection}
-        turns={session.turns}
-        cache={session.cache}
-        revision={session.revision}
-        approvals={sessionApprovals}
-        loading={session.loading}
-        error={session.error}
-        sending={sending}
+        rightOpen={rightOpen}
+        error={actionError ?? workspace.error}
+        onToggleRight={toggleRight}
         onCreate={() => void create()}
-        onSend={send}
-        onToggleSidebar={() => setSidebarOpen(value => !value)}
-        onRefresh={() => void refreshAll()}
-        onDetails={() => setRightPanel('details')}
-        onArchive={() => {
-          if (selectedSession) void mutateLifecycle('archive', selectedSession.id)
-        }}
-        onUnarchive={() => {
-          if (selectedSession) void mutateLifecycle('unarchive', selectedSession.id)
-        }}
-        onDelete={() => {
-          if (selectedSession) setDeleteConfirm(selectedSession.id)
-        }}
-        onOpenApprovals={() => setRightPanel('approvals')}
-      />
-
-      <RightPanel
-        open={rightOpen}
-        title={rightTitle}
-        onClose={() => setRightPanel(undefined)}
       >
-        {rightPanel === 'details' && selectedSession && (
-          <Inspector
+        {selectedSession && (
+          <SessionView
+            key={selectedSession.id}
             session={selectedSession}
-            inspection={session.inspection}
-            stats={session.stats}
-            links={workspace.links}
-            sessions={workspace.sessions}
-            busy={actionBusy}
-            onArchive={() => void mutateLifecycle('archive', selectedSession.id)}
-            onUnarchive={() => void mutateLifecycle('unarchive', selectedSession.id)}
-            onDelete={() => setDeleteConfirm(selectedSession.id)}
-            onCloseLink={linkId => void closeLink(linkId)}
+            agent={selectedAgent}
+            onSent={() => void workspace.refresh(true)}
           />
         )}
-        {rightPanel === 'approvals' && (
-          <ApprovalsPanel
-            approvals={workspace.approvals}
-            busy={actionBusy}
-            onRespond={(id, approved) => void respondApproval(id, approved)}
-          />
-        )}
-        {rightPanel === 'agents' && <AgentsPanel agents={workspace.agents} />}
-      </RightPanel>
+      </FrameCenter>
 
-      <CommandPalette
-        open={commandOpen}
-        sessions={workspace.sessions}
-        onClose={() => setCommandOpen(false)}
-        onSelect={select}
-        onCreate={() => void create()}
-        onApprovals={() => setRightPanel('approvals')}
-        onAgents={() => setRightPanel('agents')}
-        onToggleArchived={() => setShowArchived(value => !value)}
-        onToggleDeleted={() => setShowDeleted(value => !value)}
-        showArchived={showArchived}
-        showDeleted={showDeleted}
-      />
+      <FrameRight
+        open={rightOpen}
+        onResizeStart={event => startResize('right', event)}
+      >
+        <AgentPanel
+          agentId={panelAgentId}
+          agent={panelAgent}
+          sessions={panelSessions}
+          onSelectSession={id => {
+            setSelectedId(id)
+            setActionError(undefined)
+          }}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onChanged={() => void workspace.refresh(true)}
+          onClose={() => setRightOpen(false)}
+        />
+      </FrameRight>
 
-      <ConfirmDialog
-        open={Boolean(deleteConfirm)}
-        title="删除这个会话？"
-        body="软删除：从默认列表隐藏，关闭连接并取消等待。历史文件保留，不做硬删除。"
-        confirmLabel="删除"
-        danger
-        busy={actionBusy}
-        onCancel={() => setDeleteConfirm(undefined)}
-        onConfirm={() => {
-          const id = deleteConfirm
-          setDeleteConfirm(undefined)
-          if (id) void mutateLifecycle('delete', id)
-        }}
-      />
-
-      <ConfirmDialog
-        open={Boolean(forceConfirm)}
-        title={forceConfirm?.kind === 'delete' ? '强制删除？' : '强制归档？'}
-        body="会话正在运行。强制操作只阻止后续唤醒，不中止当前轮；当前轮会自行收尾。"
-        confirmLabel={forceConfirm?.kind === 'delete' ? '强制删除' : '强制归档'}
-        danger={forceConfirm?.kind === 'delete'}
-        busy={actionBusy}
-        onCancel={() => setForceConfirm(undefined)}
-        onConfirm={() => {
-          const pending = forceConfirm
-          setForceConfirm(undefined)
-          if (!pending) return
-          void mutateLifecycle(pending.kind, pending.id, true)
-        }}
-      />
-
-      {toast && (
-        <button
-          type="button"
-          className={`toast ${toast.kind}`}
-          onClick={() => setToast(undefined)}
-          title="点击关闭"
-        >
-          <Icon name={toast.kind === 'error' ? 'warning' : 'check'} size={15} />
-          <span>{toast.text}</span>
-        </button>
+      {addAgentOpen && (
+        <AddMainAgentDialog
+          onClose={() => setAddAgentOpen(false)}
+          onSubmit={addMainAgent}
+        />
       )}
+
+      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
     </div>
   )
 }

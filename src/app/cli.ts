@@ -735,12 +735,23 @@ function doctor(app: App): void {
     detail: missing.length === 0 ? (app.config.profile.agentDir ?? '未配置') : `缺失：${missing.join('、')}`,
   })
 
-  const model = app.models.resolve(app.config.defaultModel.provider, app.config.defaultModel.model)
-  const hasKey = Boolean(app.models.resolveApiKey(model.provider) || model.provider.apiKey)
+  const agents = app.agentSummaries()
+  const missingModels = agents.filter(agent => !agent.modelConfigured)
   checks.push({
-    name: 'defaultModel',
-    ok: true,
-    detail: `${model.provider.id}/${model.model.id}${hasKey ? '' : '（未找到密钥，环境变量可能未设置）'}`,
+    name: 'agentModels',
+    ok: agents.length > 0 && missingModels.length === 0,
+    detail: agents.length === 0
+      ? '（没有主 agent）'
+      : agents.map(agent => {
+        if (!agent.model) return `${agent.id}: 未配置`
+        try {
+          const model = app.models.resolve(agent.model.provider, agent.model.model)
+          const hasKey = Boolean(app.models.resolveApiKey(model.provider) || model.provider.apiKey)
+          return `${agent.id}: ${model.provider.id}/${model.model.id}${hasKey ? '' : '（未找到密钥）'}`
+        } catch (error) {
+          return `${agent.id}: ${error instanceof Error ? error.message : String(error)}`
+        }
+      }).join('；'),
   })
 
   checks.push({

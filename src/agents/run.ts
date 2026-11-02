@@ -31,6 +31,7 @@ import type {
   PathSandbox,
   ToolResult,
 } from '../tools/types.ts'
+import { addCost, costOfUsage, type CostBreakdown } from '../model/pricing.ts'
 import type { OffloadPolicy } from '../tools/offload.ts'
 import { recordToolResultOnce } from '../tools/persist.ts'
 import { trimHistoryForContext } from './context.ts'
@@ -49,6 +50,8 @@ export interface SubagentRuntime {
   readonly estimator?: TokenEstimator
   /** 传了就用实例注册表；不传退回模块级默认实例（旧 demo 兼容） */
   readonly models?: ModelRegistry
+  /** 带 provider/model 覆盖的解析器；优先于 models。 */
+  readonly resolveModel?: (provider: string, model: string) => ResolvedModel
   readonly modelRetry?: ModelRetryPolicy
   readonly sandbox?: PathSandbox
   readonly network?: NetworkGuard
@@ -137,14 +140,15 @@ export function allowedToolNames(preset: AgentPreset, tools: ToolRegistry): stri
   return preset.tools.filter(name => {
     if (
       name === 'request_agent'
+      || name === 'model_list'
       || name === 'session_join'
       || name === 'session_create'
       || name === 'session_message'
       || name.startsWith('agent_')
     ) return false
     if (preset.readOnly && writeTools.has(name)) return false
-    const policy = tools.policy(name)
-    if (policy?.approval === 'required' && preset.allowDangerousTools !== true) return false
+    const dangerous = Boolean(tools.get(name)?.meta?.dangerous)
+    if (dangerous && preset.allowDangerousTools !== true) return false
     return true
   })
 }
@@ -166,12 +170,26 @@ export async function runSubagent(
     else store.flush()
   }
 
-  const resolve = runtime.models
-    ? (provider: string, model: string): ResolvedModel => runtime.models!.resolve(provider, model)
-    : resolveModel
+  const resolve = runtime.resolveModel
+    ?? (runtime.models
+      ? (provider: string, model: string): ResolvedModel => runtime.models!.resolve(provider, model)
+      : resolveModel)
 
   const startedAt = new Date().toISOString()
+  const runStartedMs = Date.now()
   const usage: AgentUsage = { input: 0, output: 0, cacheRead: 0 }
+  let cost: CostBreakdown = {
+    currency: null,
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    total: 0,
+    priced: false,
+    period: 'standard',
+  }
+  let modelDurationMs = 0
+  let usedModel: { provider: string; model: string } | undefined
   const artifacts = new Set<string>()
   let steps = 0
   let lastText = ''
@@ -234,6 +252,8 @@ export async function runSubagent(
     // 模型候选链：只在本步没有执行任何工具前降级，避免副作用重放。
     for (const choice of preset.models) {
       if (signal.aborted) break
+      const modelStarted = Date.now()
+      const pricedAt = new Date()
       try {
         const model = resolve(choice.provider, choice.model)
         collected = await collectModel(
@@ -247,9 +267,18 @@ export async function runSubagent(
           runtime.modelGate,
           request.priority,
         )
+        usedModel = { provider: model.provider.id, model: model.model.id }
+        cost = addCost(cost, costOfUsage(
+          model.model.pricing,
+          collected.usage,
+          pricedAt,
+          runtime.profile.timeZone,
+        ))
         break
       } catch (error) {
         lastError = error
+      } finally {
+        modelDurationMs += Date.now() - modelStarted
       }
     }
 
@@ -399,5 +428,9 @@ export async function runSubagent(
     ...(errorText ? { error: errorText } : {}),
     startedAt,
     finishedAt: new Date().toISOString(),
+    ...(usedModel ? { model: usedModel } : {}),
+    durationMs: Date.now() - runStartedMs,
+    modelDurationMs,
+    cost,
   }
 }

@@ -16,7 +16,7 @@ import {
   renameSync,
   writeFileSync,
 } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { withFileLock } from '../core/lock.ts'
 import { assertWithin } from '../core/safe-path.ts'
 
@@ -152,6 +152,51 @@ export function defaultAgentManifest(
   })
 }
 
+const IDENTITY_HINTS: Record<string, string> = {
+  principle: '原则。这里告诉我我是谁，描绘我的底色、准则、红线。',
+  preference: '偏好。这里写用户与我的喜恶、习惯，我的思维与说话方式。',
+  prompt: '提示。这里写当前的环境、工作目录、记忆系统的使用方式，接续点等。',
+}
+
+const PROMPT_DEFAULT = [
+  '## IF 环境',
+  '',
+  '- 我运行在 In_Fate：一个本地桌面应用，Electron 外壳 + React 界面；对话与会话数据留在本机。',
+  '- 会话以 JSONL 事件流保存；一轮从用户消息开始，到本轮完成结束。界面看到的是事件投影，不直接改写历史。',
+  '- 可用工具分两类：read / recall / fetch / websearch 默认只读；write / edit / bash 需要显式开启，危险工具会走审批。',
+  '- 主 agent 的身份由 agents/<agent-id>/agent.json 和 identity/ 下的三份 PPP 文件定义。会话带 agentId，切 agent 就是切身份。',
+  '',
+  '## 记忆系统',
+  '',
+  '- 记忆库根目录：<memory-root>。下面提到的路径都相对它。',
+  '- detail/<域>/<文件>.json 是分条记忆；每条有 id、rec-time、rev-time、at、tag 和 content，原话放 quotes。',
+  '- tag 分三档：确信、可信、有疑。拿不准就往下调一档。',
+  '- log/<年>/<月>/<日>/ 是原始流水，append-only，不改；引用原话必须带 log-addr。',
+  '- agents/<agent-id>/identity/ 是本 agent 的 principle / preference / prompt。别的 agent 的 PPP 不混用。',
+  '- 先用 memory_search / memory_read 查；memory_add / memory_update 需要写权限；没有写权限就用 memory_propose，等用户接受。',
+  '- 不要编原话，不要编 log-addr；没查到就说没查到，并说明搜索条件。',
+  '- 写入后按当前环境做校验和提交；没有相应工具就明确说没做，不假装已经落盘。',
+].join('\n')
+
+/** 人类新建主 agent 时的 PPP 初始文件：保留写作提示，不锁分类；Prompt 带默认环境说明。 */
+export function defaultIdentityText(slot: Pick<IdentitySlot, 'id' | 'label'>): string {
+  const hint = IDENTITY_HINTS[slot.id]
+    ?? '这个槽位里写需要长期保留的内容。'
+  if (slot.id === 'prompt') {
+    return `# ${slot.label}
+
+${hint}
+
+${PROMPT_DEFAULT}
+`
+  }
+  return `# ${slot.label}
+
+${hint}
+
+`
+}
+
 export class AgentManifestStore {
   readonly memoryRoot: string
   readonly agentsRoot: string
@@ -231,6 +276,23 @@ export class AgentManifestStore {
     if (existing) return existing
     const manifest = defaultAgentManifest(agentId, name, labels)
     await this.write(manifest)
+    return manifest
+  }
+
+  /** 人类新建主 agent：manifest + 三个空白 PPP 文件。 */
+  async createDefault(
+    agentId: string,
+    name = agentId,
+    labels: Partial<Record<IdentitySlotName, string>> = {},
+  ): Promise<AgentManifest> {
+    if (this.read(agentId)) throw new Error(`agent already exists: ${agentId}`)
+    const manifest = defaultAgentManifest(agentId, name, labels)
+    await this.write(manifest)
+    for (const slot of manifest.identity) {
+      const path = this.slotPath(agentId, slot)
+      mkdirSync(dirname(path), { recursive: true })
+      if (!existsSync(path)) writeFileSync(path, defaultIdentityText(slot), 'utf8')
+    }
     return manifest
   }
 }

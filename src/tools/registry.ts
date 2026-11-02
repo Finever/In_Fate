@@ -19,6 +19,11 @@ import {
   type ToolSource,
 } from './types.ts'
 
+export interface ToolRegisterOptions {
+  readonly enabled?: boolean
+  readonly approval?: ApprovalMode
+}
+
 interface Entry {
   readonly tool: ToolDefinition
   readonly source: ToolSource
@@ -32,13 +37,17 @@ export class ToolRegistry {
   private readonly entries = new Map<string, Entry>()
   private readonly listeners = new Set<(change: ToolChange) => void>()
 
-  register(tool: ToolDefinition, source: ToolSource = 'builtin'): ToolDescriptor {
+  register(
+    tool: ToolDefinition,
+    source: ToolSource = 'builtin',
+    options: ToolRegisterOptions = {},
+  ): ToolDescriptor {
     if (this.entries.has(tool.name)) throw new Error(`tool already registered: ${tool.name}`)
     const entry: Entry = {
       tool,
       source,
-      enabled: true,
-      approval: tool.meta?.dangerous ? 'required' : 'auto',
+      enabled: options.enabled ?? true,
+      approval: options.approval ?? (tool.meta?.dangerous ? 'required' : 'auto'),
       revision: 1,
       overrides: {},
     }
@@ -132,6 +141,8 @@ export class ToolRegistry {
       enabled: entry.enabled,
       approval: entry.approval,
       revision: entry.revision,
+      dangerous: Boolean(entry.tool.meta?.dangerous),
+      readOnly: Boolean(entry.tool.meta?.readOnly),
     }
   }
 

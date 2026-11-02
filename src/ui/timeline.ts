@@ -62,6 +62,23 @@ export interface UiTimelineItem {
     readonly steps: number
     readonly usage: { readonly input: number; readonly output: number; readonly cacheRead: number }
     readonly hitLimit: boolean
+    readonly model?: { readonly provider: string; readonly model: string }
+    /** 从本轮用户消息到 turn.completed 的墙钟耗时。 */
+    readonly durationMs?: number
+    /** 各次模型请求耗时之和。 */
+    readonly modelDurationMs?: number
+    /** 工具执行耗时之和（含审批等待）。 */
+    readonly toolDurationMs?: number
+    readonly cost?: {
+      readonly currency: string | null
+      readonly input: number
+      readonly output: number
+      readonly cacheRead: number
+      readonly cacheWrite: number
+      readonly total: number
+      readonly priced: boolean
+      readonly period: 'standard' | 'peak' | 'offPeak' | 'mixed'
+    }
   }
 }
 
@@ -218,6 +235,80 @@ function pruneMap(events: readonly Event[]): Map<string, PruneItem> {
     }
   }
   return map
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? value
+    : undefined
+}
+
+/** 从 turn.completed 事件提取 UI 用量；旧日志没有新字段也能用。 */
+export function uiTurnUsageOf(
+  event: Event,
+  startedAtMs?: number,
+): NonNullable<UiTimelineItem['turnUsage']> {
+  const usage = event.payload.usage as {
+    input?: number
+    output?: number
+    cacheRead?: number
+  } | undefined
+  const model = event.payload.model as { provider?: unknown; model?: unknown } | undefined
+  const cost = event.payload.cost as {
+    currency?: unknown
+    input?: unknown
+    output?: unknown
+    cacheRead?: unknown
+    cacheWrite?: unknown
+    total?: unknown
+    priced?: unknown
+    period?: unknown
+  } | undefined
+  const finishedAt = Date.parse(event.ts)
+  const payloadDuration = finiteNumber(event.payload.durationMs)
+  const fallbackDuration = startedAtMs !== undefined
+    && Number.isFinite(startedAtMs)
+    && Number.isFinite(finishedAt)
+    ? Math.max(0, finishedAt - startedAtMs)
+    : undefined
+  const costPeriod = cost?.period === 'standard' || cost?.period === 'peak' || cost?.period === 'offPeak' || cost?.period === 'mixed'
+    ? cost.period
+    : undefined
+  return {
+    steps: Number(event.payload.steps ?? 0),
+    usage: {
+      input: Number(usage?.input ?? 0),
+      output: Number(usage?.output ?? 0),
+      cacheRead: Number(usage?.cacheRead ?? 0),
+    },
+    hitLimit: Boolean(event.payload.hitLimit),
+    ...(typeof model?.provider === 'string' && typeof model.model === 'string'
+      ? { model: { provider: model.provider, model: model.model } }
+      : {}),
+    ...(payloadDuration !== undefined
+      ? { durationMs: payloadDuration }
+      : fallbackDuration !== undefined ? { durationMs: fallbackDuration } : {}),
+    ...(finiteNumber(event.payload.modelDurationMs) !== undefined
+      ? { modelDurationMs: finiteNumber(event.payload.modelDurationMs) }
+      : {}),
+    ...(finiteNumber(event.payload.toolDurationMs) !== undefined
+      ? { toolDurationMs: finiteNumber(event.payload.toolDurationMs) }
+      : {}),
+    ...(cost && costPeriod
+      ? {
+        cost: {
+          currency: typeof cost.currency === 'string' ? cost.currency : null,
+          input: Number(cost.input ?? 0),
+          output: Number(cost.output ?? 0),
+          cacheRead: Number(cost.cacheRead ?? 0),
+          cacheWrite: Number(cost.cacheWrite ?? 0),
+          total: Number(cost.total ?? 0),
+          priced: Boolean(cost.priced),
+          period: costPeriod,
+        },
+      }
+      : {}),
+  }
 }
 
 function itemsOfTurn(turn: Turn, pruned: Map<string, PruneItem>): UiTimelineItem[] {
@@ -377,12 +468,8 @@ function itemsOfTurn(turn: Turn, pruned: Map<string, PruneItem>): UiTimelineItem
       }
 
       case 'turn.completed': {
-        const usage = event.payload.usage as {
-          input?: number
-          output?: number
-          cacheRead?: number
-        } | undefined
         const waiting = event.payload.status === 'waiting'
+        const startedAt = Date.parse(turn.events[0]?.event.ts ?? '')
         items.push({
           ...base,
           kind: 'turn',
@@ -392,15 +479,7 @@ function itemsOfTurn(turn: Turn, pruned: Map<string, PruneItem>): UiTimelineItem
             : event.payload.status === 'failed'
               ? 'error'
               : event.payload.aborted ? 'cancelled' : 'ok',
-          turnUsage: {
-            steps: Number(event.payload.steps ?? 0),
-            usage: {
-              input: Number(usage?.input ?? 0),
-              output: Number(usage?.output ?? 0),
-              cacheRead: Number(usage?.cacheRead ?? 0),
-            },
-            hitLimit: Boolean(event.payload.hitLimit),
-          },
+          turnUsage: uiTurnUsageOf(event, startedAt),
         })
         break
       }

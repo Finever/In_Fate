@@ -39,8 +39,8 @@ registerProvider({
 const profile = {
   ...defaultProfile(),
   principals: {
-    user: { id: 'u1', name: '触久' },
-    agents: [{ id: 'a1', name: '未凉', role: 'main' }],
+    user: { id: 'u1', name: 'Demo User' },
+    agents: [{ id: 'a1', name: 'Demo Agent', role: 'main' }],
   },
 }
 
@@ -58,7 +58,7 @@ const base = {
   sections: [
     staticSection(
       'header',
-      '你是未凉，说话精简。消息开头的 [YYYY-MM-DD HH:mm] 是系统注入的时间标签，不是消息内容；回复时不要复制时间标签。',
+      '你是Demo Agent，说话精简。消息开头的 [YYYY-MM-DD HH:mm] 是系统注入的时间标签，不是消息内容；回复时不要复制时间标签。',
     ),
     timeSection(),
   ],

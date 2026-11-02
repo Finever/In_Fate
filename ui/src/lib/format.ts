@@ -54,3 +54,55 @@ export function formatDuration(ms: number | undefined): string {
   if (ms < 3_600_000) return `${Math.round(ms / 60_000)} min`
   return `${(ms / 3_600_000).toFixed(1)} h`
 }
+
+/** 实时/完成计时：一分钟内保留一位小数，超过后显示 m:ss。 */
+export function formatElapsed(ms: number | undefined): string {
+  if (ms === undefined || !Number.isFinite(ms) || ms < 0) return ''
+  if (ms < 60_000) return `${(ms / 1_000).toFixed(1)} s`
+  const total = Math.floor(ms / 1_000)
+  const hours = Math.floor(total / 3_600)
+  const minutes = Math.floor((total % 3_600) / 60)
+  const seconds = total % 60
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+    : `${minutes}:${String(seconds).padStart(2, '0')}`
+}
+
+export function formatTokens(value: number | undefined): string {
+  if (value === undefined || !Number.isFinite(value)) return '0'
+  return Math.round(value).toLocaleString('en-US')
+}
+
+export function formatSpeed(tokens: number, durationMs: number | undefined): string {
+  if (!Number.isFinite(tokens) || tokens <= 0 || !durationMs || durationMs <= 0) {
+    return '0 tok/s'
+  }
+  const seconds = durationMs / 1_000
+  return `${(tokens / seconds).toFixed(1)} tok/s`
+}
+
+export function formatCost(value: number, currency: string | null): string {
+  const amount = !Number.isFinite(value) || value <= 0
+    ? '0'
+    : value >= 1
+      ? value.toFixed(2)
+      : value >= 0.01
+        ? value.toFixed(4)
+        : value < 0.000001
+          ? '<0.000001'
+          : value.toFixed(6)
+  if (!currency) return amount
+  const symbol = currency === 'CNY'
+    ? '¥'
+    : currency === 'USD'
+      ? '$'
+      : currency === 'EUR'
+        ? '€'
+        : `${currency} `
+  return `${symbol}${amount}`
+}
+
+export function formatPercent(value: number, total: number): string {
+  if (!Number.isFinite(value) || !Number.isFinite(total) || total <= 0) return '0%'
+  return `${((value / total) * 100).toFixed(1)}%`
+}

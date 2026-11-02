@@ -8,6 +8,7 @@ import test from 'node:test'
 import type { AppConfig } from '../src/app/config.ts'
 import { buildBundle } from '../src/app/bundle.ts'
 import { Container } from '../src/app/container.ts'
+import { seedAgentModel } from './support.ts'
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
 
@@ -44,6 +45,7 @@ function configFor(dir: string, port: number): AppConfig {
 
 test('join 等待目标完成后唤醒，不占模型', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'if-join-app-'))
+  seedAgentModel(dir)
   let joinCalls = 0
   const server = createServer((req, res) => {
     const chunks: Buffer[] = []

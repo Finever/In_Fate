@@ -69,6 +69,19 @@ export interface AgentResult {
   readonly error?: string
   readonly startedAt?: string
   readonly finishedAt?: string
+  readonly model?: { readonly provider: string; readonly model: string }
+  readonly durationMs?: number
+  readonly modelDurationMs?: number
+  readonly cost?: {
+    readonly currency: string | null
+    readonly input: number
+    readonly output: number
+    readonly cacheRead: number
+    readonly cacheWrite: number
+    readonly total: number
+    readonly priced: boolean
+    readonly period: 'standard' | 'peak' | 'offPeak' | 'mixed'
+  }
 }
 
 export interface AgentPoolConfig {

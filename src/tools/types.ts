@@ -91,6 +91,8 @@ export interface ToolDescriptor {
   readonly enabled: boolean
   readonly approval: ApprovalMode
   readonly revision: number
+  readonly dangerous?: boolean
+  readonly readOnly?: boolean
 }
 
 export interface ToolPatch {

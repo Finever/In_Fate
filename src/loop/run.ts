@@ -24,6 +24,7 @@ import { chatOpenAI, type ChatRequest } from '../model/openai.ts'
 import type { ResolvedModel } from '../model/registry.ts'
 import type { ModelGate, ModelPriority } from '../model/gate.ts'
 import type { ModelRetryPolicy } from '../model/retry.ts'
+import { addCost, costOfUsage, type CostBreakdown } from '../model/pricing.ts'
 import type { ModelEvent } from '../model/types.ts'
 import { projectHistory } from '../projections/history.ts'
 import type {
@@ -71,6 +72,10 @@ export interface RunLoopOptions {
   readonly now?: () => Date
   /** 流式回调，给 UI 用 */
   readonly onModelEvent?: (event: ModelEvent) => void
+  /** 按 agent 限制本轮可见/可执行的工具；不传=全部全局启用工具 */
+  readonly toolAllow?: readonly string[]
+  /** 按 agent 覆盖工具的审批模式；不传=注册表默认 */
+  readonly toolApproval?: Readonly<Record<string, 'auto' | 'required'>>
   /** 压缩配置；不传就不压 */
   readonly compaction?: {
     readonly config: CompactionConfig
@@ -94,6 +99,12 @@ export interface RunResult {
   readonly aborted: boolean
   readonly hitLimit: boolean
   readonly status: 'completed' | 'waiting' | 'failed' | 'cancelled'
+  /** 本轮实际使用的模型。 */
+  readonly model?: { readonly provider: string; readonly model: string }
+  readonly durationMs?: number
+  readonly modelDurationMs?: number
+  readonly toolDurationMs?: number
+  readonly cost?: CostBreakdown
   /** 模型请求失败的原因；失败也会落一条 turn.completed */
   readonly error?: string
 }
@@ -115,6 +126,9 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
   const agentId = options.profile.principals.agents?.[0]?.id ?? 'agent'
   const cwd = options.cwd ?? process.cwd()
   const maxSteps = options.maxSteps ?? 32
+  const allowedTools = options.toolAllow ? new Set(options.toolAllow) : undefined
+  const toolSpecs = () => options.tools.toModelSpecs().filter(spec =>
+    !allowedTools || allowedTools.has(spec.name))
   const append = (input: NewEvent): Event =>
     options.writer ? options.writer.append(input) : options.store.append(input)
   const flush = (): void => {
@@ -164,7 +178,7 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
         ...(options.compaction.maxOutputTokens !== undefined
           ? { maxOutputTokens: options.compaction.maxOutputTokens } : {}),
         system: rendered.system,
-        tools: options.tools.toModelSpecs(),
+        tools: toolSpecs(),
         messages: rendered.messages,
         currentTurn,
         projectMessages: () => projectHistory(options.store.read()),
@@ -195,6 +209,18 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
   flush()
 
   const usage: RunUsage = { input: 0, output: 0, cacheRead: 0 }
+  let cost: CostBreakdown = {
+    currency: null,
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    total: 0,
+    priced: false,
+    period: 'standard',
+  }
+  let modelDurationMs = 0
+  let toolDurationMs = 0
   let steps = 0
   let hitLimit = false
   let waiting = false
@@ -230,7 +256,7 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
       resolved: options.model,
       system: rendered.system,
       messages: rendered.messages,
-      tools: options.tools.toModelSpecs(),
+      tools: toolSpecs(),
       signal: options.signal,
       ...(options.modelRetry ? { retry: options.modelRetry } : {}),
       ...(options.modelGate ? { gate: options.modelGate } : {}),
@@ -247,6 +273,9 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
     const reasoning: string[] = []
     const calls: { id: string; name: string; arguments: string }[] = []
     let stepInput = 0
+    let stepOutput = 0
+    let stepCacheRead = 0
+    const requestedAt = now()
     const modelStarted = Date.now()
 
     try {
@@ -256,10 +285,15 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
         else if (event.type === 'reasoning') reasoning.push(event.text)
         else if (event.type === 'tool_call') calls.push(event)
         else if (event.type === 'usage') {
-          usage.input += event.input ?? 0
-          usage.output += event.output ?? 0
-          usage.cacheRead += event.cacheRead ?? 0
-          stepInput += event.input ?? 0
+          const input = event.input ?? 0
+          const output = event.output ?? 0
+          const cacheRead = event.cacheRead ?? 0
+          usage.input += input
+          usage.output += output
+          usage.cacheRead += cacheRead
+          stepInput += input
+          stepOutput += output
+          stepCacheRead += cacheRead
         }
       }
       options.metrics?.inc('model.ok')
@@ -270,7 +304,21 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
       failure = error instanceof Error ? error.message : String(error)
       break
     } finally {
-      options.metrics?.observe('model.duration_ms', Date.now() - modelStarted)
+      const elapsed = Date.now() - modelStarted
+      modelDurationMs += elapsed
+      options.metrics?.observe('model.duration_ms', elapsed)
+      if (stepInput + stepOutput + stepCacheRead > 0) {
+        cost = addCost(cost, costOfUsage(
+          options.model.model.pricing,
+          {
+            input: stepInput,
+            output: stepOutput,
+            cacheRead: stepCacheRead,
+          },
+          requestedAt,
+          options.profile.timeZone,
+        ))
+      }
     }
 
     // 用真实 usage 校准估算器；没有 usage 的提供方保持原系数。
@@ -325,22 +373,31 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
 
     for (const call of pending) {
       let result: ToolResult
-      try {
-        result = await executeTool(call.name, parseArguments(call.arguments), {
-          registry: options.tools,
-          approvals: options.approvals,
-          callId: call.id,
-          sessionId: options.sessionId,
-          cwd,
-          ...(options.signal ? { signal: options.signal } : {}),
-          ...(options.sandbox ? { sandbox: options.sandbox } : {}),
-          ...(options.network ? { network: options.network } : {}),
-          ...(options.leases ? { leases: options.leases } : {}),
-          ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
-          ...(options.metrics ? { metrics: options.metrics } : {}),
-        })
-      } catch (error) {
-        result = { text: error instanceof Error ? error.message : String(error), isError: true }
+      if (allowedTools && !allowedTools.has(call.name)) {
+        result = { text: `tool not allowed for this agent: ${call.name}`, isError: true }
+      } else {
+        const toolStarted = Date.now()
+        try {
+          result = await executeTool(call.name, parseArguments(call.arguments), {
+            registry: options.tools,
+            approvals: options.approvals,
+            callId: call.id,
+            sessionId: options.sessionId,
+            cwd,
+            ...(options.signal ? { signal: options.signal } : {}),
+            ...(options.sandbox ? { sandbox: options.sandbox } : {}),
+            ...(options.network ? { network: options.network } : {}),
+            ...(options.leases ? { leases: options.leases } : {}),
+            ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
+            ...(options.metrics ? { metrics: options.metrics } : {}),
+            ...(allowedTools ? { allowedTools } : {}),
+            ...(options.toolApproval ? { approvalOverrides: options.toolApproval } : {}),
+          })
+        } catch (error) {
+          result = { text: error instanceof Error ? error.message : String(error), isError: true }
+        } finally {
+          toolDurationMs += Date.now() - toolStarted
+        }
       }
 
       if (result.waiting) waiting = true
@@ -361,6 +418,11 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
         ? 'cancelled'
         : 'completed'
 
+  const durationMs = Date.now() - startedAt
+  const model = {
+    provider: options.model.provider.id,
+    model: options.model.model.id,
+  }
   append({
     stream,
     actor: 'system',
@@ -372,6 +434,11 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
       hitLimit,
       status,
       lastSeenSeq,
+      model,
+      durationMs,
+      modelDurationMs,
+      toolDurationMs,
+      cost,
       ...(failure ? { error: failure } : {}),
     },
   })
@@ -379,7 +446,7 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
   flush()
 
   options.metrics?.inc('turn.steps', steps)
-  options.metrics?.observe('turn.duration_ms', Date.now() - startedAt)
+  options.metrics?.observe('turn.duration_ms', durationMs)
   options.metrics?.inc(
     status === 'waiting'
       ? 'turn.waiting'
@@ -394,6 +461,11 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
     aborted,
     hitLimit,
     status,
+    model,
+    durationMs,
+    modelDurationMs,
+    toolDurationMs,
+    cost,
     ...(failure ? { error: failure } : {}),
   }
 }

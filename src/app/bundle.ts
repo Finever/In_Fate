@@ -18,12 +18,18 @@ import { AgentManager } from '../agents/manager.ts'
 import { PresetRegistry } from '../agents/presets.ts'
 import { repairAgentStream } from '../agents/recovery.ts'
 import { runSubagent } from '../agents/run.ts'
+import {
+  AgentSettingsStore,
+  type AgentSettings,
+  type ModelRef,
+  type SubagentPolicy,
+} from '../agents/settings.ts'
 import type { AgentPreset, AgentRequest, AgentResult } from '../agents/types.ts'
 import { TokenEstimator } from '../compaction/estimate.ts'
 import { archiveCompactedSegments } from '../compaction/archive.ts'
 import { compactIfNeeded } from '../compaction/fold.ts'
 import type { CompactionConfig, CompactionPayload } from '../compaction/types.ts'
-import { staticSection, memorySection, timeSection } from '../context/sections.ts'
+import { staticSection, sessionMemorySection, timeSection } from '../context/sections.ts'
 import type { ContextSection } from '../context/types.ts'
 import { BlobStore } from '../core/blobs.ts'
 import { FsPolicy } from '../core/fs-policy.ts'
@@ -35,17 +41,21 @@ import { WorkspaceLeaseManager } from '../core/workspace-lease.ts'
 import { SessionWriter } from '../core/session-writer.ts'
 import { EventStore } from '../core/store.ts'
 import { agentStream, sessionStream } from '../core/streams.ts'
+import { withFileLock } from '../core/lock.ts'
 import { loadIdentitySources } from '../memory/sources.ts'
-import { AgentManifestStore } from '../memory/agent-manifest.ts'
+import { AgentManifestStore, type AgentManifest, type IdentitySlot } from '../memory/agent-manifest.ts'
 import { AgentIdentityStore } from '../memory/identity-slots.ts'
 import { ManifestIdentityStore } from '../memory/identity-adapter.ts'
 import { MemoryAccess, type MemoryRole } from '../memory/access.ts'
 import { MemoryCommitter } from '../memory/committer.ts'
 import { MemoryIdentityStore } from '../memory/identity.ts'
 import { MemoryProposalStore, type MemoryAcceptResult, type MemoryProposal, type ProposalStatus } from '../memory/proposals.ts'
-import { MemoryStore, type MemoryEntry } from '../memory/store.ts'
+import { MemoryStore, type MemoryDocument, type MemoryEntry, type MemorySearchHit } from '../memory/store.ts'
 import { createMemoryTools } from '../memory/tools.ts'
+import { readFileSync, renameSync, writeFileSync } from 'node:fs'
 import type { ModelRegistry, ResolvedModel } from '../model/registry.ts'
+import type { ModelCard, ModelPricing, ProviderConfig } from '../model/types.ts'
+import { validatePricing } from '../model/pricing.ts'
 import { ModelRegistry as Registry } from '../model/registry.ts'
 import { ModelGate, type ModelPriority } from '../model/gate.ts'
 import { resolveRetryPolicy } from '../model/retry.ts'
@@ -92,7 +102,7 @@ import { editTool } from '../tools/builtin/edit.ts'
 import { fetchTool } from '../tools/builtin/fetch.ts'
 import { readTool } from '../tools/builtin/read.ts'
 import { createRecallTool } from '../tools/builtin/recall.ts'
-import { createRequestAgentTool } from '../tools/builtin/request-agent.ts'
+import { createRequestAgentTool, modelListTool } from '../tools/builtin/request-agent.ts'
 import { websearchTool } from '../tools/builtin/websearch.ts'
 import { writeTool } from '../tools/builtin/write.ts'
 import { OffloadPolicy } from '../tools/offload.ts'
@@ -114,6 +124,7 @@ import {
 import type { UiTurnMeta } from '../ui/index.ts'
 import type { AppConfig } from './config.ts'
 import type { Container } from './container.ts'
+import { AgentModelInvalidError, AgentModelMissingError } from './errors.ts'
 import { applyPatches, mergeCompaction, mergeOffload, mergePool } from './patch.ts'
 import { repairInterruptedSession, settleInterruptedApprovals } from './repair.ts'
 import {
@@ -151,6 +162,8 @@ export interface ChatOptions {
 export interface CreateSessionInput {
   readonly createdBy?: string
   readonly createdFrom?: { readonly sessionId: string; readonly eventId?: string }
+  /** 所属主 agent；不传时按配置 mainAgentId 回退。 */
+  readonly agentId?: string
   readonly reason?: string
   /** true = 立即写 session.created；默认只在首次 chat 时落盘 */
   readonly materialize?: boolean
@@ -251,10 +264,46 @@ export interface App {
   /** 进程内指标快照；关闭指标时返回空快照。 */
   metrics(): MetricsSnapshot
 
+  /** 当前模型配置的脱敏视图（不回传 API key）。 */
+  modelConfig(): ModelConfigView
+  /** 更新 provider 的端点或 API key；有 configPath 时写回配置文件。 */
+  saveModelConfig(input: ModelConfigUpdate): Promise<ModelConfigView>
+  /** 更新单个模型的上下文/输出/价格；有 configPath 时写回配置文件。 */
+  saveModelCard(input: ModelCardUpdate): Promise<ModelConfigView>
+
+  /** 主 agent manifest 列表；没有 memoryRoot 返回空。 */
+  mainAgents(): readonly AgentManifest[]
+  /** 主 agent 的显示摘要（manifest + 运行设置）。 */
+  agentSummaries(): AgentSummary[]
+  agentSummary(agentId: string): AgentSummary
+  updateAgentSettings(agentId: string, input: AgentSettingsUpdate): Promise<AgentSummary>
+  /** 新建主 agent：manifest + 三份空白 PPP 文件。 */
+  createMainAgent(input: { id: string; name: string }): Promise<AgentManifest>
+  /** 读主 agent 的 PPP 槽位全文。 */
+  mainAgentIdentity(agentId: string): {
+    manifest: AgentManifest
+    slots: Array<IdentitySlot & { path: string; content: string }>
+  }
+  /** 人类 UI 整文件保存 PPP 槽位；先备份再写。 */
+  writeMainAgentSlot(
+    agentId: string,
+    slotId: string,
+    content: string,
+  ): Promise<{ path: string; backup: string }>
+
+  /** 工具列表；带 agentId 时附带该 agent 的白名单/审批覆盖。 */
+  toolViews(agentId?: string): ToolView[]
+  /** 全局工具启停/审批；有 configPath 时写回配置文件。 */
+  setToolGlobal(name: string, input: ToolGlobalUpdate): Promise<ToolView[]>
+
   /** 当前会话的记忆角色；未配置记忆返回 undefined。 */
   memoryRole(sessionId: string): MemoryRole | undefined
   /** 只由用户/App 调用：给任意会话授予记忆角色。 */
   grantMemory(sessionId: string, role: MemoryRole): MemoryRole
+  /** 全局 detail 记忆搜索。 */
+  memorySearch(query: string, limit?: number): MemorySearchHit[]
+  /** 读一个 detail 记忆文档。 */
+  memoryRead(target: string): MemoryDocument
   memoryProposals(status?: ProposalStatus): MemoryProposal[]
   acceptMemoryProposal(proposalId: string): Promise<MemoryAcceptResult>
   rejectMemoryProposal(proposalId: string): MemoryProposal
@@ -262,9 +311,121 @@ export interface App {
   dispose(): Promise<void>
 }
 
+export interface ModelConfigProviderView {
+  readonly id: string
+  readonly name: string
+  readonly endpointFamily: string
+  readonly baseUrl: string
+  readonly models: Array<{
+    readonly id: string
+    readonly name?: string
+    readonly contextWindow?: number
+    readonly maxOutputTokens?: number
+    readonly pricing?: ModelPricing
+  }>
+  readonly hasApiKey: boolean
+  readonly apiKeyEnv?: string
+}
+
+export interface ModelConfigView {
+  readonly timeZone: string
+  readonly providers: readonly ModelConfigProviderView[]
+}
+
+export interface ModelConfigUpdate {
+  readonly provider: string
+  /** 空字符串表示不改；不传也保持原值。 */
+  readonly apiKey?: string
+  readonly baseUrl?: string
+}
+
+export interface ModelCardUpdate {
+  readonly provider: string
+  readonly model: string
+  readonly contextWindow?: number | null
+  readonly maxOutputTokens?: number | null
+  readonly pricing?: ModelPricing | null
+}
+
+export interface AgentPresetSummary {
+  readonly id: string
+  readonly description: string
+}
+
+export interface AgentSummary {
+  readonly id: string
+  readonly name: string
+  readonly hasManifest: boolean
+  readonly model?: ModelRef
+  readonly modelConfigured: boolean
+  readonly subagentModels: readonly ModelRef[]
+  readonly subagentPresets?: readonly string[]
+  readonly availablePresets: readonly AgentPresetSummary[]
+  readonly tools: {
+    readonly allow?: readonly string[]
+    readonly approval?: Readonly<Record<string, 'auto' | 'required'>>
+  }
+}
+
+export interface AgentSettingsUpdate {
+  readonly model?: ModelRef
+  readonly subagentModels?: readonly ModelRef[]
+  readonly subagentPresets?: readonly string[]
+  readonly tools?: {
+    readonly allow?: readonly string[]
+    readonly approval?: Readonly<Record<string, 'auto' | 'required'>>
+  }
+}
+
+export interface ToolView {
+  readonly name: string
+  readonly description?: string
+  readonly source: string
+  readonly enabled: boolean
+  readonly approval: 'auto' | 'required'
+  readonly dangerous: boolean
+  readonly readOnly: boolean
+  readonly agentAllowed: boolean
+  readonly agentApproval?: 'auto' | 'required'
+  readonly effectiveApproval: 'auto' | 'required'
+}
+
+export interface ToolGlobalUpdate {
+  readonly enabled?: boolean
+  readonly approval?: 'auto' | 'required'
+}
+
 export interface BuildOptions {
   readonly cwd?: string
   readonly now?: () => Date
+  readonly configPath?: string
+}
+
+interface RawModelEntry {
+  id?: string
+  contextWindow?: number
+  maxOutputTokens?: number
+  pricing?: ModelPricing
+}
+
+interface RawProviderEntry {
+  id?: string
+  apiKey?: string
+  defaultChatEndpoint?: string
+  endpoints?: Record<string, { baseUrl?: string }>
+  models?: RawModelEntry[]
+}
+
+interface RawConfigFile {
+  providers?: RawProviderEntry[]
+  patch?: {
+    tools?: {
+      enabled?: string[]
+      disabled?: string[]
+      approval?: Record<string, 'auto' | 'required'>
+    }
+  }
+  [key: string]: unknown
 }
 
 export function buildBundle(rawConfig: AppConfig, container: Container, options: BuildOptions = {}): App {
@@ -448,6 +609,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
           seqBase: 0,
           createdBy: provenance?.createdBy ?? 'user',
           ...(provenance?.createdFrom ? { createdFrom: provenance.createdFrom } : {}),
+          ...(provenance?.agentId ? { agentId: provenance.agentId } : {}),
           ...(provenance?.reason ? { reason: provenance.reason } : {}),
         },
       })
@@ -467,16 +629,181 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     return store
   }
 
-  // 模型：配置提供，代码不猜。
+  // 模型：配置提供，代码不猜。设置里改过的 provider 用覆盖层，不重建整个 registry。
   const models = new Registry()
   for (const provider of config.providers) models.register(provider)
   container.register('models', models)
 
-  let defaultModel: ResolvedModel
-  try {
-    defaultModel = models.resolve(config.defaultModel.provider, config.defaultModel.model)
-  } catch (error) {
-    throw new Error(`defaultModel: ${error instanceof Error ? error.message : String(error)}`)
+  const providerOverrides = new Map<string, { apiKey?: string; baseUrl?: string }>()
+  const modelOverrides = new Map<string, {
+    contextWindow?: number | null
+    maxOutputTokens?: number | null
+    pricing?: ModelPricing | null
+  }>()
+  const modelKey = (providerId: string, modelId: string): string => `${providerId}\u0000${modelId}`
+
+  const applyModelOverrides = (model: ModelCard, providerId: string): ModelCard => {
+    const override = modelOverrides.get(modelKey(providerId, model.id))
+    if (!override) return model
+    const {
+      contextWindow: modelContext,
+      maxOutputTokens: modelMaxOutput,
+      pricing: modelPricing,
+      ...rest
+    } = model
+    const contextWindow = override.contextWindow === undefined
+      ? modelContext
+      : override.contextWindow
+    const maxOutputTokens = override.maxOutputTokens === undefined
+      ? modelMaxOutput
+      : override.maxOutputTokens
+    const pricing = override.pricing === undefined ? modelPricing : override.pricing
+    return {
+      ...rest,
+      ...(contextWindow !== undefined && contextWindow !== null ? { contextWindow } : {}),
+      ...(maxOutputTokens !== undefined && maxOutputTokens !== null ? { maxOutputTokens } : {}),
+      ...(pricing !== undefined && pricing !== null ? { pricing } : {}),
+    }
+  }
+
+  const resolveModelWithOverrides = (providerId: string, modelId: string): ResolvedModel => {
+    const resolved = models.resolve(providerId, modelId)
+    const override = providerOverrides.get(providerId)
+    return {
+      ...resolved,
+      model: applyModelOverrides(resolved.model, providerId),
+      provider: override?.apiKey
+        ? { ...resolved.provider, apiKey: override.apiKey }
+        : resolved.provider,
+      endpoint: override?.baseUrl
+        ? { ...resolved.endpoint, baseUrl: override.baseUrl }
+        : resolved.endpoint,
+    }
+  }
+
+  const agentSettings = new AgentSettingsStore(config.profile.dataRoot, { now })
+
+  const writeConfigFile = async (mutate: (raw: RawConfigFile) => void): Promise<void> => {
+    if (!options.configPath) return
+    const configPath = options.configPath
+    await withFileLock(configPath, () => {
+      const raw = JSON.parse(readFileSync(configPath, 'utf8')) as RawConfigFile
+      mutate(raw)
+      const temp = `${configPath}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`
+      writeFileSync(temp, `${JSON.stringify(raw, null, 2)}\n`, 'utf8')
+      renameSync(temp, configPath)
+    }, { timeoutMs: 5_000 })
+  }
+
+  const modelConfigView = (): ModelConfigView => ({
+    timeZone: config.profile.timeZone,
+    providers: models.list().map((provider: ProviderConfig) => {
+      const override = providerOverrides.get(provider.id)
+      const endpointFamily = provider.defaultChatEndpoint
+        ?? Object.keys(provider.endpoints)[0]
+        ?? ''
+      return {
+        id: provider.id,
+        name: provider.name,
+        endpointFamily,
+        baseUrl: override?.baseUrl ?? provider.endpoints[endpointFamily]?.baseUrl ?? '',
+        models: provider.models.map(model => {
+          const merged = applyModelOverrides(model, provider.id)
+          return {
+            id: merged.id,
+            ...(merged.name ? { name: merged.name } : {}),
+            ...(merged.contextWindow !== undefined
+              ? { contextWindow: merged.contextWindow }
+              : {}),
+            ...(merged.maxOutputTokens !== undefined
+              ? { maxOutputTokens: merged.maxOutputTokens }
+              : {}),
+            ...(merged.pricing ? { pricing: merged.pricing } : {}),
+          }
+        }),
+        hasApiKey: Boolean(
+          override?.apiKey
+          || provider.apiKey
+          || (provider.apiKeyEnv && process.env[provider.apiKeyEnv]),
+        ),
+        ...(provider.apiKeyEnv ? { apiKeyEnv: provider.apiKeyEnv } : {}),
+      }
+    }),
+  })
+
+  const saveModelConfig = async (input: ModelConfigUpdate): Promise<ModelConfigView> => {
+    const provider = models.get(input.provider)
+    const current = providerOverrides.get(input.provider) ?? {}
+    const next = { ...current }
+    if (input.apiKey !== undefined && input.apiKey.trim()) next.apiKey = input.apiKey.trim()
+    if (input.baseUrl !== undefined && input.baseUrl.trim()) next.baseUrl = input.baseUrl.trim()
+    providerOverrides.set(provider.id, next)
+
+    await writeConfigFile(raw => {
+      const rawProvider = raw.providers?.find(item => item.id === input.provider)
+      if (!rawProvider) throw new Error(`config provider not found: ${input.provider}`)
+      if (next.apiKey) rawProvider.apiKey = next.apiKey
+      if (next.baseUrl) {
+        const family = rawProvider.defaultChatEndpoint
+          ?? Object.keys(rawProvider.endpoints ?? {})[0]
+        const endpoint = family ? rawProvider.endpoints?.[family] : undefined
+        if (!family || !endpoint) {
+          throw new Error(`config provider has no endpoint: ${input.provider}`)
+        }
+        endpoint.baseUrl = next.baseUrl
+      }
+    })
+    providerOverrides.set(provider.id, next)
+    return modelConfigView()
+  }
+
+  const saveModelCard = async (input: ModelCardUpdate): Promise<ModelConfigView> => {
+    const provider = models.get(input.provider)
+    if (!provider.models.some(model => model.id === input.model)) {
+      throw new Error(`unknown model: ${input.provider}/${input.model}`)
+    }
+    if (input.contextWindow !== undefined && input.contextWindow !== null) {
+      if (!Number.isFinite(input.contextWindow) || input.contextWindow <= 0) {
+        throw new Error('contextWindow must be a positive number')
+      }
+    }
+    if (input.maxOutputTokens !== undefined && input.maxOutputTokens !== null) {
+      if (!Number.isFinite(input.maxOutputTokens) || input.maxOutputTokens <= 0) {
+        throw new Error('maxOutputTokens must be a positive number')
+      }
+    }
+    if (input.pricing) validatePricing(input.pricing)
+
+    const key = modelKey(input.provider, input.model)
+    const current = modelOverrides.get(key) ?? {}
+
+    await writeConfigFile(raw => {
+      const rawProvider = raw.providers?.find(item => item.id === input.provider)
+      if (!rawProvider) throw new Error(`config provider not found: ${input.provider}`)
+      const rawModel = rawProvider.models?.find(model => model.id === input.model)
+      if (!rawModel) throw new Error(`config model not found: ${input.provider}/${input.model}`)
+      if (input.contextWindow !== undefined) {
+        if (input.contextWindow === null) delete rawModel.contextWindow
+        else rawModel.contextWindow = input.contextWindow
+      }
+      if (input.maxOutputTokens !== undefined) {
+        if (input.maxOutputTokens === null) delete rawModel.maxOutputTokens
+        else rawModel.maxOutputTokens = input.maxOutputTokens
+      }
+      if (input.pricing !== undefined) {
+        if (input.pricing === null) delete rawModel.pricing
+        else rawModel.pricing = input.pricing
+      }
+    })
+    modelOverrides.set(key, {
+      ...current,
+      ...(input.contextWindow !== undefined ? { contextWindow: input.contextWindow } : {}),
+      ...(input.maxOutputTokens !== undefined
+        ? { maxOutputTokens: input.maxOutputTokens }
+        : {}),
+      ...(input.pricing !== undefined ? { pricing: input.pricing } : {}),
+    })
+    return modelConfigView()
   }
 
   // 全文库与写时卸载：工具结果落事件前经过它。
@@ -497,14 +824,136 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   }), 'builtin')
 
   const mainAgentId = config.profile.principals.agents?.[0]?.id ?? 'main'
+  const manifestStore = config.profile.memoryLogRoot
+    ? new AgentManifestStore(config.profile.memoryLogRoot)
+    : undefined
   const agentManifest = (() => {
-    if (!config.profile.memoryLogRoot) return undefined
+    if (!manifestStore) return undefined
     try {
-      return new AgentManifestStore(config.profile.memoryLogRoot).read(mainAgentId)
+      return manifestStore.read(mainAgentId)
     } catch {
       return undefined
     }
   })()
+
+  const agentIdOfSession = (sessionId: string): string =>
+    sessionInfo(config.profile.dataRoot, sessionId)?.agentId ?? mainAgentId
+
+  const agentSettingsOf = (agentId: string): AgentSettings | undefined => {
+    try {
+      return agentSettings.read(agentId)
+    } catch (error) {
+      throw new AgentModelInvalidError(
+        agentId,
+        error instanceof Error ? error.message : String(error),
+      )
+    }
+  }
+
+  const resolveAgentModel = (agentId: string): ResolvedModel => {
+    const settings = agentSettingsOf(agentId)
+    const choice = settings?.models?.main
+    if (!choice) throw new AgentModelMissingError(agentId)
+    try {
+      return resolveModelWithOverrides(choice.provider, choice.model)
+    } catch (error) {
+      throw new AgentModelInvalidError(
+        agentId,
+        error instanceof Error ? error.message : String(error),
+      )
+    }
+  }
+
+  const manifestOf = (agentId: string): AgentManifest | undefined => {
+    if (!manifestStore) return undefined
+    try {
+      return manifestStore.read(agentId)
+    } catch {
+      return undefined
+    }
+  }
+
+  const settingsOfQuietly = (agentId: string): AgentSettings | undefined => {
+    try {
+      return agentSettings.read(agentId)
+    } catch {
+      return undefined
+    }
+  }
+
+  const agentSummaryOf = (agentId: string): AgentSummary => {
+    const manifest = manifestOf(agentId)
+    const settings = settingsOfQuietly(agentId)
+    const model = settings?.models?.main
+    let modelConfigured = false
+    if (model) {
+      try {
+        resolveModelWithOverrides(model.provider, model.model)
+        modelConfigured = true
+      } catch {
+        modelConfigured = false
+      }
+    }
+    return {
+      id: agentId,
+      name: manifest?.name ?? agentId,
+      hasManifest: Boolean(manifest),
+      ...(model ? { model } : {}),
+      modelConfigured,
+      subagentModels: settings?.models?.subagents ?? [],
+      ...(settings?.subagentPresets !== undefined
+        ? { subagentPresets: settings.subagentPresets }
+        : {}),
+      availablePresets: presets.list().map(preset => ({
+        id: preset.id,
+        description: preset.description,
+      })),
+      tools: {
+        ...(settings?.tools?.allow !== undefined ? { allow: settings.tools.allow } : {}),
+        ...(settings?.tools?.approval ? { approval: settings.tools.approval } : {}),
+      },
+    }
+  }
+
+  const subagentPolicyOf = (sessionId: string): SubagentPolicy | undefined => {
+    const agentId = agentIdOfSession(sessionId)
+    const settings = settingsOfQuietly(agentId)
+    if (!settings) return undefined
+    const mainModel = settings.models?.main
+    const models = settings.models?.subagents?.length
+      ? settings.models.subagents
+      : mainModel ? [mainModel] : []
+    return {
+      models,
+      ...(mainModel ? { mainModel } : {}),
+      ...(settings.subagentPresets !== undefined ? { presets: settings.subagentPresets } : {}),
+      ...(settings.tools?.allow !== undefined ? { toolAllow: settings.tools.allow } : {}),
+    }
+  }
+
+  const toolViewsOf = (agentId?: string): ToolView[] => {
+    const settings = agentId ? settingsOfQuietly(agentId) : undefined
+    const allow = settings?.tools?.allow !== undefined
+      ? new Set(settings.tools.allow)
+      : undefined
+    const overrides = settings?.tools?.approval
+    return tools.list({ includeDisabled: true }).map(descriptor => {
+      const tool = tools.get(descriptor.name)
+      const agentApproval = overrides?.[descriptor.name]
+      return {
+        name: descriptor.name,
+        ...(descriptor.description ? { description: descriptor.description } : {}),
+        source: descriptor.source,
+        enabled: descriptor.enabled,
+        approval: descriptor.approval,
+        dangerous: Boolean(tool?.meta?.dangerous),
+        readOnly: Boolean(tool?.meta?.readOnly),
+        agentAllowed: !allow || allow.has(descriptor.name),
+        ...(agentApproval ? { agentApproval } : {}),
+        effectiveApproval: agentApproval ?? descriptor.approval,
+      }
+    })
+  }
 
   // 记忆工具：能力位由 session 决定；没有 memoryRoot 就不注册。
   const memoryCommitter = config.profile.memoryLogRoot
@@ -561,8 +1010,11 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   }
 
   const dangerousEnabled = new Set(config.patch?.tools?.enabled ?? [])
+  const disabledTools = new Set(config.patch?.tools?.disabled ?? [])
   for (const [name, tool] of Object.entries(DANGEROUS_TOOLS)) {
-    if (dangerousEnabled.has(name)) tools.register(tool, 'builtin')
+    tools.register(tool, 'builtin', {
+      enabled: dangerousEnabled.has(name) && !disabledTools.has(name),
+    })
   }
   container.register('tools', tools)
 
@@ -626,6 +1078,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       offload,
       estimator,
       models,
+      resolveModel: resolveModelWithOverrides,
       modelRetry,
       ...(fsPolicy ? { sandbox: fsPolicy } : {}),
       ...(networkPolicy ? { network: networkPolicy } : {}),
@@ -674,7 +1127,15 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   }
 
   // 派活与控制面放在 manager 之后注册：工具创建时要用到它。
-  tools.register(createRequestAgentTool({ manager: agents, presets }), 'builtin')
+  tools.register(createRequestAgentTool({
+    manager: agents,
+    presets,
+    resolvePolicy: subagentPolicyOf,
+  }), 'builtin')
+  tools.register(modelListTool({
+    presets,
+    resolvePolicy: subagentPolicyOf,
+  }), 'builtin')
   for (const tool of createAgentControlTools({ manager: agents })) {
     tools.register(tool, 'builtin')
   }
@@ -682,12 +1143,15 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   // 上下文：请求头 + 身份/记忆 + 时间。记忆读不到就跳过。
   const sections: ContextSection[] = []
   if (config.profile.header) sections.push(staticSection('header', config.profile.header, 100))
-  if (config.profile.agentDir || agentManifest) {
-    sections.push(memorySection('memory', loadIdentitySources(
-      config.profile.agentDir ?? '',
-      config.profile.memoryLogRoot,
-      mainAgentId,
-    ), 90))
+  if (config.profile.memoryLogRoot || config.profile.agentDir) {
+    sections.push(sessionMemorySection('memory', sessionId => {
+      const agentId = sessionInfo(config.profile.dataRoot, sessionId)?.agentId ?? mainAgentId
+      return loadIdentitySources(
+        config.profile.agentDir ?? '',
+        config.profile.memoryLogRoot,
+        agentId,
+      )
+    }, 90))
   }
   sections.push(timeSection())
 
@@ -701,12 +1165,15 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     }
     const store = ensureSession(input.sessionId)
     const writer = writerFor(input.sessionId)
+    const agentId = agentIdOfSession(input.sessionId)
+    const model = resolveAgentModel(agentId)
+    const settings = agentSettingsOf(agentId)
     const result = await runTurn(input.text, {
       store,
       writer,
       sessionId: input.sessionId,
       profile: config.profile,
-      model: defaultModel,
+      model,
       tools,
       approvals,
       sections,
@@ -717,6 +1184,12 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       ...(modelGate ? { modelGate } : {}),
       priority: input.priority ?? 'interactive',
       ...(skipStartEvent ? { skipStartEvent: true } : {}),
+      ...(settings?.tools?.allow !== undefined
+        ? { toolAllow: settings.tools.allow }
+        : {}),
+      ...(settings?.tools?.approval !== undefined
+        ? { toolApproval: settings.tools.approval }
+        : {}),
       ...(fsPolicy ? { sandbox: fsPolicy } : {}),
       ...(networkPolicy ? { network: networkPolicy } : {}),
       ...(leases ? { leases } : {}),
@@ -728,9 +1201,9 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       compaction: {
         config: compaction,
         estimator,
-        contextWindow: defaultModel.model.contextWindow ?? 128_000,
-        ...(defaultModel.model.maxOutputTokens !== undefined
-          ? { maxOutputTokens: defaultModel.model.maxOutputTokens }
+        contextWindow: model.model.contextWindow ?? 128_000,
+        ...(model.model.maxOutputTokens !== undefined
+          ? { maxOutputTokens: model.model.maxOutputTokens }
           : {}),
         spill,
       },
@@ -839,9 +1312,15 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     }
 
     const sessionId = newSessionId(now(), config.profile.timeZone)
+    const creatorAgentId = sessionInfo(
+      config.profile.dataRoot,
+      input.creator,
+      sessionLifecycle.stateOf(input.creator),
+    )?.agentId
     pendingProvenance.set(sessionId, {
       createdBy: 'agent',
       createdFrom: { sessionId: input.creator },
+      ...(creatorAgentId ? { agentId: creatorAgentId } : {}),
       reason: input.reason ?? 'agent spawned session',
     })
     ensureSession(sessionId)
@@ -890,6 +1369,13 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   tools.register(createSessionJoinTool({ joins: joinScheduler }), 'builtin')
   tools.register(createSessionCreateTool({ spawn: spawnSession }), 'builtin')
   tools.register(createSessionMessageTool({ send: sendSessionMessage }), 'builtin')
+
+  for (const name of disabledTools) {
+    if (tools.get(name)) tools.setEnabled(name, false)
+  }
+  for (const [name, mode] of Object.entries(config.patch?.tools?.approval ?? {})) {
+    if (tools.get(name)) tools.update(name, { approval: mode })
+  }
 
   const requireSession = (sessionId: string): SessionInfo => {
     const info = sessionInfo(
@@ -1128,6 +1614,12 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     async compact(sessionId) {
       const store = storeFor(sessionId)
       const writer = writerFor(sessionId)
+      const agentId = agentIdOfSession(sessionId)
+      const model = resolveAgentModel(agentId)
+      const settings = agentSettingsOf(agentId)
+      const allowed = settings?.tools?.allow !== undefined
+        ? new Set(settings.tools.allow)
+        : undefined
       const history = projectHistory(store.read())
       const rendered = renderContext({
         sections,
@@ -1146,12 +1638,12 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         stream: sessionStream(sessionId),
         config: compaction,
         estimator,
-        contextWindow: defaultModel.model.contextWindow ?? 128_000,
-        ...(defaultModel.model.maxOutputTokens !== undefined
-          ? { maxOutputTokens: defaultModel.model.maxOutputTokens }
+        contextWindow: model.model.contextWindow ?? 128_000,
+        ...(model.model.maxOutputTokens !== undefined
+          ? { maxOutputTokens: model.model.maxOutputTokens }
           : {}),
         system: rendered.system,
-        tools: tools.toModelSpecs(),
+        tools: tools.toModelSpecs().filter(spec => !allowed || allowed.has(spec.name)),
         messages: rendered.messages,
         currentTurn,
         projectMessages: () => projectHistory(store.read()),
@@ -1298,8 +1790,28 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     requestAgent(input) {
       const preset: AgentPreset | undefined = presets.get(input.preset)
       if (!preset) throw new Error(`unknown preset: ${input.preset}`)
+      const policy = subagentPolicyOf(input.sourceSession)
+      if (policy?.presets && !policy.presets.includes(preset.id)) {
+        throw new Error(`preset not allowed for this agent: ${preset.id}`)
+      }
+      const allowedModels = new Set((policy?.models ?? []).map(choice =>
+        `${choice.provider}\u0000${choice.model}`))
+      let models = allowedModels.size > 0
+        ? preset.models.filter(choice =>
+          allowedModels.has(`${choice.provider}\u0000${choice.model}`))
+        : [...preset.models]
+      if (models.length === 0 && policy?.mainModel) models = [policy.mainModel]
+      if (models.length === 0) throw new Error(`no model available for preset: ${preset.id}`)
+      const toolAllow = policy?.toolAllow !== undefined
+        ? new Set(policy.toolAllow)
+        : undefined
+      const effective: AgentPreset = {
+        ...preset,
+        models,
+        tools: preset.tools.filter(name => !toolAllow || toolAllow.has(name)),
+      }
       return agents.submit({
-        preset: preset.id,
+        preset: effective.id,
         prompt: input.prompt,
         ...(input.context ? { context: input.context } : {}),
         ...(input.acceptance ? { acceptance: input.acceptance } : {}),
@@ -1308,7 +1820,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
           session: input.sourceSession,
           ...(input.sourceTurn !== undefined ? { turn: input.sourceTurn } : {}),
         },
-      }, preset)
+      }, effective)
     },
 
     agentStatus(id) {
@@ -1331,6 +1843,140 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       return agents.interrupt(id)
     },
 
+    mainAgents() {
+      return manifestStore?.list() ?? []
+    },
+
+    agentSummaries() {
+      const ids = new Set<string>([mainAgentId])
+      for (const manifest of manifestStore?.list() ?? []) ids.add(manifest.id)
+      for (const settings of agentSettings.list()) ids.add(settings.agentId)
+      return [...ids].sort().map(agentSummaryOf)
+    },
+
+    agentSummary(agentId) {
+      return agentSummaryOf(agentId)
+    },
+
+    async updateAgentSettings(agentId, input) {
+      if (input.model) {
+        try {
+          resolveModelWithOverrides(input.model.provider, input.model.model)
+        } catch (error) {
+          throw new Error(error instanceof Error ? error.message : String(error))
+        }
+      }
+      for (const choice of input.subagentModels ?? []) {
+        try {
+          resolveModelWithOverrides(choice.provider, choice.model)
+        } catch (error) {
+          throw new Error(error instanceof Error ? error.message : String(error))
+        }
+      }
+      for (const preset of input.subagentPresets ?? []) {
+        if (!presets.get(preset)) throw new Error(`unknown preset: ${preset}`)
+      }
+      for (const name of input.tools?.allow ?? []) {
+        if (!tools.get(name)) throw new Error(`unknown tool: ${name}`)
+      }
+      for (const name of Object.keys(input.tools?.approval ?? {})) {
+        if (!tools.get(name)) throw new Error(`unknown tool: ${name}`)
+      }
+
+      await agentSettings.update(agentId, current => {
+        const main = input.model ?? current.models?.main
+        const subagents = input.subagentModels ?? current.models?.subagents ?? []
+        const toolsSettings = input.tools === undefined
+          ? current.tools
+          : {
+            ...(input.tools.allow !== undefined
+              ? { allow: input.tools.allow }
+              : current.tools?.allow !== undefined ? { allow: current.tools.allow } : {}),
+            ...(input.tools.approval !== undefined
+              ? { approval: input.tools.approval }
+              : current.tools?.approval ? { approval: current.tools.approval } : {}),
+          }
+        return {
+          ...current,
+          models: {
+            ...(main ? { main } : {}),
+            subagents,
+          },
+          ...(input.subagentPresets !== undefined
+            ? { subagentPresets: input.subagentPresets }
+            : current.subagentPresets !== undefined
+              ? { subagentPresets: current.subagentPresets }
+              : {}),
+          ...(toolsSettings ? { tools: toolsSettings } : {}),
+        }
+      })
+      return agentSummaryOf(agentId)
+    },
+
+    toolViews(agentId) {
+      return toolViewsOf(agentId)
+    },
+
+    async setToolGlobal(name, input) {
+      if (!tools.get(name)) throw new Error(`unknown tool: ${name}`)
+      const dangerous = Boolean(tools.get(name)?.meta?.dangerous)
+      await writeConfigFile(raw => {
+        if (!raw.patch) raw.patch = {}
+        if (!raw.patch.tools) raw.patch.tools = {}
+        const target = raw.patch.tools
+        if (!Array.isArray(target.enabled)) target.enabled = []
+        if (!Array.isArray(target.disabled)) target.disabled = []
+        if (!target.approval) target.approval = {}
+        if (input.enabled !== undefined) {
+          target.enabled = target.enabled.filter(item => item !== name)
+          target.disabled = target.disabled.filter(item => item !== name)
+          if (input.enabled) {
+            if (dangerous) target.enabled.push(name)
+          } else {
+            target.disabled.push(name)
+          }
+        }
+        if (input.approval !== undefined) {
+          target.approval[name] = input.approval
+        }
+      })
+      tools.update(name, {
+        ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
+        ...(input.approval !== undefined ? { approval: input.approval } : {}),
+      })
+      return toolViewsOf()
+    },
+
+    async createMainAgent(input) {
+      if (!manifestStore) throw new Error('memory is not configured')
+      return manifestStore.createDefault(input.id, input.name)
+    },
+
+    mainAgentIdentity(agentId) {
+      if (!manifestStore || !config.profile.memoryLogRoot) {
+        throw new Error('memory is not configured')
+      }
+      const manifest = manifestStore.readOrThrow(agentId)
+      const store = new AgentIdentityStore(config.profile.memoryLogRoot, agentId, { manifest })
+      return {
+        manifest,
+        slots: store.slots().map(slot => ({
+          ...slot,
+          path: store.path(slot.id),
+          content: store.readOrEmpty(slot.id),
+        })),
+      }
+    },
+
+    async writeMainAgentSlot(agentId, slotId, content) {
+      if (!manifestStore || !config.profile.memoryLogRoot) {
+        throw new Error('memory is not configured')
+      }
+      const manifest = manifestStore.readOrThrow(agentId)
+      const store = new AgentIdentityStore(config.profile.memoryLogRoot, agentId, { manifest })
+      return store.writeSlot(slotId, content)
+    },
+
     async waitForAgents(timeoutMs = 30_000) {
       const started = Date.now()
       while (
@@ -1351,6 +1997,13 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       }
     },
 
+    modelConfig() {
+      return modelConfigView()
+    },
+
+    saveModelConfig,
+    saveModelCard,
+
     memoryRole(sessionId) {
       return memoryAccess?.roleFor(sessionId)
     },
@@ -1358,6 +2011,15 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     grantMemory(sessionId, role) {
       if (!memoryAccess) throw new Error('memory is not configured')
       return memoryAccess.grant(sessionId, role)
+    },
+
+    memorySearch(query, limit = 20) {
+      return memoryStore?.search(query, limit) ?? []
+    },
+
+    memoryRead(target) {
+      if (!memoryStore) throw new Error('memory is not configured')
+      return memoryStore.read(target)
     },
 
     memoryProposals(status) {

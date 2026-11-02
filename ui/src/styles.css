@@ -59,14 +59,12 @@ kbd {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 0 minmax(0, 1fr) 0;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr) 0;
   height: 100dvh;
   overflow: hidden;
   background: var(--bg);
 }
-.app-shell.sidebar-open { grid-template-columns: var(--sidebar-w) minmax(0, 1fr) 0; }
-.app-shell.right-open { grid-template-columns: 0 minmax(0, 1fr) var(--right-w); }
-.app-shell.sidebar-open.right-open {
+.app-shell.right-open {
   grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--right-w);
 }
 .sidebar { grid-column: 1; }
@@ -74,10 +72,6 @@ kbd {
 .right-panel { grid-column: 3; }
 
 .sidebar-backdrop { display: none; }
-
-/* 侧栏开着时，聊天头部不再重复显示品牌和第二个侧栏开关。 */
-.app-shell.sidebar-open .chat-sidebar-toggle,
-.app-shell.sidebar-open .chat-head-brand { display: none; }
 
 .boot {
   height: 100dvh;
@@ -1198,49 +1192,28 @@ kbd {
 /* ---------- responsive ---------- */
 
 @media (max-width: 1100px) {
+  .chat-head-actions .head-text-btn span { display: none; }
+}
+
+@media (max-width: 900px) {
+  .app-shell {
+    --sidebar-w: 228px;
+  }
   .app-shell,
   .app-shell.right-open {
-    grid-template-columns: 0 minmax(0, 1fr) 0;
-  }
-  .app-shell.sidebar-open,
-  .app-shell.sidebar-open.right-open {
     grid-template-columns: var(--sidebar-w) minmax(0, 1fr) 0;
+  }
+  .sidebar {
+    width: var(--sidebar-w);
   }
   .right-panel {
     position: fixed;
     top: 0;
     right: 0;
     bottom: 0;
-    width: min(360px, 92vw);
+    width: min(360px, 88vw);
     z-index: 70;
     box-shadow: -18px 0 50px rgba(0, 0, 0, .45);
-  }
-}
-
-@media (max-width: 900px) {
-  .app-shell,
-  .app-shell.sidebar-open,
-  .app-shell.right-open,
-  .app-shell.sidebar-open.right-open {
-    grid-template-columns: 0 minmax(0, 1fr) 0;
-  }
-  .sidebar {
-    position: fixed;
-    top: 0;
-    left: 0;
-    bottom: 0;
-    width: min(300px, 86vw);
-    z-index: 60;
-    box-shadow: 18px 0 50px rgba(0, 0, 0, .45);
-  }
-  .sidebar-backdrop {
-    display: block;
-    position: fixed;
-    inset: 0;
-    z-index: 55;
-    border: none;
-    background: rgba(3, 5, 10, .5);
-    cursor: default;
   }
   .chat-head { padding: 0 8px; gap: 5px; }
   .chat-head-left { gap: 6px; }
@@ -1256,6 +1229,7 @@ kbd {
 }
 
 @media (max-width: 560px) {
+  .app-shell { --sidebar-w: 196px; }
   .chat-state { display: none; }
   .chat-head h1 { font-size: 12.5px; }
   .composer-hint { display: none; }

@@ -45,7 +45,7 @@ test('agent manifest 可读写，槽位顺序稳定', async () => {
   const { dir, memoryRoot } = workspace()
   try {
     const store = new AgentManifestStore(memoryRoot)
-    const manifest = defaultAgentManifest('main', '未凉', {
+    const manifest = defaultAgentManifest('main', 'Demo Agent', {
       principle: '本心',
       preference: '所爱',
       prompt: '当口',
@@ -53,10 +53,36 @@ test('agent manifest 可读写，槽位顺序稳定', async () => {
     await store.write(manifest)
 
     const read = store.read('main')
-    assert.equal(read?.name, '未凉')
+    assert.equal(read?.name, 'Demo Agent')
     assert.deepEqual(read?.identity.map(slot => slot.id), ['principle', 'preference', 'prompt'])
     assert.deepEqual(read?.identity.map(slot => slot.label), ['本心', '所爱', '当口'])
     assert.equal(store.list().length, 1)
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+  }
+})
+
+
+test('createDefault 建主 agent 的 PPP 文件，writeSlot 先备份再整文件写入', async () => {
+  const { dir, memoryRoot } = workspace()
+  try {
+    const store = new AgentManifestStore(memoryRoot)
+    const manifest = await store.createDefault('demo-agent', 'Demo Agent')
+    assert.equal(manifest.name, 'Demo Agent')
+    assert.equal(store.list().length, 1)
+    for (const slot of manifest.identity) {
+      assert.equal(existsSync(join(memoryRoot, 'agents', 'demo-agent', 'identity', slot.file)), true)
+    }
+
+    const identity = new AgentIdentityStore(memoryRoot, 'demo-agent', { manifest })
+    assert.match(identity.readOrEmpty('principle'), /# Principle/)
+    assert.match(identity.readOrEmpty('principle'), /原则。这里告诉我我是谁/)
+    assert.doesNotMatch(identity.readOrEmpty('principle'), /写完删掉/)
+    assert.match(identity.readOrEmpty('prompt'), /## IF 环境/)
+    assert.match(identity.readOrEmpty('prompt'), /## 记忆系统/)
+    const result = await identity.writeSlot('principle', '# Principle\n\n## 正文\n\n新的。\n')
+    assert.equal(existsSync(result.backup), true)
+    assert.match(identity.read('principle'), /新的。/)
   } finally {
     rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   }
@@ -109,7 +135,7 @@ test('迁移 dry-run 不写文件；apply 写 manifest 和槽位副本，旧文�
       agentDir,
       memoryRoot,
       agentId: 'main',
-      name: '未凉',
+      name: 'Demo Agent',
       labels: { principle: '本心', preference: '所爱', prompt: '当口' },
     })
     assert.equal(plan.files.length, 3)

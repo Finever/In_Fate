@@ -20,6 +20,7 @@ cd ..
 # 2. 配置：复制一份本机配置
 cp config/if.example.json config/if.local.json
 # 填好 provider / model / apiKey
+# 启动后在右侧“状态”面板为每个主 agent 选择模型；没有配置模型不会发消息
 
 # 3. 安装 Electron
 cd desktop
@@ -99,9 +100,25 @@ npm run smoke
 
 它会启动后端、加载 UI、打印 `ready:`，然后 1.5 秒后自动退出，并杀掉后端。
 
+## 图标
+
+- `if-w3.png` / `if-w3.ico`：当前使用的两环原子 IF 图标（`twobreaks-w3`），ICO 含 16–256px 多尺寸。
+- `main.mjs` 的 `BrowserWindow` 用 `if-w3.ico` 作为窗口/任务栏图标；快捷方式也指向同一个文件。
+- UI 左上角用的是同一张图的副本 `ui/public/icon.png`；换图标时两处要一起换。
+- 旧的 `if.png` / `if.ico` 保留作历史文件，不再被窗口或快捷方式引用。
+- 旧版紫底圆角图标备份在 `icon-concepts/_old-brand/`；设计过程和弃案在 `icon-concepts/`。
+- Windows 会按文件路径缓存图标；换图时用新文件名（如本次的 `if-w3.ico`）可以绕开缓存，再运行 `npm run desktop:shortcut` 即可。
+
 ## 已知限制
 
 - 需要系统里有 `node`；打包版后面再内置 Node。
 - 后端和 Electron 是同一个 dataRoot 的单 host；如果已经手动跑了 `if serve`，桌面壳会因为 host 锁被拒绝。
 - 窗口状态存在 Electron 的 userData 目录，不进仓库。
 - 不做自动更新、托盘、安装包。
+
+## 窗口顶栏
+
+- 窗口使用 `frame: false`，原生最小化/全屏/关闭栏已去掉。
+- 顶栏在 `ui/src/components/TitleBar.tsx`，只放图标、In_Fate 和三个窗口控制图标。
+- 窗口按钮通过 `desktop/preload.cjs` 暴露给页面，再由 `desktop/main.mjs` 的 IPC 调用 Electron 窗口 API。
+- 顶栏空白处可拖动窗口；按钮区域标了 `-webkit-app-region: no-drag`。

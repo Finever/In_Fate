@@ -20,7 +20,7 @@ $desktopDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $electron = Join-Path $desktopDir 'node_modules\electron\dist\electron.exe'
 $launcher = Join-Path $desktopDir 'launch.vbs'
 $wscript = Join-Path $env:SystemRoot 'System32\wscript.exe'
-$icon = Join-Path $desktopDir 'if.ico'
+$icon = Join-Path $desktopDir 'if-w3.ico'
 $shortcutName = 'In_Fate.lnk'
 
 $desktopPath = [Environment]::GetFolderPath('Desktop')

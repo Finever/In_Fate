@@ -17,13 +17,14 @@ import type { UiSessionStats } from './api.ts'
 import {
   uiArgsOf,
   uiContentOf,
+  uiTurnUsageOf,
   type UiTimelineItem,
   type UiTimelineOptions,
   type UiTimelinePage,
   type UiToolCard,
 } from './timeline.ts'
 
-const SCHEMA_VERSION = '1'
+const SCHEMA_VERSION = '2'
 const DEFAULT_LIMIT = 20
 
 export class UiIndexStaleError extends Error {
@@ -65,6 +66,7 @@ export class UiIndex {
   readonly file: string
   private readonly db: DatabaseSync
   private currentTurn = 0
+  private turnStartedAt: number | undefined
   private eventCount = 0
   private prunedCount = 0
   private generation = 0
@@ -153,6 +155,7 @@ export class UiIndex {
       this.setMeta('generation', String(this.generation))
       this.pruned.clear()
       this.currentTurn = 0
+      this.turnStartedAt = undefined
       this.eventCount = 0
       this.prunedCount = 0
     } else if (events.length > 0) {
@@ -345,6 +348,7 @@ export class UiIndex {
       || event.type === 'session.message'
     ) {
       this.currentTurn = this.maxTurn() + 1
+      this.turnStartedAt = Date.parse(event.ts)
       this.db.prepare(
         'INSERT OR REPLACE INTO ui_turns(turn, start_seq, end_seq) VALUES(?,?,?)',
       ).run(this.currentTurn, seq, seq)
@@ -467,6 +471,7 @@ export class UiIndex {
       case 'turn.completed': {
         this.insertItem(this.itemFor(event, this.currentTurn, seq))
         this.currentTurn = 0
+        this.turnStartedAt = undefined
         break
       }
 
@@ -516,7 +521,6 @@ export class UiIndex {
         }
       }
       case 'turn.completed': {
-        const usage = event.payload.usage as { input?: number; output?: number; cacheRead?: number } | undefined
         const waiting = event.payload.status === 'waiting'
         return {
           ...base,
@@ -527,15 +531,7 @@ export class UiIndex {
             : event.payload.status === 'failed'
               ? 'error'
               : event.payload.aborted ? 'cancelled' : 'ok',
-          turnUsage: {
-            steps: Number(event.payload.steps ?? 0),
-            usage: {
-              input: Number(usage?.input ?? 0),
-              output: Number(usage?.output ?? 0),
-              cacheRead: Number(usage?.cacheRead ?? 0),
-            },
-            hitLimit: Boolean(event.payload.hitLimit),
-          },
+          turnUsage: uiTurnUsageOf(event, this.turnStartedAt),
         }
       }
       default:

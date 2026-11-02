@@ -38,7 +38,7 @@ append('user', 'message.user', { text: '你好' })
 append('agent', 'message.assistant', { text: '我在' })
 
 const history = projectHistory(store.read())
-const agentDir = 'C:/Users/qielan/AppData/Roaming/CherryStudio/Data/Agents/1176f2d6-b2c1-565f-b0bc-0576b28e7195'
+const agentDir = join(process.cwd(), 'agent')
 
 const sections = [
   staticSection('header', '你是示例助手。'),

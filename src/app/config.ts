@@ -1,5 +1,5 @@
 /**
- * App 配置：profile、providers、presets、defaultModel、patch。
+ * App 配置：profile、providers、presets、patch；defaultModel 仅为旧配置兼容。
  *
  * patch 只改装配，不改契约；工具默认只读，危险工具要显式启用。
  *
@@ -80,8 +80,12 @@ export interface RuntimePatch {
 
 export interface PatchConfig {
   readonly tools?: {
-    /** 危险工具必须显式列在这里才会注册 */
+    /** 危险工具必须显式列在这里才会启用 */
     readonly enabled?: readonly string[]
+    /** 全局禁用名单；优先于 enabled。 */
+    readonly disabled?: readonly string[]
+    /** 全局审批模式覆盖；没写的工具用注册表默认。 */
+    readonly approval?: Readonly<Record<string, 'auto' | 'required'>>
   }
   readonly agents?: Partial<AgentPoolConfig>
   readonly compaction?: Partial<CompactionConfig>
@@ -99,7 +103,8 @@ export interface AppConfig {
   readonly profile: Profile
   readonly providers: readonly ProviderConfig[]
   readonly presets: readonly AgentPreset[]
-  readonly defaultModel: { readonly provider: string; readonly model: string }
+  /** 旧版兼容字段；运行期不再使用，模型由每个 agent 自己配置。 */
+  readonly defaultModel?: { readonly provider: string; readonly model: string }
   readonly patch?: PatchConfig
 }
 
@@ -138,10 +143,11 @@ export function validateConfig(raw: unknown): AppConfig {
   }
 
   const defaultModel = raw.defaultModel
-  if (!isRecord(defaultModel)
-    || typeof defaultModel.provider !== 'string'
-    || typeof defaultModel.model !== 'string') {
-    throw new ConfigError('defaultModel', 'needs provider and model strings')
+  if (defaultModel !== undefined
+    && (!isRecord(defaultModel)
+      || typeof defaultModel.provider !== 'string'
+      || typeof defaultModel.model !== 'string')) {
+    throw new ConfigError('defaultModel', 'needs provider and model strings when set')
   }
 
   if (raw.patch !== undefined && !isRecord(raw.patch)) {

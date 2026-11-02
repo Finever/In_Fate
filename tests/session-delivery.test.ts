@@ -8,6 +8,7 @@ import test from 'node:test'
 import type { AppConfig } from '../src/app/config.ts'
 import { buildBundle } from '../src/app/bundle.ts'
 import { Container } from '../src/app/container.ts'
+import { seedAgentModel } from './support.ts'
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
 
@@ -19,6 +20,7 @@ function sse(text: string): string {
 
 test('跨会话消息落目标收件箱并唤醒一轮', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'if-delivery-'))
+  seedAgentModel(dir)
   let hits = 0
   const server = createServer((_req, res) => {
     hits += 1

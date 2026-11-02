@@ -70,7 +70,7 @@ export function loadIdentitySources(
   memoryRoot: string | undefined,
   agentId = 'main',
 ): MemorySource[] {
-  if (!memoryRoot) return defaultSources(agentDir)
+  if (!memoryRoot) return agentDir ? defaultSources(agentDir) : []
   try {
     const store = new AgentManifestStore(memoryRoot)
     const manifest = store.read(agentId)
@@ -81,7 +81,7 @@ export function loadIdentitySources(
   } catch {
     // 坏 manifest：回退到旧路径，保证会话仍能加载
   }
-  return defaultSources(agentDir)
+  return agentDir ? defaultSources(agentDir) : []
 }
 
 /** 从 JSON 读配置；路径里可用 {agentDir} 占位。 */

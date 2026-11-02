@@ -37,8 +37,8 @@ const now = new Date()
 const file = logPath(memoryRoot, now, 'r1')
 const t = clock(now)
 appendLog(file, [
-  { n: 1, who: '触久', ts: t, text: '原话一' },
-  ...buildTurn(1, '未凉', [{ type: 'text', p: '回答一' }], t),
+  { n: 1, who: 'Demo User', ts: t, text: '原话一' },
+  ...buildTurn(1, 'Demo Agent', [{ type: 'text', p: '回答一' }], t),
 ])
 
 const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`

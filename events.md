@@ -9,3 +9,5 @@ task.created|任务创建
 task.updated|任务状态更新
 token.recorded|一轮对话的token数记录，包括输入、输出和缓存命中，并自动按预设价格计算金额
 context.injected|上下文扩充
+
+turn.completed|一轮结束，记录 steps、usage、model、durationMs、modelDurationMs、toolDurationMs 与 cost

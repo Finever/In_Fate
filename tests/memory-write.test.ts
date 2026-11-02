@@ -172,7 +172,7 @@ test('身份记忆只改 section，并先备份', async () => {
   try {
     writeFileSync(
       join(agentDir, 'SOUL.md'),
-      '# 未凉\n\n## 我叫什么\n\n旧名字。\n\n## 我怎么说话\n\n精简。\n',
+      '# Demo Agent\n\n## 我叫什么\n\n旧名字。\n\n## 我怎么说话\n\n精简。\n',
       'utf8',
     )
     const identity = new (await import('../src/memory/identity.ts')).MemoryIdentityStore(agentDir, {
@@ -204,7 +204,7 @@ test('identity proposal 由用户接受后落文件', async () => {
   const agentDir = mkdtempSync(join(tmpdir(), 'if-identity-proposal-'))
   const ctx = fixture()
   try {
-    writeFileSync(join(agentDir, 'SOUL.md'), '# 未凉\n\n## 我叫什么\n\n旧名字。\n', 'utf8')
+    writeFileSync(join(agentDir, 'SOUL.md'), '# Demo Agent\n\n## 我叫什么\n\n旧名字。\n', 'utf8')
     const identity = new (await import('../src/memory/identity.ts')).MemoryIdentityStore(agentDir)
     const proposals = new MemoryProposalStore(agentDir)
     const proposal = proposals.proposeIdentity({
@@ -233,7 +233,7 @@ test('identity proposal：apply 成功但状态没落盘，重试不重复追加
   const agentDir = mkdtempSync(join(tmpdir(), 'if-identity-recover-'))
   const ctx = fixture()
   try {
-    writeFileSync(join(agentDir, 'SOUL.md'), '# 未凉\n\n## 我叫什么\n\n旧名字。\n', 'utf8')
+    writeFileSync(join(agentDir, 'SOUL.md'), '# Demo Agent\n\n## 我叫什么\n\n旧名字。\n', 'utf8')
     const { MemoryIdentityStore } = await import('../src/memory/identity.ts')
     const identity = new MemoryIdentityStore(agentDir)
     const proposals = new MemoryProposalStore(agentDir)
@@ -277,7 +277,7 @@ test('identity proposal：applying 期间目标被外部改过就拒绝自动处
   const agentDir = mkdtempSync(join(tmpdir(), 'if-identity-conflict-'))
   const ctx = fixture()
   try {
-    writeFileSync(join(agentDir, 'SOUL.md'), '# 未凉\n\n## 我叫什么\n\n旧名字。\n', 'utf8')
+    writeFileSync(join(agentDir, 'SOUL.md'), '# Demo Agent\n\n## 我叫什么\n\n旧名字。\n', 'utf8')
     const { MemoryIdentityStore } = await import('../src/memory/identity.ts')
     const identity = new MemoryIdentityStore(agentDir)
     const proposals = new MemoryProposalStore(agentDir)

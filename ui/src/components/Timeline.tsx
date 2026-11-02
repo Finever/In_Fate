@@ -10,9 +10,10 @@ interface Props {
   turns: UiTurnMeta[]
   cache: TurnCache
   refreshKey: number
+  activeTurn?: number
 }
 
-export function Timeline({ sessionId, turns, cache, refreshKey }: Props) {
+export function Timeline({ sessionId, turns, cache, refreshKey, activeTurn }: Props) {
   const parentRef = useRef<HTMLDivElement>(null)
   const atBottomRef = useRef(true)
   const [atBottom, setAtBottom] = useState(true)
@@ -82,6 +83,7 @@ export function Timeline({ sessionId, turns, cache, refreshKey }: Props) {
                   meta={meta}
                   cache={cache}
                   refreshKey={refreshKey}
+                  running={meta.turn === activeTurn}
                 />
               </div>
             )

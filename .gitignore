@@ -15,3 +15,6 @@ config/if.local.json
 
 # 前端构建产物
 ui/dist/
+
+# 废案归档：只留本机，不提交
+废案/

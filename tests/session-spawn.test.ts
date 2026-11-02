@@ -8,6 +8,7 @@ import test from 'node:test'
 import type { AppConfig } from '../src/app/config.ts'
 import { buildBundle } from '../src/app/bundle.ts'
 import { Container } from '../src/app/container.ts'
+import { seedAgentModel } from './support.ts'
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
 
@@ -49,6 +50,7 @@ function configFor(dir: string, port: number, maxPerCreator = 16): AppConfig {
 
 test('agent 创建用户会话，自动连接并跑第一条任务', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'if-spawn-'))
+  seedAgentModel(dir)
   const server = createServer((_req, res) => {
     res.writeHead(200, { 'content-type': 'text/event-stream' })
     res.end(sse('spawned ack'))
@@ -90,6 +92,7 @@ test('agent 创建用户会话，自动连接并跑第一条任务', async () =>
 
 test('agent 创建会话受配额限制', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'if-spawn-quota-'))
+  seedAgentModel(dir)
   const server = createServer((_req, res) => {
     res.writeHead(200, { 'content-type': 'text/event-stream' })
     res.end(sse('ack'))

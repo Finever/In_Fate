@@ -18,7 +18,7 @@ import { findQuotes, formatAddress, parseAddress } from './quote.ts'
 import { appendLog, buildTurn, clock, readLog } from './log.ts'
 import { defaultSources, readSources } from './sources.ts'
 
-const target = process.argv[2] ?? 'C:/Users/qielan/work/memory/detail/him/这个人.json'
+const target = process.argv[2] ?? join(process.cwd(), 'memory', 'detail', 'example', 'example.json')
 const doc = JSON.parse(readFileSync(target, 'utf8')) as MemoryFile
 
 const result = validateFile(doc)
@@ -47,22 +47,22 @@ console.log('  新 id：', appended.added[0].id)
 console.log('  条目数：', appended.file.entries.length)
 
 // --- index：扫真库，只生成不写盘 ---
-const memoryRoot = 'C:/Users/qielan/work/memory'
+const memoryRoot = join(process.cwd(), 'memory')
 const index = generateIndex({ memoryRoot })
 console.log('索引条目：', index.items.length)
 
 // --- quote：地址往返 + 真流水检索（只读） ---
-const address = formatAddress('2026-10-18', 'dd35552c-6c22-4d29-93d5-22cc287a21f3', 34)
+const address = formatAddress('2026-10-18', 'demo-session', 34)
 console.log('地址：', address, '→', JSON.stringify(parseAddress(address)))
-const hits = findQuotes({ memoryRoot, phrase: '通用框架', userName: '触久', limit: 3 })
+const hits = findQuotes({ memoryRoot, phrase: '通用框架', userName: 'Demo User', limit: 3 })
 console.log('检索命中：', hits.length, hits[0]?.address ?? '')
 
 // --- log：在临时目录写一轮 ---
 const logFile = join(dir, 'demo-log.jsonl')
-appendLog(logFile, buildTurn(1, '未凉', [{ type: 'text', p: '测试' }], clock(new Date())))
+appendLog(logFile, buildTurn(1, 'Demo Agent', [{ type: 'text', p: '测试' }], clock(new Date())))
 console.log('流水行数：', readLog(logFile).length)
 
 // --- sources：只读当前 agent 的三份文件 ---
-const agentDir = 'C:/Users/qielan/AppData/Roaming/CherryStudio/Data/Agents/1176f2d6-b2c1-565f-b0bc-0576b28e7195'
+const agentDir = join(process.cwd(), 'agent')
 const sources = readSources(defaultSources(agentDir))
 console.log('源：', sources.map(source => `${source.id}=${source.bytes}B`).join(', '))

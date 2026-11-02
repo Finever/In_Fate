@@ -47,6 +47,10 @@ export interface ExecuteOptions {
   readonly leases?: WorkspaceLeaseManager
   readonly workspaceId?: string
   readonly metrics?: Metrics
+  /** 按 agent 收窄可执行工具；不传=注册表启用状态。 */
+  readonly allowedTools?: ReadonlySet<string>
+  /** 按 agent 覆盖审批模式；优先级低于 hooks.guard。 */
+  readonly approvalOverrides?: Readonly<Record<string, 'auto' | 'required'>>
   readonly hooks?: PipelineHooks
 }
 
@@ -101,6 +105,9 @@ async function executeToolInner(
 
   const descriptor = options.registry.list({ includeDisabled: true }).find(item => item.name === name)
   if (!descriptor?.enabled) return errorResult(`tool disabled: ${name}`)
+  if (options.allowedTools && !options.allowedTools.has(name)) {
+    return errorResult(`tool not allowed for this agent: ${name}`)
+  }
 
   const issues = validateValue(tool.inputSchema, rawArgs)
   if (issues.length > 0) {
@@ -138,9 +145,10 @@ async function executeToolInner(
       if (output !== undefined) args = output
     }
 
-    // guard：策略优先，默认按注册表的 approval
+    // guard：策略优先，其次 agent 覆盖，最后注册表的 approval
     const guard = options.hooks?.guard?.(name, args, context)
-    const mode = guard ?? (descriptor.approval === 'required' ? 'ask' : 'allow')
+    const approval = options.approvalOverrides?.[name] ?? descriptor.approval
+    const mode = guard ?? (approval === 'required' ? 'ask' : 'allow')
     if (mode === 'deny') return errorResult('denied by policy')
     if (mode === 'ask') {
       const decision = await requestApproval(name, args, options, context)

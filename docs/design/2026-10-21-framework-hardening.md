@@ -624,13 +624,20 @@ Electron 壳只做生命周期，不碰 UI 和窗口管理：
 桌面壳已经能跑之后，补上“双击就能开”的入口：
 
 - `npm run desktop:shortcut` 调 `desktop/install-shortcut.mjs`，用绝对路径起 Windows PowerShell，执行 `install-shortcut.ps1`。
-- 在桌面和开始菜单各建一个 `In_Fate.lnk`；目标 `wscript.exe`，参数 `launch.vbs`，工作目录 `desktop/`，图标 `if.ico`。
+- 在桌面和开始菜单各建一个 `In_Fate.lnk`；目标 `wscript.exe`，参数 `launch.vbs`，工作目录 `desktop/`，图标 `if-w3.ico`。
 - `launch.vbs` 用隐藏窗口执行 `node run.mjs`，避免 Explorer 双击时闪一个控制台；`run.mjs` 再清掉 `ELECTRON_RUN_AS_NODE` / `ELECTRON_NO_ATTACH_CONSOLE` 后拉起 Electron。
 - `--remove` 删除两处快捷方式；`desktop/launch.cmd` 留给需要看输出的终端启动。
 - PowerShell 脚本只写 ASCII：Windows PowerShell 5.1 会把无 BOM 的 UTF-8 当 ANSI/GBK 读，中文注释会让解析直接失败。
 
 已验证：快捷方式创建、双击启动、后端随机端口拉起、窗口加载 UI；关窗后后端收到 SIGTERM 并退出。
 未做：开机自启、托盘、安装包、macOS/Linux 快捷方式。
+
+### 16.1 任务栏图标（2026-10-25）
+
+- 任务栏之前显示 Electron 默认原子图标，因为 `BrowserWindow` 没设 `icon`；快捷方式用的是旧 `if.ico`，两者不是一回事。
+- 现在窗口用 `desktop/if-w3.ico`（多尺寸 ICO），快捷方式也指向同一文件；`main.mjs` 的 `BrowserWindow` 显式设置 `icon`。
+- 当前图案是两环 IF：每环两个错开的断口，每个断口只在一端有简单实心点；旧紫底圆角图标备份在 `desktop/icon-concepts/_old-brand/`。
+- Windows 会按文件路径缓存图标；改用新文件名 `if-w3.ico` 绕开旧路径缓存，再重装快捷方式并通知资源管理器刷新。
 
 ---
 
@@ -704,7 +711,7 @@ manifest：
 {
   "version": 1,
   "id": "main",
-  "name": "未凉",
+  "name": "example-agent",
   "identity": [
     { "id": "principle", "label": "本心", "file": "principle.md", "order": 100, "role": "identity", "description": "本心、原则、边界、说话方式" },
     { "id": "preference", "label": "所爱", "file": "preference.md", "order": 90, "role": "user", "description": "我与你各自的偏好、习惯、画像" },
@@ -735,10 +742,10 @@ manifest：
 
 ```bash
 npm run memory:migrate-identity -- \
-  --memory-root C:\Users\qielan\work\memory \
+  --memory-root C:\path\to\memory \
   --agent-dir <agentDir> \
   --agent-id main \
-  --name 未凉 \
+  --name example-agent \
   --labels 本心,所爱,当口
 ```
 
@@ -754,3 +761,84 @@ npm run memory:migrate-identity -- \
 - 未修 `MemoryCommitter` 的 git 根（memory 根没有 `.git`，仓库在 `detail/.git`）；手动提交路由和 UI 保存/提交状态还没做。
 - `memory_propose` 仍只接受 legacy identity 文件名；新槽位的直接编辑 UI 还没做。
 - `validate.py` / `add_entry.py` 仍是 Python 侧规则；Node 写入器与它们的 2/4 空格、log-addr 严格度差异还没统一。
+
+## 19. 基础 UI 骨架（2026-10-25）
+
+这一轮只做三容器框架，不扩展功能，也不另起配色：
+
+- `ui/src/components/Framework.tsx`：左栏会话列表、中栏工作区、右栏面板；右栏由中栏按钮开合。
+- `ui/src/framework.css`：沿用 `styles.css` 的既有变量（`--bg`、`--sidebar`、`--panel`、`--line`、`--text`、`--muted`、`--faint`、`--accent`），宽度也用既有的 `--sidebar-w` / `--right-w`。
+- 左栏常驻，内部再分两块：左侧窄条是 agent 列表（含“全部”），右侧是会话列表；左上角 logo 用 `ui/public/icon.png`（W3 图标的副本）。左侧原本的整宽“新建会话”大按钮已删掉。
+- 点击 agent 后，右侧会话列表只显示该 agent 自己的会话（`session.id === agent.id`）和它创建的会话（`session.createdFrom.sessionId === agent.id`）；会话列表自动选中该 agent 下第一条会话。
+- 中栏常驻：当前会话标题、打开/收起面板按钮；正文只保留“会话内容区”占位；没有会话时空状态里仍有新建按钮。
+- 右栏条件挂载：标题“面板”、关闭按钮、正文只保留“面板内容区”占位；窗口 ≤900px 时改为覆盖层。
+- 左右栏可拖拽调宽：左栏 200–520px，右栏 260–640px，中栏最少 360px；宽度写入 `localStorage`，窗口缩放时自动收回超出的宽度。≤900px 时拖拽手柄隐藏。
+- 不包含搜索、指标卡、下一步清单、详情卡、审批/agent 等内容；这些等后续单独做。
+- 验收：`ui` 构建通过；根 `tsc` 通过；根测试 **146/146** 通过；Electron smoke 通过。
+
+## 20. 会话内容区与聚合输入框（2026-10-31）
+
+- `ui/src/components/SessionView.tsx`：选中会话后接管中栏，内部用 `useSession` 拉 turns / inspect / stats，消息交给现有 `Timeline → TurnBlock → ItemCard`，不重写消息协议。
+- `ui/src/components/ChatComposer.tsx`：Cherry 风格聚合输入框。一个圆角卡里放 textarea 和底栏；底栏左侧是模型标识与快捷键提示，右侧发送按钮；Enter 发送、Shift+Enter 换行，发送中显示 spinner，失败把草稿放回并显示错误。
+- 思考与工具调用沿用 `ItemCard` 的 `<details>`：默认收起，summary 一行，标题/状态/耗时用小字；展开后正文 11px。工具参数与结果用现有 `code-block`。
+- 会话切换时用 `key={session.id}` 重置草稿和消息状态，避免把上一个会话的草稿发到下一个。
+- 归档/删除会话禁用输入，并显示原因。
+- 中栏补 `grid-template-rows: minmax(0, 1fr)` 与各栏 `min-height:0`，否则消息变多后输入框会被顶出窗口。
+- 验收：mock API（含 user / assistant / thoughts / tool / turn 五类 item）验证折叠、发送、自动滚动；真实后端 1440px 检查输入框固定在底部、右栏打开后中栏正常收缩；`ui` 构建、根 `tsc`、146 条测试、Electron smoke 通过。
+
+## 21. 一轮内的过程收纳（2026-10-31）
+
+- `TurnBlock` 按轮重新分组：用户消息先渲染；该轮的 `thoughts / tool / compaction` 汇总成一个 `<details class="turn-process">`，默认收起；助手输出放在这个 details 之后。
+- 每个助手轮只保留一个头像和 `In_Fate` 头（头像 32px、名字 13px），头像不再跟着每条 assistant item 重复；工具/思考在头像下方、输出上方。
+- 过程组标题只有两种状态：当前轮运行中或仍有工具在跑时显示“处理中”（带脉冲点），否则显示“已处理”（带勾）；不再套外框，避免折叠时头重脚轻。
+- 组内思考直接以小字正文显示；工具仍是可展开行，参数与结果继续用代码块，避免一次性铺开长结果。
+- `ItemCard` 新增 `bare`（助手输出不重复头像）与 `inProcess`（思考在组内展开为小字）两个渲染模式。
+- 验收：真实会话 `索引冒烟` 验证用户消息 → 单个“已处理”折叠组 → “完成”输出顺序；展开组后出现 `read` 工具行；运行中 mock 验证“处理中”与脉冲点；构建、tsc、146 条测试通过。
+
+## 22. 主 agent、PPP 与记忆面板（2026-10-31）
+
+- 左栏 agent 区改为列主 agent manifest（`memory/agents/<id>/agent.json`），不再把子 agent run 放到主页；子 agent 会话仍保留在磁盘与 `/api/agents`，但 `kind === 'agent'` 的会话从主页会话列表隐藏。
+- `+` 打开“添加主 agent”：用户自己填 id 和名字；`POST /api/main-agents` 创建 manifest 与三份默认 PPP 文件（principle / preference / prompt）。id 会作为目录名，`main` 会额外提示它是旧会话的回退身份，先写 PPP 再聊。
+- 会话新增 `agentId`：`POST /api/sessions` 可带 `agentId`；`session.created` 落该字段；`SessionInfo.agentId` 返回给 UI。旧会话没有字段时回退到配置的 mainAgentId。
+- 上下文身份按会话动态加载：`sessionMemorySection` 在每轮渲染时读取 `session.agentId` 对应的 manifest，`loadIdentitySources` 支持多主 agent；没有 agentId 的旧会话仍走 main/legacy 回退。
+- 右栏是主 agent 面板：`身份` tab 编辑 PPP 全文，保存时走 `AgentIdentityStore.writeSlot`（备份 + 文件锁，整文件保存，人类 UI 专用）；`记忆` tab 提供全局 detail 搜索、条目读取、待处理 proposal 的接受/拒绝。
+- 记忆范围按用户确认：PPP 各自独立；detail 记忆当前全局共享；`MemoryAccess` 的 role 仍在，未来再按分块限定 agent 可读范围。本轮没有实现分块权限。
+- 验收：mock / 临时数据根验证创建主 agent、PPP 读取与保存、会话 agentId、记忆搜索/读取、面板切换；`ui` 构建、根 `tsc`、**148** 条测试、Electron smoke 通过。
+
+## 23. 自定义顶栏（2026-10-31）
+
+- Electron 窗口改为 `frame: false`；原生最小化、全屏、关闭按钮不再显示。
+- 新增 `desktop/preload.cjs`，通过 `contextBridge` 暴露 `window.ifWindow`，只开放 minimize / toggleFullscreen / close。
+- `desktop/main.mjs` 注册对应 `ipcMain` 处理；保留原有 F11 全屏。
+- `ui/src/components/TitleBar.tsx` 是全局 40px 顶栏：左边只有图标和 In_Fate，右边是设置图标和三个窗口按钮；设置按钮打开模型设置。
+- 左栏原来的 In_Fate 头和右栏原来的“面板”头去掉；会话标题与打开/收起面板按钮下移到中栏 44px 副标题行。
+- 右栏在窄窗口覆盖时从顶栏下沿开始，并保留 tabs 行末尾的图标关闭按钮。
+- 无边框窗口用 CSS 补 1px 靛蓝亮边（8px 圆角 + 极淡内发光），模拟 Windows 11 的窗口强调边；不是读取系统 accent color。
+- 验收：Electron smoke 截图确认无原生边框、顶栏只有图标/标题/三个窗口按钮，最小化/全屏/关闭走 preload IPC；浏览器预览不显示窗口按钮。
+
+## 24. 模型设置（2026-10-31）
+
+> 历史小节：第 25 节已取消全局默认模型和“将设为默认”，模型改由每个 agent 的 `settings.json` 选择；本节保留当时的过程记录。
+
+- 顶栏设置按钮打开 `SettingsDialog`；设置弹窗按 Cherry“模型服务”的样子分成左右两栏：左边是 provider 列表，右边是当前 provider 的 Base URL / API key 和模型列表。没有新增添加服务商、测试连接等后端没有的能力。
+- 每个模型行显示 `contextWindow` / `maxOutputTokens`；没有元数据时明确写“Token 未配置”。当前默认模型带“默认”标记，改了但还没保存的选择写“将设为默认”。
+- 切换 provider 时按 provider 保存编辑草稿，不会把另一家的 Base URL / key 覆盖掉；保存仍然提交当前 provider 和选中的模型。
+- `GET /api/model-config` 返回脱敏视图：provider、endpoint family、baseUrl、模型列表、是否已配置 key；不返回 key 值。
+- `POST /api/model-config` 接收 `defaultModel: { provider, model }`，可选 `apiKey` / `baseUrl`。后端更新内存覆盖层并让下一轮对话使用新模型；有 `configPath` 时原子写回配置文件。
+- `bootstrap` 把配置文件绝对路径传给 `buildBundle`；桌面启动时才能写回 `config/if.local.json`。
+- 子 agent 的 preset 模型解析仍走原 registry，不受主模型设置影响；设置页目前只改主 agent 的默认 provider/model 和该 provider 的 key/baseUrl。
+- 轮次过程组标题“已处理”后面跟本轮墙钟耗时：`UiTimelineItem.turnUsage.durationMs` 由 `turn.completed` 时间减本轮首条用户消息时间得到；运行中不显示假时间。`src/ui/index.ts` 的增量投影同步补了该字段。
+- 验收：临时配置验证 GET 不回传 key、POST 改 model/key/baseUrl 并写回文件、非法 model 返回 400；Electron 截图验证双栏设置、token 数、provider 切换和“已处理 12.4 s”；`ui` 构建、根 `tsc`、**150** 条测试通过。
+
+## 25. 模型、状态面板与轮次用量（2026-10-31）
+
+- **取消全局默认模型**：`defaultModel` 只保留为旧配置兼容字段，不再参与运行。主对话、唤醒、压缩都按会话 `agentId` 读取 `<dataRoot>/agents/<agentId>/settings.json` 的 `models.main`；没有配置直接返回 `EAGENTMODEL`，不回退。
+- **每个 agent 的设置**：`models.main`、`models.subagents`、`subagentPresets`、`tools.allow`、`tools.approval`。主模型变化时自动并入子 agent 可用模型；子 agent 当前模型固定可用。
+- **模型价格**：模型卡可编辑 `contextWindow` / `maxOutputTokens` / `pricing`。价格含标准价与低谷价，低谷时段可自定义星期和 `HH:mm` 起止，按 `profile.timeZone` 判断，支持跨午夜。
+- **计费**：`turn.completed` 落盘 `model`、`durationMs`、`modelDurationMs`、`toolDurationMs`、`cost`。缓存命中属于输入子集，先算 `input - cacheRead`，避免重复收费；没有价格时 `priced:false`、金额 0。
+- **轮次 UI**：处理中每 250ms 刷新实时耗时；结束后显示最终耗时。助手输出下显示输入/输出/缓存 token、速度、金额；点击打开明细弹窗，含 token 构成、金额分布、时间分布（模型/工具审批/其他）。
+- **设置面板**：左栏 provider，右栏 provider 凭据 + 模型列表；模型行显示 token 与价格摘要，点“编辑”打开模型编辑器，可改上下文、输出、币种、高峰价、低谷价和时段。不再有“默认模型”按钮或标记。
+- **状态面板**：右栏改为“状态 / 记忆”两页。状态页包含当前模型（可保存）、子 agent 预设/可用模型、该 agent 的会话、PPP 文件（默认折叠、可预览、点开编辑、保存留备份）、工具与权限（全局启停/审批 + agent 白名单/审批）。MCP 服务器管理下一阶段。
+- **工具策略**：`ToolRegistry` 可注册默认禁用/审批模式；`ToolDescriptor` 带危险/只读元数据；`ExecuteOptions` 支持 agent 白名单和审批覆盖。`request_agent` 增加可选 `model`，主 agent 先通过 `model_list` 读取当前 agent 的可用模型/预设；不指定时按预设链与白名单交集，空交集回退主模型。
+- **存储**：模型目录与凭据仍写回 `configPath`；agent 运行设置写 `<dataRoot>/agents/<id>/settings.json`，不进记忆库 git。`UiIndex.SCHEMA_VERSION` 升到 2，旧用量缓存一次性重建。
+- 验收：`npm run check`、`npm --prefix ui run build`、根测试 **164** 条通过；Electron 截图验证设置双栏/模型编辑器/状态面板/用量明细；未配置模型返回 409，配置后可正常跑轮。

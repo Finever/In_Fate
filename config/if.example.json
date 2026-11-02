@@ -2,12 +2,12 @@
   "version": 1,
   "profile": {
     "dataRoot": "../data",
-    "memoryLogRoot": "C:/Users/qielan/work/memory",
+    "memoryLogRoot": "C:/path/to/memory",
     "timeZone": "Asia/Shanghai",
-    "agentDir": "C:/Users/qielan/AppData/Roaming/CherryStudio/Data/Agents/1176f2d6-b2c1-565f-b0bc-0576b28e7195",
+    "agentDir": "C:/path/to/agent",
     "header": "你是这个对话世界里的助手。按对话历史与记忆文件行动；不确定就查，不编。",
     "principals": {
-      "user": { "id": "user", "name": "触久" },
+      "user": { "id": "user", "name": "示例用户" },
       "agents": [{ "id": "main", "role": "main" }]
     }
   },
@@ -47,10 +47,6 @@
       "systemPrompt": "你是子 agent。只按请求完成任务；先查证据再下结论，不满足验收就明说没完成。"
     }
   ],
-  "defaultModel": {
-    "provider": "deepseek",
-    "model": "deepseek-chat"
-  },
   "patch": {
     "tools": { "enabled": [] },
     "agents": {

@@ -4,7 +4,7 @@ import { groupSessions, sessionDisplayTitle, sessionTime } from '../lib/sessions
 import type { SessionInfo, SessionLink } from '../types'
 import { Icon } from './Icon'
 import { LinkRail } from './LinkRail'
-import { IconButton, StatusDot } from './Ui'
+import { StatusDot } from './Ui'
 
 const STATE_LABEL: Record<string, string> = {
   running: '运行中',
@@ -131,7 +131,6 @@ export function Sidebar({
   onApprovals,
   onAgents,
   onCommand,
-  onCollapse,
 }: {
   sessions: SessionInfo[]
   links: SessionLink[]
@@ -156,7 +155,6 @@ export function Sidebar({
   onApprovals: () => void
   onAgents: () => void
   onCommand: () => void
-  onCollapse: () => void
 }) {
   const [filterOpen, setFilterOpen] = useState(false)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -172,7 +170,6 @@ export function Sidebar({
           <b>In_Fate</b>
           <small>workspace</small>
         </span>
-        <IconButton icon="sidebar" label="收起会话列表" onClick={onCollapse} />
       </header>
 
       <div className="side-new-wrap">

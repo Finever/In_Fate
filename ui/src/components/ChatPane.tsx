@@ -34,7 +34,6 @@ export function ChatPane({
   sending,
   onCreate,
   onSend,
-  onToggleSidebar,
   onRefresh,
   onDetails,
   onArchive,
@@ -54,7 +53,6 @@ export function ChatPane({
   sending: boolean
   onCreate: () => void
   onSend: (text: string) => Promise<void>
-  onToggleSidebar: () => void
   onRefresh: () => void
   onDetails: () => void
   onArchive: () => void
@@ -75,8 +73,6 @@ export function ChatPane({
     <section className="chat-pane" aria-label={session ? `会话 ${session.id}` : 'In_Fate'}>
       <header className="chat-head">
         <div className="chat-head-left">
-          <IconButton icon="sidebar" label="会话列表" onClick={onToggleSidebar} className="chat-sidebar-toggle" />
-          <span className="chat-head-brand">IF</span>
           <h1 title={session?.id ?? title}>{title}</h1>
           <StateBadge state={state} />
           {session && lifecycle !== 'active' && <LifecycleBadge lifecycle={lifecycle} />}

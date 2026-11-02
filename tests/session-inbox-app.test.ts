@@ -12,6 +12,7 @@ import { SessionWriter } from '../src/core/session-writer.ts'
 import { EventStore } from '../src/core/store.ts'
 import { sessionFile } from '../src/app/session.ts'
 import { sessionStream } from '../src/core/streams.ts'
+import { seedAgentModel } from './support.ts'
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
 
@@ -99,6 +100,7 @@ function seedPendingMessage(
 
 test('启动恢复：崩溃前未处理的 wake 消息会补跑一轮', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'if-inbox-recover-'))
+  seedAgentModel(dir)
   let hits = 0
   const server = createServer((_req, res) => {
     hits += 1
@@ -133,6 +135,7 @@ test('启动恢复：崩溃前未处理的 wake 消息会补跑一轮', async ()
 
 test('启动恢复：已经进过完成轮的消息不重复跑', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'if-inbox-seen-'))
+  seedAgentModel(dir)
   let hits = 0
   const server = createServer((_req, res) => {
     hits += 1

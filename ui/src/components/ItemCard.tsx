@@ -4,10 +4,13 @@ import { formatClock, formatDuration } from '../lib/format'
 import { Markdown } from '../lib/markdown'
 import type { UiContent, UiTimelineItem } from '../types'
 import { Icon } from './Icon'
+import { TurnMetrics } from './TurnMetrics'
 
 interface Props {
   sessionId: string
   item: UiTimelineItem
+  bare?: boolean
+  inProcess?: boolean
 }
 
 type ContentTarget = { ref: string } | { eventId: string } | undefined
@@ -48,7 +51,7 @@ function ToolStatus({ status }: { status: 'running' | 'ok' | 'error' | undefined
   )
 }
 
-export function ItemCard({ sessionId, item }: Props) {
+export function ItemCard({ sessionId, item, bare = false, inProcess = false }: Props) {
   const [expanded, setExpanded] = useState(false)
   const [full, setFull] = useState<string | undefined>()
   const [loading, setLoading] = useState(false)
@@ -102,9 +105,26 @@ export function ItemCard({ sessionId, item }: Props) {
   }
 
   if (item.kind === 'assistant') {
+    if (bare) {
+      return (
+        <div className="turn-output">
+          <div className="msg-content">
+            <Markdown text={text} />
+            <ExpandButton
+              canExpand={canExpand}
+              expanded={expanded}
+              bytes={content?.bytes ?? 0}
+              loading={loading}
+              onClick={() => void toggle()}
+            />
+          </div>
+          {error && <div className="inline-error">{error}</div>}
+        </div>
+      )
+    }
     return (
       <article className="msg msg-assistant">
-        <span className="msg-avatar">IF</span>
+        <img className="msg-avatar" src="/icon.png" alt="" />
         <div className="msg-main">
           <div className="msg-head">
             <span>In_Fate</span>
@@ -181,6 +201,28 @@ export function ItemCard({ sessionId, item }: Props) {
   }
 
   if (item.kind === 'thoughts') {
+    if (inProcess) {
+      return (
+        <div className="turn-thought">
+          <div className="turn-thought-head">
+            <span className="process-icon"><Icon name="layers" size={13} /></span>
+            <span className="process-title">思考</span>
+            <span className="process-meta">{formatClock(item.ts)}</span>
+          </div>
+          <div className="turn-thought-body">
+            <Markdown text={text} />
+            <ExpandButton
+              canExpand={canExpand}
+              expanded={expanded}
+              bytes={content?.bytes ?? 0}
+              loading={loading}
+              onClick={() => void toggle()}
+            />
+          </div>
+          {error && <div className="inline-error">{error}</div>}
+        </div>
+      )
+    }
     return (
       <details className="process-row thought-row">
         <summary>
@@ -221,11 +263,6 @@ export function ItemCard({ sessionId, item }: Props) {
     )
   }
 
-  // turn 完成行：只留一条很轻的分隔，不再显示轮次编号和事件数。
-  return (
-    <div className={`turn-summary${item.status === 'cancelled' ? ' cancelled' : ''}`}>
-      <span>{item.status === 'cancelled' ? '本轮中断' : '本轮完成'}</span>
-      <span>{formatClock(item.ts)}</span>
-    </div>
-  )
+  // turn 完成行：显示本轮用量，点击打开明细。
+  return <TurnMetrics item={item} />
 }

@@ -10,7 +10,7 @@
  * 不做原生应用嵌入、不做多窗口、不做插件；那些等壳稳定后再加。
  */
 
-import { app, BrowserWindow, Menu, dialog, shell } from 'electron'
+import { app, BrowserWindow, Menu, dialog, ipcMain, shell } from 'electron'
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:net'
 import { randomBytes } from 'node:crypto'
@@ -35,6 +35,18 @@ let serverPort
 let serverToken
 let stopping = false
 let logPath
+
+ipcMain.on('if:window-minimize', event => {
+  BrowserWindow.fromWebContents(event.sender)?.minimize()
+})
+ipcMain.on('if:window-toggle-fullscreen', event => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win) return
+  win.setFullScreen(!win.isFullScreen())
+})
+ipcMain.on('if:window-close', event => {
+  BrowserWindow.fromWebContents(event.sender)?.close()
+})
 
 function log(line) {
   const text = `[${new Date().toISOString()}] ${line}\n`
@@ -182,10 +194,13 @@ function createWindow(url) {
     minWidth: 900,
     minHeight: 600,
     show: false,
+    frame: false,
     title: 'In_Fate',
-    backgroundColor: '#07090f',
+    icon: join(here, 'if-w3.ico'),
+    backgroundColor: '#0b0d11',
     autoHideMenuBar: true,
     webPreferences: {
+      preload: join(here, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -194,6 +209,7 @@ function createWindow(url) {
   })
 
   win.setMenuBarVisibility(false)
+  win.setIcon(join(here, 'if-w3.ico'))
   win.loadURL(url)
 
   win.once('ready-to-show', () => {
@@ -201,7 +217,17 @@ function createWindow(url) {
     win.show()
     log(`ready: ${url}`)
     if (smoke) {
-      setTimeout(() => app.quit(), 1500)
+      setTimeout(() => {
+        const shot = process.env.IF_SMOKE_SHOT
+        if (!shot) {
+          app.quit()
+          return
+        }
+        void win.webContents.capturePage()
+          .then(image => writeFileSync(shot, image.toPNG()))
+          .catch(error => log(`smoke shot failed: ${error instanceof Error ? error.message : String(error)}`))
+          .finally(() => app.quit())
+      }, 1500)
     }
   })
 

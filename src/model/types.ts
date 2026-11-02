@@ -27,11 +27,28 @@ export interface PriceRate {
   readonly perMillionTokens: number
 }
 
-export interface ModelPricing {
+/** 低谷时段；按本地墙钟时间判断，end <= start 表示跨午夜。 */
+export interface PricingWindow {
+  /** 0=周日 … 6=周六；不填=每天。指窗口开始那天。 */
+  readonly days?: readonly number[]
+  /** 本地时间 HH:mm */
+  readonly start: string
+  /** 本地时间 HH:mm；结束开区间 */
+  readonly end: string
+}
+
+export interface ModelPriceSet {
   readonly input?: PriceRate
   readonly output?: PriceRate
   readonly cacheRead?: PriceRate
   readonly cacheWrite?: PriceRate
+}
+
+export interface ModelPricing extends ModelPriceSet {
+  /** 低谷价；缺某项时回退到上面的标准价。 */
+  readonly offPeak?: ModelPriceSet & {
+    readonly windows: readonly PricingWindow[]
+  }
 }
 
 export interface ModelCard {

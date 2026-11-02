@@ -49,7 +49,7 @@ function cors(req: IncomingMessage, res: ServerResponse): void {
     res.setHeader('access-control-allow-origin', origin)
     res.setHeader('vary', 'origin')
   }
-  res.setHeader('access-control-allow-methods', 'GET, POST, OPTIONS')
+  res.setHeader('access-control-allow-methods', 'GET, POST, PUT, PATCH, OPTIONS')
   res.setHeader('access-control-allow-headers', 'authorization, content-type')
 }
 
@@ -235,6 +235,101 @@ async function handle(
     return
   }
 
+  if (req.method === 'GET' && parts[1] === 'model-config' && parts.length === 2) {
+    json(res, 200, { config: app.modelConfig() })
+    return
+  }
+
+  if (req.method === 'POST' && parts[1] === 'model-config' && parts.length === 2) {
+    const body = await readOptionalJson(req)
+    const provider = typeof body.provider === 'string' ? body.provider.trim() : ''
+    if (!provider) {
+      json(res, 400, { error: 'provider is required' })
+      return
+    }
+    try {
+      const config = await app.saveModelConfig({
+        provider,
+        ...(typeof body.apiKey === 'string' ? { apiKey: body.apiKey } : {}),
+        ...(typeof body.baseUrl === 'string' ? { baseUrl: body.baseUrl } : {}),
+      })
+      json(res, 200, { config })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  if (req.method === 'PUT' && parts[1] === 'model-config' && parts[2] === 'models'
+    && parts[3] && parts[4] && parts.length === 5) {
+    const body = await readOptionalJson(req)
+    const contextWindow = body.contextWindow
+    const maxOutputTokens = body.maxOutputTokens
+    if (contextWindow !== undefined && contextWindow !== null
+      && (typeof contextWindow !== 'number' || !Number.isFinite(contextWindow))) {
+      json(res, 400, { error: 'contextWindow must be a number or null' })
+      return
+    }
+    if (maxOutputTokens !== undefined && maxOutputTokens !== null
+      && (typeof maxOutputTokens !== 'number' || !Number.isFinite(maxOutputTokens))) {
+      json(res, 400, { error: 'maxOutputTokens must be a number or null' })
+      return
+    }
+    if (body.pricing !== undefined && body.pricing !== null
+      && (typeof body.pricing !== 'object' || Array.isArray(body.pricing))) {
+      json(res, 400, { error: 'pricing must be an object or null' })
+      return
+    }
+    try {
+      const config = await app.saveModelCard({
+        provider: parts[3]!,
+        model: parts[4]!,
+        ...(contextWindow !== undefined
+          ? { contextWindow: contextWindow as number | null }
+          : {}),
+        ...(maxOutputTokens !== undefined
+          ? { maxOutputTokens: maxOutputTokens as number | null }
+          : {}),
+        ...(body.pricing !== undefined
+          ? { pricing: body.pricing as never }
+          : {}),
+      })
+      json(res, 200, { config })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  if (req.method === 'GET' && parts[1] === 'tools' && parts.length === 2) {
+    json(res, 200, { tools: app.toolViews(url.searchParams.get('agentId') ?? undefined) })
+    return
+  }
+
+  if (req.method === 'PATCH' && parts[1] === 'tools' && parts[2] && parts.length === 3) {
+    const body = await readOptionalJson(req)
+    if (body.enabled !== undefined && typeof body.enabled !== 'boolean') {
+      json(res, 400, { error: 'enabled must be a boolean' })
+      return
+    }
+    if (body.approval !== undefined && body.approval !== 'auto' && body.approval !== 'required') {
+      json(res, 400, { error: 'approval must be auto or required' })
+      return
+    }
+    try {
+      const tools = await app.setToolGlobal(parts[2], {
+        ...(typeof body.enabled === 'boolean' ? { enabled: body.enabled } : {}),
+        ...(body.approval === 'auto' || body.approval === 'required'
+          ? { approval: body.approval }
+          : {}),
+      })
+      json(res, 200, { tools })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
   if (req.method === 'GET' && parts[1] === 'memory' && parts[2] === 'role') {
     const sessionId = url.searchParams.get('sessionId')
     if (!sessionId) {
@@ -339,10 +434,114 @@ async function handle(
     const body = await readOptionalJson(req)
     const sessionId = app.createSession({
       createdBy: typeof body.createdBy === 'string' ? body.createdBy : 'user',
+      ...(typeof body.agentId === 'string' && body.agentId.trim()
+        ? { agentId: body.agentId }
+        : {}),
       ...(typeof body.reason === 'string' ? { reason: body.reason } : { reason: 'ui' }),
       materialize: true,
     })
     json(res, 200, { sessionId })
+    return
+  }
+
+  if (req.method === 'GET' && parts[1] === 'main-agents' && parts.length === 2) {
+    json(res, 200, { agents: app.agentSummaries() })
+    return
+  }
+
+  if (req.method === 'GET' && parts[1] === 'main-agents' && parts[2] && parts.length === 3) {
+    try {
+      json(res, 200, { agent: app.agentSummary(parts[2]) })
+    } catch (error) {
+      json(res, 404, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  if (req.method === 'PATCH' && parts[1] === 'main-agents' && parts[2] && parts.length === 3) {
+    const body = await readOptionalJson(req)
+    const model = body.model
+    if (model !== undefined && (
+      typeof model !== 'object'
+      || model === null
+      || Array.isArray(model)
+      || typeof (model as { provider?: unknown }).provider !== 'string'
+      || typeof (model as { model?: unknown }).model !== 'string'
+    )) {
+      json(res, 400, { error: 'model must be { provider, model }' })
+      return
+    }
+    const subagentModels = body.subagentModels
+    if (subagentModels !== undefined && !Array.isArray(subagentModels)) {
+      json(res, 400, { error: 'subagentModels must be an array' })
+      return
+    }
+    const subagentPresets = body.subagentPresets
+    if (subagentPresets !== undefined && !Array.isArray(subagentPresets)) {
+      json(res, 400, { error: 'subagentPresets must be an array' })
+      return
+    }
+    const toolsPatch = body.tools
+    if (toolsPatch !== undefined
+      && (typeof toolsPatch !== 'object' || toolsPatch === null || Array.isArray(toolsPatch))) {
+      json(res, 400, { error: 'tools must be an object' })
+      return
+    }
+    try {
+      const agent = await app.updateAgentSettings(parts[2], {
+        ...(model !== undefined ? { model: model as never } : {}),
+        ...(subagentModels !== undefined ? { subagentModels: subagentModels as never } : {}),
+        ...(subagentPresets !== undefined ? { subagentPresets: subagentPresets as string[] } : {}),
+        ...(toolsPatch !== undefined ? { tools: toolsPatch as never } : {}),
+      })
+      json(res, 200, { agent })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  if (req.method === 'POST' && parts[1] === 'main-agents' && parts.length === 2) {
+    const body = await readOptionalJson(req)
+    const id = typeof body.id === 'string' ? body.id.trim() : ''
+    const name = typeof body.name === 'string' ? body.name.trim() : ''
+    if (!id || !name) {
+      json(res, 400, { error: 'id and name are required' })
+      return
+    }
+    try {
+      const agent = await app.createMainAgent({ id, name })
+      json(res, 200, { agent })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  if (req.method === 'GET' && parts[1] === 'main-agents' && parts[2]
+    && parts[3] === 'identity' && parts.length === 4) {
+    try {
+      const identity = app.mainAgentIdentity(parts[2])
+      json(res, 200, { identity })
+    } catch (error) {
+      json(res, 404, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  if (req.method === 'PUT' && parts[1] === 'main-agents' && parts[2]
+    && parts[3] === 'identity' && parts[4] && parts.length === 5) {
+    const body = await readOptionalJson(req)
+    if (typeof body.content !== 'string') {
+      json(res, 400, { error: 'content is required' })
+      return
+    }
+    try {
+      const result = await app.writeMainAgentSlot(parts[2], parts[4], body.content)
+      json(res, 200, { result })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
     return
   }
 
@@ -352,6 +551,23 @@ async function handle(
     const includeDeleted = url.searchParams.get('includeDeleted') === '1'
       || url.searchParams.get('includeDeleted') === 'true'
     json(res, 200, { agents: app.agentRuns({ includeArchived, includeDeleted }) })
+    return
+  }
+
+  if (req.method === 'GET' && parts[1] === 'memory' && parts[2] === 'search') {
+    const q = url.searchParams.get('q') ?? ''
+    const limit = Number(url.searchParams.get('limit') ?? 20)
+    json(res, 200, { hits: app.memorySearch(q, Number.isFinite(limit) ? limit : 20) })
+    return
+  }
+
+  if (req.method === 'GET' && parts[1] === 'memory' && parts[2] === 'read') {
+    const target = url.searchParams.get('target') ?? ''
+    if (!target) {
+      json(res, 400, { error: 'target is required' })
+      return
+    }
+    json(res, 200, { document: app.memoryRead(target) })
     return
   }
 
@@ -553,8 +769,19 @@ async function handle(
 
   if (req.method === 'POST' && action === 'wake' && parts.length === 4) {
     const body = JSON.parse(await readBody(req)) as { text?: unknown }
-    const result = await app.wake(sessionId, typeof body.text === 'string' ? body.text : undefined)
-    json(res, 200, { result })
+    try {
+      const result = await app.wake(sessionId, typeof body.text === 'string' ? body.text : undefined)
+      json(res, 200, { result })
+    } catch (error) {
+      const code = typeof error === 'object' && error !== null && 'code' in error
+        ? String((error as { code?: unknown }).code ?? '')
+        : ''
+      const status = code === 'EAGENTMODEL' || code === 'EAGENTMODELINVALID' ? 409 : 500
+      json(res, status, {
+        error: error instanceof Error ? error.message : String(error),
+        ...(code ? { code } : {}),
+      })
+    }
     return
   }
 
@@ -564,8 +791,23 @@ async function handle(
       json(res, 400, { error: 'text is required' })
       return
     }
-    const result = await app.chat({ sessionId, text: body.text })
-    json(res, 200, { result })
+    try {
+      const result = await app.chat({ sessionId, text: body.text })
+      json(res, 200, { result })
+    } catch (error) {
+      const code = typeof error === 'object' && error !== null && 'code' in error
+        ? String((error as { code?: unknown }).code ?? '')
+        : ''
+      const agentId = typeof error === 'object' && error !== null && 'agentId' in error
+        ? String((error as { agentId?: unknown }).agentId ?? '')
+        : undefined
+      const status = code === 'EAGENTMODEL' || code === 'EAGENTMODELINVALID' ? 409 : 500
+      json(res, status, {
+        error: error instanceof Error ? error.message : String(error),
+        ...(code ? { code } : {}),
+        ...(agentId ? { agentId } : {}),
+      })
+    }
     return
   }
 

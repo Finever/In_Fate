@@ -38,6 +38,27 @@ export function memorySection(
   }
 }
 
+/** 按会话解析记忆源：每个主 agent 的身份文件不同，渲染时再查。 */
+export function sessionMemorySection(
+  id: string,
+  resolveSources: (sessionId: string) => readonly MemorySource[],
+  priority = 90,
+): ContextSection {
+  return {
+    id,
+    layer: 'stable',
+    priority,
+    render: (context) => {
+      const chunks = readSources(resolveSources(context.sessionId))
+      if (chunks.length === 0) return
+      return {
+        text: chunks.map(chunk => `<!-- ${chunk.id} -->\n${chunk.text}`).join('\n\n'),
+        meta: { sources: chunks.map(chunk => ({ id: chunk.id, bytes: chunk.bytes, digest: chunk.digest })) },
+      }
+    },
+  }
+}
+
 /** 当前时间：ephemeral，必进，永远放在最后。 */
 export function timeSection(priority = 100): ContextSection {
   return {
