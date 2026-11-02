@@ -181,7 +181,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     setNotice(undefined)
   }
 
-  function applyConfig(next: ModelConfig, savedProvider?: string): void {
+  function applyConfig(
+    next: ModelConfig,
+    savedProvider?: string,
+    clearKeyFor?: string,
+  ): void {
     setConfig(next)
     setDrafts(current => {
       const updated = { ...current }
@@ -194,6 +198,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           const baseUrl = item.endpoints.find(endpoint => endpoint.family === format)?.baseUrl
             ?? item.baseUrl
           updated[item.id] = { ...existing, format, baseUrl, apiKey: '' }
+        } else if (clearKeyFor === item.id) {
+          updated[item.id] = { ...existing, apiKey: '' }
         } else {
           updated[item.id] = existing
         }
@@ -236,7 +242,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     setNotice(undefined)
     try {
       const next = await api.addModelApiKey(provider.id, key)
-      applyConfig(next, provider.id)
+      applyConfig(next, undefined, provider.id)
       setNotice('API key 已添加；请求会按启用顺序轮换')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))

@@ -108,7 +108,7 @@ function requestBody(request: ChatRequest): Record<string, unknown> {
   const system = systemText(request)
   return {
     model: request.resolved.apiModelId,
-    max_tokens: request.maxTokens ?? request.resolved.model.maxOutputTokens ?? 8192,
+    max_tokens: request.maxTokens ?? request.resolved.model.maxOutputTokens ?? 4096,
     stream: true,
     messages: toMessages(request.messages),
     ...(system.length > 0 ? { system } : {}),

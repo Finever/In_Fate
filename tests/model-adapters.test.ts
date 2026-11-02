@@ -254,7 +254,7 @@ test('Anthropic Messages：tool_use 与缓存用量', async () => {
     assert.equal(server.captured.headers?.['x-api-key'], 'secret')
     assert.equal(server.captured.headers?.['anthropic-version'], '2023-06-01')
     assert.equal(server.captured.body?.system, 'you are a test')
-    assert.equal(server.captured.body?.max_tokens, 8192)
+    assert.equal(server.captured.body?.max_tokens, 4096)
     assert.deepEqual(events, [
       { type: 'text', text: '你' },
       { type: 'tool_call', id: 'toolu_1', name: 'read', arguments: '{"path":"a"}' },
