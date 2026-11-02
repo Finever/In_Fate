@@ -1,10 +1,9 @@
 import { useState } from 'react'
 import type { AgentSummary, SessionInfo } from '../types'
-import { MemoryPanel } from './MemoryPanel'
-import { PppPanel } from './PppPanel'
+import { PersonaPanel } from './PersonaPanel'
 import { StatusPanel } from './StatusPanel'
 
-type PanelTab = 'status' | 'memory' | 'ppp'
+type PanelTab = 'status' | 'persona'
 
 export function AgentPanel({
   agentId,
@@ -37,17 +36,10 @@ export function AgentPanel({
         </button>
         <button
           type="button"
-          className={tab === 'memory' ? 'is-active' : ''}
-          onClick={() => setTab('memory')}
+          className={tab === 'persona' ? 'is-active' : ''}
+          onClick={() => setTab('persona')}
         >
-          记忆
-        </button>
-        <button
-          type="button"
-          className={tab === 'ppp' ? 'is-active' : ''}
-          onClick={() => setTab('ppp')}
-        >
-          PPP
+          人格文件
         </button>
         <button
           type="button"
@@ -73,11 +65,9 @@ export function AgentPanel({
               />
             )
             : <div className="fw-panel-empty">先添加或选择一个主 agent。</div>)
-          : tab === 'ppp'
-            ? (agentId
-              ? <PppPanel agentId={agentId} />
-              : <div className="fw-panel-empty">先添加或选择一个主 agent。</div>)
-            : <MemoryPanel />}
+          : (agentId
+            ? <PersonaPanel agentId={agentId} />
+            : <div className="fw-panel-empty">先添加或选择一个主 agent。</div>)}
       </div>
     </div>
   )

@@ -715,7 +715,7 @@ manifest：
   "identity": [
     { "id": "principle", "label": "本心", "file": "principle.md", "order": 100, "role": "identity", "description": "本心、原则、边界、说话方式" },
     { "id": "preference", "label": "所爱", "file": "preference.md", "order": 90, "role": "user", "description": "我与你各自的偏好、习惯、画像" },
-    { "id": "prompt", "label": "当口", "file": "prompt.md", "order": 80, "role": "fact", "description": "环境与记忆系统的稳定说明；末尾接续点" }
+    { "id": "prompt", "label": "提示", "file": "prompt.md", "order": 80, "role": "fact", "description": "环境与记忆系统的稳定说明；末尾接续点" }
   ]
 }
 ```
@@ -746,7 +746,7 @@ npm run memory:migrate-identity -- \
   --agent-dir <agentDir> \
   --agent-id main \
   --name example-agent \
-  --labels 本心,所爱,当口
+  --labels 本心,所爱,提示
 ```
 
 - 默认 dry-run；`--apply` 才写 `agents/<id>/agent.json` 和 `identity/*.md`。
@@ -795,15 +795,15 @@ npm run memory:migrate-identity -- \
 - `ItemCard` 新增 `bare`（助手输出不重复头像）与 `inProcess`（思考在组内展开为小字）两个渲染模式。
 - 验收：真实会话 `索引冒烟` 验证用户消息 → 单个“已处理”折叠组 → “完成”输出顺序；展开组后出现 `read` 工具行；运行中 mock 验证“处理中”与脉冲点；构建、tsc、146 条测试通过。
 
-## 22. 主 agent、PPP 与记忆面板（2026-10-31）
+## 22. 主 agent、人格文件 与记忆面板（2026-10-31）
 
 - 左栏 agent 区改为列主 agent manifest（`memory/agents/<id>/agent.json`），不再把子 agent run 放到主页；子 agent 会话仍保留在磁盘与 `/api/agents`，但 `kind === 'agent'` 的会话从主页会话列表隐藏。
-- `+` 打开“添加主 agent”：用户自己填 id 和名字；`POST /api/main-agents` 创建 manifest 与三份默认 PPP 文件（principle / preference / prompt）。id 会作为目录名，`main` 会额外提示它是旧会话的回退身份，先写 PPP 再聊。
+- `+` 打开“添加主 agent”：用户自己填 id 和名字；`POST /api/main-agents` 创建 manifest 与三份默认 人格文件 文件（principle / preference / prompt）。id 会作为目录名，`main` 会额外提示它是旧会话的回退身份，先写 人格文件 再聊。
 - 会话新增 `agentId`：`POST /api/sessions` 可带 `agentId`；`session.created` 落该字段；`SessionInfo.agentId` 返回给 UI。旧会话没有字段时回退到配置的 mainAgentId。
 - 上下文身份按会话动态加载：`sessionMemorySection` 在每轮渲染时读取 `session.agentId` 对应的 manifest，`loadIdentitySources` 支持多主 agent；没有 agentId 的旧会话仍走 main/legacy 回退。
-- 右栏是主 agent 面板：`身份` tab 编辑 PPP 全文，保存时走 `AgentIdentityStore.writeSlot`（备份 + 文件锁，整文件保存，人类 UI 专用）；`记忆` tab 提供全局 detail 搜索、条目读取、待处理 proposal 的接受/拒绝。
-- 记忆范围按用户确认：PPP 各自独立；detail 记忆当前全局共享；`MemoryAccess` 的 role 仍在，未来再按分块限定 agent 可读范围。本轮没有实现分块权限。
-- 验收：mock / 临时数据根验证创建主 agent、PPP 读取与保存、会话 agentId、记忆搜索/读取、面板切换；`ui` 构建、根 `tsc`、**148** 条测试、Electron smoke 通过。
+- 右栏是主 agent 面板：`身份` tab 编辑 人格文件 全文，保存时走 `AgentIdentityStore.writeSlot`（备份 + 文件锁，整文件保存，人类 UI 专用）；`记忆` tab 提供全局 detail 搜索、条目读取、待处理 proposal 的接受/拒绝。
+- 记忆范围按用户确认：人格文件 各自独立；detail 记忆当前全局共享；`MemoryAccess` 的 role 仍在，未来再按分块限定 agent 可读范围。本轮没有实现分块权限。
+- 验收：mock / 临时数据根验证创建主 agent、人格文件 读取与保存、会话 agentId、记忆搜索/读取、面板切换；`ui` 构建、根 `tsc`、**148** 条测试、Electron smoke 通过。
 
 ## 23. 自定义顶栏（2026-10-31）
 
@@ -838,7 +838,7 @@ npm run memory:migrate-identity -- \
 - **计费**：`turn.completed` 落盘 `model`、`durationMs`、`modelDurationMs`、`toolDurationMs`、`cost`。缓存命中属于输入子集，先算 `input - cacheRead`，避免重复收费；没有价格时 `priced:false`、金额 0。
 - **轮次 UI**：处理中每 250ms 刷新实时耗时；结束后显示最终耗时。助手输出下显示输入/输出/缓存 token、速度、金额；点击打开明细弹窗，含 token 构成、金额分布、时间分布（模型/工具审批/其他）。
 - **设置面板**：左栏 provider，右栏 provider 凭据 + 模型列表；模型行显示 token 与价格摘要，点“编辑”打开模型编辑器，可改上下文、输出、币种、高峰价、低谷价和时段。不再有“默认模型”按钮或标记。
-- **状态面板**：右栏改为“状态 / 记忆”两页。状态页包含当前模型（可保存）、子 agent 预设/可用模型、该 agent 的会话、PPP 文件（默认折叠、可预览、点开编辑、保存留备份）、工具与权限（全局启停/审批 + agent 白名单/审批）。MCP 服务器管理下一阶段。
+- **状态面板**：右栏改为“状态 / 记忆”两页。状态页包含当前模型（可保存）、子 agent 预设/可用模型、该 agent 的会话、人格文件 文件（默认折叠、可预览、点开编辑、保存留备份）、工具与权限（全局启停/审批 + agent 白名单/审批）。MCP 服务器管理下一阶段。
 - **工具策略**：`ToolRegistry` 可注册默认禁用/审批模式；`ToolDescriptor` 带危险/只读元数据；`ExecuteOptions` 支持 agent 白名单和审批覆盖。`request_agent` 增加可选 `model`，主 agent 先通过 `model_list` 读取当前 agent 的可用模型/预设；不指定时按预设链与白名单交集，空交集回退主模型。
 - **存储**：模型目录与凭据仍写回 `configPath`；agent 运行设置写 `<dataRoot>/agents/<id>/settings.json`，不进记忆库 git。`UiIndex.SCHEMA_VERSION` 升到 2，旧用量缓存一次性重建。
 - 验收：`npm run check`、`npm --prefix ui run build`、根测试 **164** 条通过；Electron 截图验证设置双栏/模型编辑器/状态面板/用量明细；未配置模型返回 409，配置后可正常跑轮。

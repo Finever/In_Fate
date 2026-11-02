@@ -11,7 +11,7 @@ function byteLength(text: string): number {
   return new TextEncoder().encode(text).length
 }
 
-export function PppPanel({ agentId }: { agentId: string }) {
+export function PersonaPanel({ agentId }: { agentId: string }) {
   const [identity, setIdentity] = useState<MainAgentIdentity>()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
@@ -80,21 +80,21 @@ export function PppPanel({ agentId }: { agentId: string }) {
   }
 
   if (loading) {
-    return <div className="fw-panel-loading"><span className="fw-spinner" /> 载入 PPP…</div>
+    return <div className="fw-panel-loading"><span className="fw-spinner" /> 载入人格文件…</div>
   }
 
   return (
-    <div className="fw-ppp-panel">
-      <div className="fw-ppp-intro">
-        <span>PPP 文件</span>
-        <small>原则 / 偏好 / 当口。保存会覆盖原文件，先自动备份到 _archive。</small>
+    <div className="fw-persona-panel">
+      <div className="fw-persona-intro">
+        <span>人格文件</span>
+        <small>原则 / 偏好 / 提示。保存会覆盖原文件，先自动备份到 _archive。</small>
       </div>
 
       {error && <div className="fw-dialog-error fw-status-error">{error}</div>}
-      {notice && <div className="fw-settings-notice fw-ppp-notice" title={notice}>{notice}</div>}
+      {notice && <div className="fw-settings-notice fw-persona-notice" title={notice}>{notice}</div>}
 
       {!identity && (
-        <div className="fw-panel-empty">没有读到 PPP 文件。</div>
+        <div className="fw-panel-empty">没有读到 人格文件。</div>
       )}
 
       {identity?.slots.map(slot => {
@@ -103,29 +103,29 @@ export function PppPanel({ agentId }: { agentId: string }) {
         const dirty = draft !== slot.content
         const confirmingSlot = confirming === slot.id
         return (
-          <div className="fw-status-ppp" key={slot.id}>
+          <div className="fw-persona-slot" key={slot.id}>
             <button
               type="button"
-              className="fw-status-ppp-head"
+              className="fw-persona-slot-head"
               aria-expanded={openSlot}
               onClick={() => setOpen(current => ({
                 ...current,
                 [slot.id]: !openSlot,
               }))}
             >
-              <span className="fw-status-ppp-label">
+              <span className="fw-persona-slot-label">
                 {slot.label}
-                {dirty && <em className="fw-ppp-dirty">未保存</em>}
+                {dirty && <em className="fw-persona-dirty">未保存</em>}
               </span>
-              <span className="fw-status-ppp-path" title={slot.path}>{slot.path}</span>
-              <span className="fw-status-ppp-preview">{firstLine(draft)}</span>
+              <span className="fw-persona-slot-path" title={slot.path}>{slot.path}</span>
+              <span className="fw-persona-slot-preview">{firstLine(draft)}</span>
               <Icon name="down" size={13} className={openSlot ? 'is-open' : ''} />
             </button>
 
             {openSlot && (
-              <div className="fw-status-ppp-body">
+              <div className="fw-persona-slot-body">
                 {slot.description && (
-                  <p className="fw-ppp-description">{slot.description}</p>
+                  <p className="fw-persona-description">{slot.description}</p>
                 )}
                 <textarea
                   value={draft}
@@ -137,7 +137,7 @@ export function PppPanel({ agentId }: { agentId: string }) {
                     setNotice(undefined)
                   }}
                 />
-                <div className="fw-ppp-meta">
+                <div className="fw-persona-meta">
                   <span>{byteLength(draft).toLocaleString('en-US')} 字节</span>
                   {dirty && (
                     <button
@@ -157,17 +157,17 @@ export function PppPanel({ agentId }: { agentId: string }) {
                   )}
                 </div>
                 {confirmingSlot && (
-                  <div className="fw-ppp-confirm">
+                  <div className="fw-persona-confirm">
                     确认覆盖这个文件？原文件会先备份到 _archive。
                   </div>
                 )}
-                <div className="fw-status-ppp-actions">
+                <div className="fw-persona-slot-actions">
                   <span>{dirty ? '有未保存的改动' : '已保存'}</span>
-                  <div className="fw-ppp-actions-right">
+                  <div className="fw-persona-actions-right">
                     {confirmingSlot && (
                       <button
                         type="button"
-                        className="fw-dialog-cancel fw-ppp-cancel"
+                        className="fw-dialog-cancel fw-persona-cancel"
                         onClick={() => setConfirming(undefined)}
                       >
                         取消

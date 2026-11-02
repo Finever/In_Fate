@@ -10,7 +10,7 @@
  *     --agent-dir C:\path\to\agent \
  *     --agent-id main \
  *     --name <name> \
- *     --labels 本心,所爱,当口 \
+ *     --labels 本心,所爱,提示 \
  *     --apply
  */
 
@@ -36,7 +36,7 @@ async function main(): Promise<void> {
 
   if (values.help) {
     process.stdout.write(`用法：
-  node bin/migrate-identity.ts --memory-root <记忆库根> --agent-dir <agent 目录> [--agent-id main] [--name <name>] [--labels 本心,所爱,当口] [--apply] [--force]
+  node bin/migrate-identity.ts --memory-root <记忆库根> --agent-dir <agent 目录> [--agent-id main] [--name <name>] [--labels 本心,所爱,提示] [--apply] [--force]
 
 默认 dry-run；--apply 才写 agents/<id>/agent.json 和 identity/*.md。旧 SOUL/USER/FACT 不动。
 目标文件已存在且内容不同时默认拒绝；--force 先备份再覆盖。

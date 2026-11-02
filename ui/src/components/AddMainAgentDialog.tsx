@@ -77,7 +77,7 @@ export function AddMainAgentDialog({
           <small>会作为记忆目录名，创建后不改。</small>
           {id.trim() === 'main' && (
             <small className="fw-dialog-warn">
-              main 也是旧会话的回退身份；先写好 PPP 再聊，避免旧会话读到空白身份。
+              main 也是旧会话的回退身份；先写好人格文件再聊，避免旧会话读到空白身份。
             </small>
           )}
         </label>
@@ -95,7 +95,7 @@ export function AddMainAgentDialog({
         <div className="fw-agent-source">
           <span>创建内容</span>
           <b>agent.json + principle / preference / prompt</b>
-          <small>PPP 三份身份文件创建后可以在右栏编辑。</small>
+          <small>三份人格文件创建后可以在右栏编辑。</small>
         </div>
 
         {error && <div className="fw-dialog-error">{error}</div>}

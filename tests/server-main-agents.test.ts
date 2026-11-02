@@ -89,12 +89,12 @@ test('main agent 创建、PPP 读写、会话 agentId 与全局记忆 API', asyn
       identity: { slots: Array<{ id: string; content: string }> }
     }
     assert.equal(identityBody.identity.slots.length, 3)
-    assert.match(identityBody.identity.slots[0]!.content, /# Principle/)
+    assert.match(identityBody.identity.slots[0]!.content, /# 原则/)
 
     const put = await fetch(`${handle.url}/api/main-agents/main/identity/principle`, {
       method: 'PUT',
       headers,
-      body: JSON.stringify({ content: '# Principle\n\n## 正文\n\n新的。\n' }),
+      body: JSON.stringify({ content: '# 原则\n\n## 正文\n\n新的。\n' }),
     })
     assert.equal(put.status, 200)
     const readAfter = await fetch(`${handle.url}/api/main-agents/main/identity`, { headers })

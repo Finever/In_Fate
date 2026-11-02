@@ -38,7 +38,7 @@ function seedLegacy(agentDir: string): void {
     'utf8',
   )
   writeFileSync(join(agentDir, 'USER.md'), '# USER\n\n## 他是谁\n\n他。\n', 'utf8')
-  writeFileSync(join(agentDir, 'memory', 'FACT.md'), '# FACT\n\n## 当口\n\n事。\n', 'utf8')
+  writeFileSync(join(agentDir, 'memory', 'FACT.md'), '# FACT\n\n## 提示\n\n事。\n', 'utf8')
 }
 
 test('agent manifest 可读写，槽位顺序稳定', async () => {
@@ -48,14 +48,14 @@ test('agent manifest 可读写，槽位顺序稳定', async () => {
     const manifest = defaultAgentManifest('main', 'Demo Agent', {
       principle: '本心',
       preference: '所爱',
-      prompt: '当口',
+      prompt: '提示',
     })
     await store.write(manifest)
 
     const read = store.read('main')
     assert.equal(read?.name, 'Demo Agent')
     assert.deepEqual(read?.identity.map(slot => slot.id), ['principle', 'preference', 'prompt'])
-    assert.deepEqual(read?.identity.map(slot => slot.label), ['本心', '所爱', '当口'])
+    assert.deepEqual(read?.identity.map(slot => slot.label), ['本心', '所爱', '提示'])
     assert.equal(store.list().length, 1)
   } finally {
     rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
@@ -75,12 +75,12 @@ test('createDefault 建主 agent 的 PPP 文件，writeSlot 先备份再整文�
     }
 
     const identity = new AgentIdentityStore(memoryRoot, 'demo-agent', { manifest })
-    assert.match(identity.readOrEmpty('principle'), /# Principle/)
+    assert.match(identity.readOrEmpty('principle'), /# 原则/)
     assert.match(identity.readOrEmpty('principle'), /原则。这里告诉我我是谁/)
     assert.doesNotMatch(identity.readOrEmpty('principle'), /写完删掉/)
     assert.match(identity.readOrEmpty('prompt'), /## IF 环境/)
     assert.match(identity.readOrEmpty('prompt'), /## 记忆系统/)
-    const result = await identity.writeSlot('principle', '# Principle\n\n## 正文\n\n新的。\n')
+    const result = await identity.writeSlot('principle', '# 原则\n\n## 正文\n\n新的。\n')
     assert.equal(existsSync(result.backup), true)
     assert.match(identity.read('principle'), /新的。/)
   } finally {
@@ -136,10 +136,10 @@ test('迁移 dry-run 不写文件；apply 写 manifest 和槽位副本，旧文�
       memoryRoot,
       agentId: 'main',
       name: 'Demo Agent',
-      labels: { principle: '本心', preference: '所爱', prompt: '当口' },
+      labels: { principle: '本心', preference: '所爱', prompt: '提示' },
     })
     assert.equal(plan.files.length, 3)
-    assert.deepEqual(plan.manifest.identity.map(slot => slot.label), ['本心', '所爱', '当口'])
+    assert.deepEqual(plan.manifest.identity.map(slot => slot.label), ['本心', '所爱', '提示'])
     assert.equal(existsSync(join(memoryRoot, 'agents', 'main', 'agent.json')), false)
 
     const result = await applyIdentityMigration(plan)

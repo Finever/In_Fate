@@ -26,7 +26,7 @@ export type IdentitySlotName = 'principle' | 'preference' | 'prompt'
 export interface IdentitySlot {
   /** 稳定 id，例如 principle / preference / prompt；UI 不直接改 */
   readonly id: string
-  /** 显示名，例如 本心 / 所爱 / 当口 */
+  /** 显示名，例如 本心 / 所爱 / 提示 */
   readonly label: string
   /** identity 目录里的文件名 */
   readonly file: string
@@ -111,7 +111,7 @@ export function defaultIdentitySlots(
   return [
     {
       id: 'principle',
-      label: labels.principle ?? 'Principle',
+      label: labels.principle ?? '原则',
       file: 'principle.md',
       order: 100,
       role: 'identity',
@@ -120,7 +120,7 @@ export function defaultIdentitySlots(
     },
     {
       id: 'preference',
-      label: labels.preference ?? 'Preference',
+      label: labels.preference ?? '偏好',
       file: 'preference.md',
       order: 90,
       role: 'user',
@@ -129,7 +129,7 @@ export function defaultIdentitySlots(
     },
     {
       id: 'prompt',
-      label: labels.prompt ?? 'Prompt',
+      label: labels.prompt ?? '提示',
       file: 'prompt.md',
       order: 80,
       role: 'fact',
@@ -164,7 +164,7 @@ const PROMPT_DEFAULT = [
   '- 我运行在 In_Fate：一个本地桌面应用，Electron 外壳 + React 界面；对话与会话数据留在本机。',
   '- 会话以 JSONL 事件流保存；一轮从用户消息开始，到本轮完成结束。界面看到的是事件投影，不直接改写历史。',
   '- 可用工具分两类：read / recall / fetch / websearch 默认只读；write / edit / bash 需要显式开启，危险工具会走审批。',
-  '- 主 agent 的身份由 agents/<agent-id>/agent.json 和 identity/ 下的三份 PPP 文件定义。会话带 agentId，切 agent 就是切身份。',
+  '- 主 agent 的身份由 agents/<agent-id>/agent.json 和 identity/ 下的三份 人格文件 文件定义。会话带 agentId，切 agent 就是切身份。',
   '',
   '## 记忆系统',
   '',
@@ -172,13 +172,13 @@ const PROMPT_DEFAULT = [
   '- detail/<域>/<文件>.json 是分条记忆；每条有 id、rec-time、rev-time、at、tag 和 content，原话放 quotes。',
   '- tag 分三档：确信、可信、有疑。拿不准就往下调一档。',
   '- log/<年>/<月>/<日>/ 是原始流水，append-only，不改；引用原话必须带 log-addr。',
-  '- agents/<agent-id>/identity/ 是本 agent 的 principle / preference / prompt。别的 agent 的 PPP 不混用。',
+  '- agents/<agent-id>/identity/ 是本 agent 的 principle / preference / prompt。别的 agent 的 人格文件 不混用。',
   '- 先用 memory_search / memory_read 查；memory_add / memory_update 需要写权限；没有写权限就用 memory_propose，等用户接受。',
   '- 不要编原话，不要编 log-addr；没查到就说没查到，并说明搜索条件。',
   '- 写入后按当前环境做校验和提交；没有相应工具就明确说没做，不假装已经落盘。',
 ].join('\n')
 
-/** 人类新建主 agent 时的 PPP 初始文件：保留写作提示，不锁分类；Prompt 带默认环境说明。 */
+/** 人类新建主 agent 时的人格文件初始文件：保留写作提示，不锁分类；提示槽位带默认环境说明。 */
 export function defaultIdentityText(slot: Pick<IdentitySlot, 'id' | 'label'>): string {
   const hint = IDENTITY_HINTS[slot.id]
     ?? '这个槽位里写需要长期保留的内容。'
@@ -279,7 +279,7 @@ export class AgentManifestStore {
     return manifest
   }
 
-  /** 人类新建主 agent：manifest + 三个空白 PPP 文件。 */
+  /** 人类新建主 agent：manifest + 三个空白 人格文件 文件。 */
   async createDefault(
     agentId: string,
     name = agentId,

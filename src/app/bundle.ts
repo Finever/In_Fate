@@ -277,14 +277,14 @@ export interface App {
   agentSummaries(): AgentSummary[]
   agentSummary(agentId: string): AgentSummary
   updateAgentSettings(agentId: string, input: AgentSettingsUpdate): Promise<AgentSummary>
-  /** 新建主 agent：manifest + 三份空白 PPP 文件。 */
+  /** 新建主 agent：manifest + 三份空白 人格文件 文件。 */
   createMainAgent(input: { id: string; name: string }): Promise<AgentManifest>
-  /** 读主 agent 的 PPP 槽位全文。 */
+  /** 读主 agent 的 人格文件 槽位全文。 */
   mainAgentIdentity(agentId: string): {
     manifest: AgentManifest
     slots: Array<IdentitySlot & { path: string; content: string }>
   }
-  /** 人类 UI 整文件保存 PPP 槽位；先备份再写。 */
+  /** 人类 UI 整文件保存 人格文件 槽位；先备份再写。 */
   writeMainAgentSlot(
     agentId: string,
     slotId: string,

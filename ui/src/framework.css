@@ -2436,10 +2436,10 @@ body.fw-resizing {
   color: var(--faint);
   font: 9px var(--mono);
 }
-.fw-status-ppp + .fw-status-ppp {
+.fw-persona-slot + .fw-persona-slot {
   margin-top: 5px;
 }
-.fw-status-ppp-head {
+.fw-persona-slot-head {
   width: 100%;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -2452,21 +2452,21 @@ body.fw-resizing {
   color: var(--muted);
   text-align: left;
 }
-.fw-status-ppp-head:hover {
+.fw-persona-slot-head:hover {
   border-color: var(--line-strong);
 }
-.fw-status-ppp-label {
+.fw-persona-slot-label {
   color: var(--text);
   font-size: 10.5px;
 }
-.fw-status-ppp-path {
+.fw-persona-slot-path {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--faint);
   font: 9px var(--mono);
 }
-.fw-status-ppp-preview {
+.fw-persona-slot-preview {
   grid-column: 1 / -1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2474,18 +2474,18 @@ body.fw-resizing {
   color: var(--faint);
   font-size: 9.5px;
 }
-.fw-status-ppp-head svg {
+.fw-persona-slot-head svg {
   grid-column: 3;
   grid-row: 1;
   transition: transform .15s ease;
 }
-.fw-status-ppp-head svg.is-open {
+.fw-persona-slot-head svg.is-open {
   transform: rotate(180deg);
 }
-.fw-status-ppp-body {
+.fw-persona-slot-body {
   margin-top: 5px;
 }
-.fw-status-ppp-body textarea {
+.fw-persona-slot-body textarea {
   width: 100%;
   min-height: 150px;
   max-height: 320px;
@@ -2498,10 +2498,10 @@ body.fw-resizing {
   color: var(--text);
   font: 10.5px/1.65 var(--mono);
 }
-.fw-status-ppp-body textarea:focus {
+.fw-persona-slot-body textarea:focus {
   border-color: rgba(143, 123, 255, .45);
 }
-.fw-status-ppp-actions {
+.fw-persona-slot-actions {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2766,9 +2766,9 @@ body.fw-resizing {
   flex-wrap: wrap;
 }
 
-/* ---------- PPP 分页 ---------- */
+/* ---------- 人格文件分页 ---------- */
 
-.fw-ppp-panel {
+.fw-persona-panel {
   width: 100%;
   min-height: 0;
   flex: 1;
@@ -2778,7 +2778,7 @@ body.fw-resizing {
   flex-direction: column;
   gap: 9px;
 }
-.fw-ppp-intro {
+.fw-persona-intro {
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -2789,17 +2789,17 @@ body.fw-resizing {
   color: var(--muted);
   font-size: 11px;
 }
-.fw-ppp-intro small {
+.fw-persona-intro small {
   color: var(--faint);
   font-size: 9.5px;
   line-height: 1.6;
 }
-.fw-ppp-notice {
+.fw-persona-notice {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.fw-ppp-dirty {
+.fw-persona-dirty {
   margin-left: 6px;
   padding: 1px 5px;
   border: 1px solid rgba(242, 180, 95, .28);
@@ -2808,13 +2808,13 @@ body.fw-resizing {
   font-size: 8.5px;
   font-style: normal;
 }
-.fw-ppp-description {
+.fw-persona-description {
   margin: 0 0 6px;
   color: var(--faint);
   font-size: 9.5px;
   line-height: 1.6;
 }
-.fw-ppp-meta {
+.fw-persona-meta {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -2822,7 +2822,7 @@ body.fw-resizing {
   color: var(--faint);
   font: 9px var(--mono);
 }
-.fw-ppp-confirm {
+.fw-persona-confirm {
   margin-top: 6px;
   padding: 7px 9px;
   border: 1px solid rgba(242, 180, 95, .26);
@@ -2832,12 +2832,12 @@ body.fw-resizing {
   font-size: 9.5px;
   line-height: 1.55;
 }
-.fw-ppp-actions-right {
+.fw-persona-actions-right {
   display: flex;
   align-items: center;
   gap: 6px;
 }
-.fw-ppp-cancel {
+.fw-persona-cancel {
   height: 28px;
   padding: 0 9px;
   font-size: 10px;
