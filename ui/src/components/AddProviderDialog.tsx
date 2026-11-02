@@ -3,27 +3,15 @@ import { api } from '../api'
 import type { ModelConfig, ModelProviderInput, ModelProviderTemplate } from '../types'
 
 const FORMATS = [
-  {
-    value: 'openai-chat-completions',
-    label: 'OpenAI 兼容 · Chat Completions',
-    supported: true,
-  },
-  {
-    value: 'openai-responses',
-    label: 'OpenAI Responses（未接入）',
-    supported: false,
-  },
-  {
-    value: 'anthropic-messages',
-    label: 'Anthropic Messages（未接入）',
-    supported: false,
-  },
-  {
-    value: 'google-generate-content',
-    label: 'Google Generate Content（未接入）',
-    supported: false,
-  },
+  { value: 'openai-chat-completions', label: 'OpenAI 兼容 · Chat Completions' },
+  { value: 'openai-responses', label: 'OpenAI Responses' },
+  { value: 'anthropic-messages', label: 'Anthropic Messages' },
+  { value: 'google-generate-content', label: 'Google Generate Content' },
 ] as const
+
+function formatLabel(family: string): string {
+  return FORMATS.find(format => format.value === family)?.label ?? family
+}
 
 function parseModels(text: string): ModelProviderInput['models'] {
   return text
@@ -89,11 +77,15 @@ export function AddProviderDialog({
   }, [busy, onClose])
 
   const models = parseModels(modelsText)
+  const selectedTemplate = templates.find(item => item.id === templateId)
+  const availableFormats = selectedTemplate
+    ? Object.keys(selectedTemplate.endpoints)
+    : FORMATS.map(format => format.value)
   const valid = Boolean(
     id.trim()
     && name.trim()
     && baseUrl.trim()
-    && providerFormat === 'openai-chat-completions'
+    && providerFormat
     && models.every(model => model.id),
   )
 
@@ -115,16 +107,29 @@ export function AddProviderDialog({
     setError(undefined)
   }
 
+  function changeFormat(format: string): void {
+    setProviderFormat(format)
+    const endpoint = selectedTemplate?.endpoints[format]
+    if (endpoint) setBaseUrl(endpoint.baseUrl)
+  }
+
   async function submit(): Promise<void> {
     if (!valid || busy) return
     setBusy(true)
     setError(undefined)
     try {
+      const endpoints = selectedTemplate
+        ? Object.fromEntries(Object.entries(selectedTemplate.endpoints).map(([family, endpoint]) => [
+          family,
+          { baseUrl: family === providerFormat ? baseUrl.trim() : endpoint.baseUrl },
+        ]))
+        : undefined
       const next = await api.addModelProvider({
         id: id.trim(),
         name: name.trim(),
         baseUrl: baseUrl.trim(),
         format: providerFormat,
+        ...(endpoints ? { endpoints } : {}),
         ...(description.trim() ? { description: description.trim() } : {}),
         ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
         ...(apiKeyEnv.trim() ? { apiKeyEnv: apiKeyEnv.trim() } : {}),
@@ -215,20 +220,20 @@ export function AddProviderDialog({
           <span>格式</span>
           <select
             value={providerFormat}
-            onChange={event => setProviderFormat(event.target.value)}
+            onChange={event => changeFormat(event.target.value)}
             disabled={busy}
           >
-            {FORMATS.map(format => (
-              <option
-                key={format.value}
-                value={format.value}
-                disabled={!format.supported}
-              >
-                {format.label}
+            {availableFormats.map(family => (
+              <option key={family} value={family}>
+                {formatLabel(family)}
               </option>
             ))}
           </select>
-          <small>当前运行时只实现了 OpenAI 兼容 Chat Completions；其它格式的适配器还没接。</small>
+          <small>
+            {selectedTemplate && Object.keys(selectedTemplate.endpoints).length > 1
+              ? `模板里的 ${Object.keys(selectedTemplate.endpoints).length} 种格式会一起加入；当前选择作为默认格式。`
+              : '四种格式都已接入：OpenAI Chat / Responses、Anthropic Messages、Google Generate Content。'}
+          </small>
         </label>
 
         <label className="fw-field">

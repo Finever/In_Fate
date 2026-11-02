@@ -8,11 +8,12 @@ import { ModelEditorDialog } from './ModelEditorDialog'
 
 interface ProviderDraft {
   baseUrl: string
+  format: string
   apiKey: string
 }
 
 function initialDraft(provider: ModelConfigProvider): ProviderDraft {
-  return { baseUrl: provider.baseUrl, apiKey: '' }
+  return { baseUrl: provider.baseUrl, format: provider.endpointFamily, apiKey: '' }
 }
 
 function providerMark(name: string): string {
@@ -68,6 +69,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [providerFilter, setProviderFilter] = useState<'enabled' | 'disabled' | 'all'>('enabled')
   const [showDisabledModels, setShowDisabledModels] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [keySaving, setKeySaving] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -140,6 +142,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const enabledModelCount = provider
     ? provider.models.filter(model => model.enabled !== false).length
     : 0
+  const enabledKeyCount = provider
+    ? provider.apiKeys.filter(entry => entry.isEnabled).length
+    : 0
   const editingProvider = editing
     ? config?.providers.find(item => item.id === editing.providerId)
     : undefined
@@ -182,9 +187,16 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       const updated = { ...current }
       for (const item of next.providers) {
         const existing = updated[item.id] ?? initialDraft(item)
-        updated[item.id] = savedProvider === item.id
-          ? { ...existing, baseUrl: item.baseUrl, apiKey: '' }
-          : existing
+        if (savedProvider === item.id) {
+          const format = item.endpoints.some(endpoint => endpoint.family === existing.format)
+            ? existing.format
+            : item.endpointFamily
+          const baseUrl = item.endpoints.find(endpoint => endpoint.family === format)?.baseUrl
+            ?? item.baseUrl
+          updated[item.id] = { ...existing, format, baseUrl, apiKey: '' }
+        } else {
+          updated[item.id] = existing
+        }
       }
       return updated
     })
@@ -198,8 +210,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     try {
       const next = await api.saveModelConfig({
         provider: provider.id,
-        ...(draft.apiKey.trim() ? { apiKey: draft.apiKey.trim() } : {}),
         ...(draft.baseUrl.trim() ? { baseUrl: draft.baseUrl.trim() } : {}),
+        ...(draft.format ? { format: draft.format } : {}),
       })
       applyConfig(next, provider.id)
       setNotice('服务配置已保存，下一轮生效')
@@ -207,6 +219,62 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
       setSaving(false)
+    }
+  }
+
+  function changeFormat(format: string): void {
+    const endpoint = provider?.endpoints.find(item => item.family === format)
+    updateDraft({ format, ...(endpoint ? { baseUrl: endpoint.baseUrl } : {}) })
+  }
+
+  async function addApiKey(): Promise<void> {
+    if (!provider || !draft || keySaving) return
+    const key = draft.apiKey.trim()
+    if (!key) return
+    setKeySaving(true)
+    setError(undefined)
+    setNotice(undefined)
+    try {
+      const next = await api.addModelApiKey(provider.id, key)
+      applyConfig(next, provider.id)
+      setNotice('API key 已添加；请求会按启用顺序轮换')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setKeySaving(false)
+    }
+  }
+
+  async function setApiKeyEnabled(keyId: string, isEnabled: boolean): Promise<void> {
+    if (!provider || keySaving) return
+    setKeySaving(true)
+    setError(undefined)
+    setNotice(undefined)
+    try {
+      const next = await api.setModelApiKeyEnabled(provider.id, keyId, isEnabled)
+      applyConfig(next)
+      setNotice(isEnabled ? 'API key 已启用' : 'API key 已停用')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setKeySaving(false)
+    }
+  }
+
+  async function removeApiKey(keyId: string): Promise<void> {
+    if (!provider || keySaving) return
+    if (!window.confirm('删除这个 API key？')) return
+    setKeySaving(true)
+    setError(undefined)
+    setNotice(undefined)
+    try {
+      const next = await api.removeModelApiKey(provider.id, keyId)
+      applyConfig(next)
+      setNotice('API key 已删除')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setKeySaving(false)
     }
   }
 
@@ -221,6 +289,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       const result = await api.probeModelProvider(provider.id, {
         ...(draft?.apiKey.trim() ? { apiKey: draft.apiKey.trim() } : {}),
         ...(draft?.baseUrl.trim() ? { baseUrl: draft.baseUrl.trim() } : {}),
+        ...(draft?.format ? { format: draft.format } : {}),
       })
       setDiscovered(result.models)
     } catch (reason) {
@@ -318,10 +387,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   }
 
   const keyPlaceholder = provider?.apiKeyEnv
-    ? `使用环境变量 ${provider.apiKeyEnv}，留空不改`
-    : provider?.hasApiKey
-      ? '已配置，留空不改'
-      : '输入 API key'
+    ? `输入新 key（也可用环境变量 ${provider.apiKeyEnv}）`
+    : '输入新的 API key，添加后不回显'
 
   return (
     <div
@@ -488,7 +555,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                         <div className="fw-settings-provider-head">
                           <h3>{provider.name}</h3>
                           <span className="fw-settings-provider-format">
-                            {formatLabel(provider.endpointFamily)}
+                            {formatLabel(draft.format)}
                           </span>
                           <span className="fw-model-head-spacer" />
                           <label className="fw-settings-enabled">
@@ -512,6 +579,25 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
 
                     <div className="fw-settings-fields">
                       <label className="fw-field">
+                        <span>端点格式</span>
+                        {provider.endpointFamilies.length > 1 ? (
+                          <select
+                            value={draft.format}
+                            onChange={event => changeFormat(event.target.value)}
+                            disabled={saving}
+                          >
+                            {provider.endpointFamilies.map(family => (
+                              <option key={family} value={family}>
+                                {formatLabel(family)}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input value={formatLabel(draft.format)} readOnly disabled />
+                        )}
+                      </label>
+
+                      <label className="fw-field">
                         <span>Base URL</span>
                         <input
                           value={draft.baseUrl}
@@ -521,9 +607,56 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                           disabled={saving}
                         />
                       </label>
+                    </div>
 
-                      <label className="fw-field">
-                        <span>API key</span>
+                    <section className="fw-settings-keys">
+                      <div className="fw-settings-keys-head">
+                        <span>API keys</span>
+                        <small>
+                          {provider.apiKeys.length} 个 · 启用 {enabledKeyCount}
+                        </small>
+                        <span className="fw-model-head-spacer" />
+                        {provider.apiKeyEnv && (
+                          <small className="fw-settings-keys-env">
+                            环境变量 {provider.apiKeyEnv}
+                          </small>
+                        )}
+                      </div>
+
+                      {provider.apiKeys.length === 0 ? (
+                        <div className="fw-settings-keys-empty">
+                          还没有添加 key。
+                          {provider.hasApiKey ? ' 已有旧配置或环境变量里的 key，会与列表里的密钥一起轮换。' : ''}
+                        </div>
+                      ) : (
+                        <div className="fw-settings-key-list">
+                          {provider.apiKeys.map(entry => (
+                            <div className="fw-settings-key" key={entry.id}>
+                              <span className="fw-settings-key-preview">{entry.preview}</span>
+                              <label className="fw-settings-key-enabled">
+                                <input
+                                  type="checkbox"
+                                  checked={entry.isEnabled}
+                                  onChange={event =>
+                                    void setApiKeyEnabled(entry.id, event.target.checked)}
+                                  disabled={keySaving}
+                                />
+                                启用
+                              </label>
+                              <button
+                                type="button"
+                                className="fw-settings-key-remove"
+                                onClick={() => void removeApiKey(entry.id)}
+                                disabled={keySaving}
+                              >
+                                删除
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="fw-settings-key-add">
                         <input
                           type="password"
                           value={draft.apiKey}
@@ -531,10 +664,23 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                           placeholder={keyPlaceholder}
                           autoComplete="off"
                           spellCheck={false}
-                          disabled={saving}
+                          disabled={saving || keySaving}
+                          onKeyDown={event => {
+                            if (event.key === 'Enter') {
+                              event.preventDefault()
+                              void addApiKey()
+                            }
+                          }}
                         />
-                      </label>
-                    </div>
+                        <button
+                          type="button"
+                          onClick={() => void addApiKey()}
+                          disabled={!draft.apiKey.trim() || saving || keySaving}
+                        >
+                          {keySaving ? '添加中…' : '添加 key'}
+                        </button>
+                      </div>
+                    </section>
 
                     <section className="fw-settings-models">
                       <div className="fw-settings-models-head">

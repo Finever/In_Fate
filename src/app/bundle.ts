@@ -64,10 +64,12 @@ import {
 import { createMemoryTools } from '../memory/tools.ts'
 import { readFileSync, renameSync, writeFileSync } from 'node:fs'
 import type { ModelRegistry, ResolvedModel } from '../model/registry.ts'
-import type { ModelCard, ModelPricing, ProviderConfig } from '../model/types.ts'
+import type { ApiKeyConfig, ModelCard, ModelPricing, ProviderConfig } from '../model/types.ts'
 import { BUILTIN_PROVIDERS } from '../model/builtin.ts'
+import { apiUrl } from '../model/urls.ts'
 import { validatePricing } from '../model/pricing.ts'
 import { ModelRegistry as Registry } from '../model/registry.ts'
+import { normalizeEndpointFamily } from '../model/chat-model.ts'
 import { ModelGate, type ModelPriority } from '../model/gate.ts'
 import { resolveRetryPolicy } from '../model/retry.ts'
 import {
@@ -279,11 +281,17 @@ export interface App {
   modelConfig(): ModelConfigView
   /** 更新 provider 的端点或 API key；有 configPath 时写回配置文件。 */
   saveModelConfig(input: ModelConfigUpdate): Promise<ModelConfigView>
-  /** 添加一个新的 OpenAI 兼容服务商；有 configPath 时写回配置文件。 */
+  /** 添加一个新的模型服务商；有 configPath 时写回配置文件。 */
   addModelProvider(input: ModelProviderInput): Promise<ModelConfigView>
   /** 添加时的内置模板（不会自动注册成 provider）。 */
   modelProviderTemplates(): readonly ProviderConfig[]
-  /** 用 provider 的 key / baseUrl 调 GET /models，返回模型 id。 */
+  /** 追加一个 API key；密钥只进配置，不出现在视图里。 */
+  addModelApiKey(input: ModelApiKeyInput): Promise<ModelConfigView>
+  /** 删除一个 API key。 */
+  removeModelApiKey(input: ModelApiKeyRemoveInput): Promise<ModelConfigView>
+  /** 启用/停用单个 API key。 */
+  setModelApiKeyEnabled(input: ModelApiKeyToggleInput): Promise<ModelConfigView>
+  /** 用 provider 的 key / baseUrl 调模型列表接口，返回模型 id。 */
   probeModelProvider(input: ModelProbeInput): Promise<{ models: readonly string[] }>
   /** 给已有 provider 追加模型；重复 id 跳过。 */
   addProviderModels(input: ModelProviderModelsInput): Promise<ModelConfigView>
@@ -353,10 +361,20 @@ export interface App {
   dispose(): Promise<void>
 }
 
+export interface ModelApiKeyView {
+  readonly id: string
+  /** 脱敏后的展示串；不是完整密钥 */
+  readonly preview: string
+  readonly isEnabled: boolean
+}
+
 export interface ModelConfigProviderView {
   readonly id: string
   readonly name: string
   readonly endpointFamily: string
+  /** 所有已配置的端点格式；决定详情页能切哪些格式 */
+  readonly endpointFamilies: readonly string[]
+  readonly endpoints: ReadonlyArray<{ readonly family: string; readonly baseUrl: string }>
   readonly baseUrl: string
   readonly models: Array<{
     readonly id: string
@@ -366,6 +384,7 @@ export interface ModelConfigProviderView {
     readonly pricing?: ModelPricing
     readonly enabled: boolean
   }>
+  readonly apiKeys: readonly ModelApiKeyView[]
   readonly hasApiKey: boolean
   readonly apiKeyEnv?: string
   readonly enabled: boolean
@@ -383,7 +402,26 @@ export interface ModelConfigUpdate {
   /** 空字符串表示不改；不传也保持原值。 */
   readonly apiKey?: string
   readonly baseUrl?: string
+  /** 要改哪个端点格式；不传改默认端点。 */
+  readonly format?: string
   readonly enabled?: boolean
+}
+
+export interface ModelApiKeyInput {
+  readonly provider: string
+  readonly key: string
+  readonly isEnabled?: boolean
+}
+
+export interface ModelApiKeyRemoveInput {
+  readonly provider: string
+  readonly keyId: string
+}
+
+export interface ModelApiKeyToggleInput {
+  readonly provider: string
+  readonly keyId: string
+  readonly isEnabled: boolean
 }
 
 export interface ModelCardUpdate {
@@ -406,11 +444,14 @@ export interface ModelProviderInput {
   readonly id: string
   readonly name: string
   readonly description?: string
+  /** 默认端点的 baseUrl；也在 endpoints 里时以这里为准 */
   readonly baseUrl: string
   readonly apiKey?: string
   readonly apiKeyEnv?: string
-  /** 端点/格式；当前只实现 openai-chat-completions。 */
+  /** 默认端点格式：openai-chat-completions / openai-responses / anthropic-messages / google-generate-content */
   readonly format?: string
+  /** 一次加入多个端点格式；不传就只建 format 一个 */
+  readonly endpoints?: Readonly<Record<string, { readonly baseUrl: string }>>
   readonly models: readonly ModelProviderModelInput[]
 }
 
@@ -425,6 +466,8 @@ export interface ModelProbeInput {
   readonly apiKey?: string
   /** 未保存的草稿 baseUrl；不传就用已保存的。 */
   readonly baseUrl?: string
+  /** 要探测的端点格式；不传用默认端点。 */
+  readonly format?: string
 }
 
 export interface AgentPresetSummary {
@@ -494,10 +537,17 @@ interface RawModelEntry {
   enabled?: boolean
 }
 
+interface RawApiKeyEntry {
+  id?: string
+  key?: string
+  isEnabled?: boolean
+}
+
 interface RawProviderEntry {
   id?: string
   name?: string
   description?: string
+  apiKeys?: RawApiKeyEntry[]
   apiKey?: string
   apiKeyEnv?: string
   enabled?: boolean
@@ -729,7 +779,10 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   for (const provider of config.providers) models.register(provider)
   container.register('models', models)
 
-  const providerOverrides = new Map<string, { apiKey?: string; baseUrl?: string }>()
+  const providerOverrides = new Map<string, {
+    apiKey?: string
+    baseUrls?: Record<string, string>
+  }>()
   const modelOverrides = new Map<string, {
     contextWindow?: number | null
     maxOutputTokens?: number | null
@@ -764,14 +817,15 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   const resolveModelWithOverrides = (providerId: string, modelId: string): ResolvedModel => {
     const resolved = models.resolve(providerId, modelId)
     const override = providerOverrides.get(providerId)
+    const baseUrl = override?.baseUrls?.[resolved.family ?? '']
     return {
       ...resolved,
       model: applyModelOverrides(resolved.model, providerId),
       provider: override?.apiKey
         ? { ...resolved.provider, apiKey: override.apiKey }
         : resolved.provider,
-      endpoint: override?.baseUrl
-        ? { ...resolved.endpoint, baseUrl: override.baseUrl }
+      endpoint: baseUrl
+        ? { ...resolved.endpoint, baseUrl }
         : resolved.endpoint,
     }
   }
@@ -794,6 +848,15 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     id: provider.id,
     name: provider.name,
     ...(provider.description ? { description: provider.description } : {}),
+    ...(provider.apiKeys?.length
+      ? {
+        apiKeys: provider.apiKeys.map(entry => ({
+          id: entry.id,
+          key: entry.key,
+          ...(entry.isEnabled !== undefined ? { isEnabled: entry.isEnabled } : {}),
+        })),
+      }
+      : {}),
     ...((apiKey ?? provider.apiKey) ? { apiKey: apiKey ?? provider.apiKey } : {}),
     ...(provider.apiKeyEnv ? { apiKeyEnv: provider.apiKeyEnv } : {}),
     ...(provider.enabled !== undefined ? { enabled: provider.enabled } : {}),
@@ -838,18 +901,43 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     return entry
   }
 
+  const previewApiKey = (key: string): string => {
+    const trimmed = key.trim()
+    if (trimmed.length <= 8) return '••••'
+    return `${trimmed.slice(0, 4)}…${trimmed.slice(-4)}`
+  }
+
   const modelConfigView = (): ModelConfigView => ({
     timeZone: config.profile.timeZone,
     providers: models.list().map((provider: ProviderConfig) => {
       const override = providerOverrides.get(provider.id)
+      const endpointFamilies = Object.keys(provider.endpoints)
       const endpointFamily = provider.defaultChatEndpoint
-        ?? Object.keys(provider.endpoints)[0]
+        ?? endpointFamilies[0]
         ?? ''
+      const apiKeys = (provider.apiKeys ?? [])
+        .filter(entry => entry.key.trim().length > 0)
+        .map(entry => ({
+          id: entry.id,
+          preview: previewApiKey(entry.key),
+          isEnabled: entry.isEnabled !== false,
+        }))
+      const legacyKey = override?.apiKey ?? provider.apiKey
+      const envKey = provider.apiKeyEnv ? process.env[provider.apiKeyEnv] : undefined
       return {
         id: provider.id,
         name: provider.name,
         endpointFamily,
-        baseUrl: override?.baseUrl ?? provider.endpoints[endpointFamily]?.baseUrl ?? '',
+        endpointFamilies,
+        endpoints: endpointFamilies.map(family => ({
+          family,
+          baseUrl: override?.baseUrls?.[family]
+            ?? provider.endpoints[family]?.baseUrl
+            ?? '',
+        })),
+        baseUrl: override?.baseUrls?.[endpointFamily]
+          ?? provider.endpoints[endpointFamily]?.baseUrl
+          ?? '',
         models: provider.models.map(model => {
           const merged = applyModelOverrides(model, provider.id)
           return {
@@ -865,11 +953,9 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
             enabled: merged.enabled !== false,
           }
         }),
-        hasApiKey: Boolean(
-          override?.apiKey
-          || provider.apiKey
-          || (provider.apiKeyEnv && process.env[provider.apiKeyEnv]),
-        ),
+        apiKeys,
+        hasApiKey: apiKeys.some(entry => entry.isEnabled)
+          || Boolean(legacyKey || envKey),
         ...(provider.apiKeyEnv ? { apiKeyEnv: provider.apiKeyEnv } : {}),
         enabled: provider.enabled !== false,
         removable: true,
@@ -879,30 +965,41 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
 
   const saveModelConfig = async (input: ModelConfigUpdate): Promise<ModelConfigView> => {
     const provider = models.get(input.provider)
+    const requestedFormat = input.format?.trim()
+    const family = requestedFormat
+      || provider.defaultChatEndpoint
+      || Object.keys(provider.endpoints)[0]
+      || ''
+    if (!family) throw new Error(`config provider has no endpoint: ${input.provider}`)
+    if (requestedFormat && !provider.endpoints[requestedFormat]) {
+      throw new Error(`provider ${input.provider} has no endpoint: ${requestedFormat}`)
+    }
+
     const current = providerOverrides.get(input.provider) ?? {}
-    const next = { ...current }
+    const next = {
+      ...current,
+      ...(current.baseUrls ? { baseUrls: { ...current.baseUrls } } : {}),
+    }
     if (input.apiKey !== undefined && input.apiKey.trim()) next.apiKey = input.apiKey.trim()
-    if (input.baseUrl !== undefined && input.baseUrl.trim()) next.baseUrl = input.baseUrl.trim()
+    if (input.baseUrl !== undefined && input.baseUrl.trim()) {
+      next.baseUrls = { ...(next.baseUrls ?? {}), [family]: input.baseUrl.trim() }
+    }
     providerOverrides.set(provider.id, next)
 
     await writeConfigFile(raw => {
       const rawProvider = ensureRawProvider(raw, provider)
       if (next.apiKey) rawProvider.apiKey = next.apiKey
       if (input.enabled !== undefined) rawProvider.enabled = input.enabled
-      if (next.baseUrl) {
-        const family = rawProvider.defaultChatEndpoint
-          ?? provider.defaultChatEndpoint
-          ?? Object.keys(provider.endpoints)[0]
-          ?? Object.keys(rawProvider.endpoints ?? {})[0]
-        if (!family) throw new Error(`config provider has no endpoint: ${input.provider}`)
+      const baseUrl = next.baseUrls?.[family]
+      if (baseUrl) {
         rawProvider.endpoints ??= {}
         const endpoint = rawProvider.endpoints[family]
           ?? (rawProvider.endpoints[family] = {})
         if (!endpoint.adapterFamily) {
           endpoint.adapterFamily = provider.endpoints[family]?.adapterFamily
-            ?? 'openai-chat-completions'
+            ?? family
         }
-        endpoint.baseUrl = next.baseUrl
+        endpoint.baseUrl = baseUrl
       }
     })
     providerOverrides.set(provider.id, next)
@@ -973,13 +1070,29 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     if (!name) throw new Error('provider name is required')
     const baseUrl = input.baseUrl.trim()
     if (!baseUrl) throw new Error('baseUrl is required')
-    const format = input.format?.trim() || 'openai-chat-completions'
-    if (format !== 'openai-chat-completions') {
-      throw new Error(`暂不支持这个端点格式：${format}`)
+    let format = input.format?.trim() || 'openai-chat-completions'
+    try {
+      format = normalizeEndpointFamily(format)
+    } catch {
+      throw new Error(`不支持的端点格式：${format}`)
     }
     if (models.list().some(provider => provider.id === id)) {
       throw new Error(`provider already exists: ${id}`)
     }
+
+    const endpoints: Record<string, { adapterFamily: string; baseUrl: string }> = {}
+    for (const [key, value] of Object.entries(input.endpoints ?? {})) {
+      if (typeof value?.baseUrl !== 'string' || !value.baseUrl.trim()) continue
+      let family = key
+      try {
+        family = normalizeEndpointFamily(key)
+      } catch {
+        throw new Error(`不支持的端点格式：${key}`)
+      }
+      endpoints[family] = { adapterFamily: family, baseUrl: value.baseUrl.trim() }
+    }
+    // 默认格式的 baseUrl 以表单里那一栏为准。
+    endpoints[format] = { adapterFamily: format, baseUrl }
 
     const seen = new Set<string>()
     const modelCards: ModelCard[] = (input.models ?? []).map(model => {
@@ -1012,12 +1125,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       ...(input.apiKey?.trim() ? { apiKey: input.apiKey.trim() } : {}),
       ...(input.apiKeyEnv?.trim() ? { apiKeyEnv: input.apiKeyEnv.trim() } : {}),
       defaultChatEndpoint: format as ProviderConfig['defaultChatEndpoint'],
-      endpoints: {
-        [format]: {
-          adapterFamily: format,
-          baseUrl,
-        },
-      },
+      endpoints,
       models: modelCards,
     }
 
@@ -1031,8 +1139,71 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     models.register(provider)
     providerOverrides.set(id, {
       ...(provider.apiKey ? { apiKey: provider.apiKey } : {}),
-      baseUrl,
+      baseUrls: Object.fromEntries(
+        Object.entries(endpoints).map(([family, endpoint]) => [family, endpoint.baseUrl]),
+      ),
     })
+    return modelConfigView()
+  }
+
+  const persistApiKeys = async (
+    provider: ProviderConfig,
+    keys: readonly ApiKeyConfig[],
+  ): Promise<void> => {
+    await writeConfigFile(raw => {
+      const rawProvider = ensureRawProvider(raw, provider)
+      if (keys.length === 0) {
+        delete rawProvider.apiKeys
+        return
+      }
+      rawProvider.apiKeys = keys.map(entry => ({
+        id: entry.id,
+        key: entry.key,
+        ...(entry.isEnabled !== undefined ? { isEnabled: entry.isEnabled } : {}),
+      }))
+    })
+    models.setApiKeys(provider.id, keys.length > 0 ? keys : undefined)
+  }
+
+  const addModelApiKey = async (input: ModelApiKeyInput): Promise<ModelConfigView> => {
+    const provider = models.get(input.provider)
+    const key = input.key.trim()
+    if (!key) throw new Error('API key is required')
+    const keys = [...(provider.apiKeys ?? [])]
+    if (keys.some(entry => entry.key === key)) {
+      throw new Error('这个密钥已经存在')
+    }
+    keys.push({
+      id: `key-${randomUUID().slice(0, 8)}`,
+      key,
+      isEnabled: input.isEnabled ?? true,
+    })
+    await persistApiKeys(provider, keys)
+    return modelConfigView()
+  }
+
+  const removeModelApiKey = async (input: ModelApiKeyRemoveInput): Promise<ModelConfigView> => {
+    const provider = models.get(input.provider)
+    const keys = (provider.apiKeys ?? []).filter(entry => entry.id !== input.keyId)
+    if (keys.length === (provider.apiKeys ?? []).length) {
+      throw new Error(`unknown api key: ${input.keyId}`)
+    }
+    await persistApiKeys(provider, keys)
+    return modelConfigView()
+  }
+
+  const setModelApiKeyEnabled = async (
+    input: ModelApiKeyToggleInput,
+  ): Promise<ModelConfigView> => {
+    const provider = models.get(input.provider)
+    let found = false
+    const keys = (provider.apiKeys ?? []).map(entry => {
+      if (entry.id !== input.keyId) return entry
+      found = true
+      return { ...entry, isEnabled: input.isEnabled }
+    })
+    if (!found) throw new Error(`unknown api key: ${input.keyId}`)
+    await persistApiKeys(provider, keys)
     return modelConfigView()
   }
 
@@ -1109,25 +1280,39 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   ): Promise<{ models: readonly string[] }> => {
     const provider = models.get(input.provider)
     const override = providerOverrides.get(provider.id)
-    const family = provider.defaultChatEndpoint ?? Object.keys(provider.endpoints)[0]
+    const requestedFormat = input.format?.trim()
+    const family = requestedFormat
+      || provider.defaultChatEndpoint
+      || Object.keys(provider.endpoints)[0]
+    if (requestedFormat && !provider.endpoints[requestedFormat]) {
+      throw new Error(`provider ${provider.id} has no endpoint: ${requestedFormat}`)
+    }
     const baseUrl = input.baseUrl?.trim()
-      || override?.baseUrl
+      || (family ? override?.baseUrls?.[family] : undefined)
       || (family ? provider.endpoints[family]?.baseUrl : '')
     if (!baseUrl) throw new Error(`provider ${provider.id} has no baseUrl`)
     const apiKey = input.apiKey?.trim()
-      || override?.apiKey
-      || provider.apiKey
-      || (provider.apiKeyEnv ? process.env[provider.apiKeyEnv] : undefined)
+      || models.resolveApiKeys(provider)[0]
 
-    const url = `${baseUrl.replace(/\/+$/, '')}/models`
+    const endpointFormat = normalizeEndpointFamily(family)
+    const url = apiUrl(baseUrl, '/models', endpointFormat === 'google-generate-content' ? 'v1beta' : 'v1')
+    const headers: Record<string, string> = {
+      accept: 'application/json',
+      ...(endpointFormat === 'anthropic-messages'
+        ? {
+          'anthropic-version': '2023-06-01',
+          ...(apiKey ? { 'x-api-key': apiKey } : {}),
+        }
+        : endpointFormat === 'google-generate-content'
+          ? (apiKey ? { 'x-goog-api-key': apiKey } : {})
+          : (apiKey ? { authorization: `Bearer ${apiKey}` } : {})),
+    }
+
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 10_000)
     try {
       const response = await fetch(url, {
-        headers: {
-          accept: 'application/json',
-          ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
-        },
+        headers,
         signal: controller.signal,
       })
       const text = await response.text()
@@ -1145,14 +1330,18 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         : (typeof body === 'object' && body !== null
           && Array.isArray((body as { data?: unknown }).data))
           ? (body as { data: unknown[] }).data
-          : []
+          : (typeof body === 'object' && body !== null
+            && Array.isArray((body as { models?: unknown }).models))
+            ? (body as { models: unknown[] }).models
+            : []
       const ids = rows.map(row => {
         if (typeof row === 'string') return row
-        if (typeof row === 'object' && row !== null
-          && typeof (row as { id?: unknown }).id === 'string') {
-          return (row as { id: string }).id
-        }
-        return ''
+        if (typeof row !== 'object' || row === null) return ''
+        const record = row as { id?: unknown; name?: unknown }
+        const value = typeof record.id === 'string'
+          ? record.id
+          : (typeof record.name === 'string' ? record.name : '')
+        return value.replace(/^models\//, '')
       }).filter(id => id.length > 0)
       const unique = [...new Set(ids)].sort()
       if (unique.length === 0) throw new Error('返回里没有模型 id')
@@ -2367,6 +2556,9 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     modelProviderTemplates() {
       return BUILTIN_PROVIDERS
     },
+    addModelApiKey,
+    removeModelApiKey,
+    setModelApiKeyEnabled,
     addProviderModels,
     removeModelProvider,
     probeModelProvider,

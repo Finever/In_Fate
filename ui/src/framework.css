@@ -1635,6 +1635,109 @@ body.fw-resizing {
 .fw-settings-fields .fw-field:last-child {
   margin-bottom: 0;
 }
+.fw-settings-keys {
+  margin-top: 14px;
+}
+.fw-settings-keys-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 8px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+.fw-settings-keys-head small {
+  color: var(--faint);
+  font-size: 10px;
+  font-weight: 400;
+}
+.fw-settings-keys-env {
+  margin-left: auto;
+  font-family: var(--mono, monospace);
+}
+.fw-settings-keys-empty {
+  padding: 6px 0 9px;
+  color: var(--faint);
+  font-size: 11px;
+  line-height: 1.55;
+}
+.fw-settings-key-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 7px;
+}
+.fw-settings-key {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .015);
+}
+.fw-settings-key-preview {
+  min-width: 0;
+  flex: 1;
+  color: var(--text);
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+}
+.fw-settings-key-enabled {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.fw-settings-key-remove {
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--faint);
+  font-size: 10px;
+}
+.fw-settings-key-remove:hover {
+  border-color: rgba(255, 120, 120, .45);
+  color: #ff9a9a;
+}
+.fw-settings-key-add {
+  display: flex;
+  gap: 7px;
+}
+.fw-settings-key-add input {
+  min-width: 0;
+  flex: 1;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg-deep, rgba(0, 0, 0, .18));
+  color: var(--text);
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+  outline: none;
+}
+.fw-settings-key-add input:focus {
+  border-color: var(--accent);
+}
+.fw-settings-key-add button {
+  padding: 6px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.fw-settings-key-add button:disabled {
+  opacity: .45;
+  cursor: default;
+}
 .fw-settings-models {
   margin-top: 18px;
 }

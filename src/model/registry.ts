@@ -13,6 +13,8 @@ export interface ResolvedModel {
   readonly model: ModelCard
   readonly endpoint: EndpointConfig
   readonly apiModelId: string
+  /** 解析时选的端点格式；适配器按它分发 */
+  readonly family?: string
 }
 
 export class ModelRegistry {
@@ -55,6 +57,16 @@ export class ModelRegistry {
     })
   }
 
+  setApiKeys(id: string, apiKeys: ProviderConfig['apiKeys']): void {
+    const provider = this.get(id)
+    if (apiKeys?.length) {
+      this.providers.set(id, { ...provider, apiKeys })
+      return
+    }
+    const { apiKeys: _removed, ...rest } = provider
+    this.providers.set(id, rest)
+  }
+
   /** 给已有 provider 追加模型；重复 id 跳过。 */
   addModels(id: string, models: readonly ModelCard[]): void {
     const provider = this.get(id)
@@ -79,13 +91,33 @@ export class ModelRegistry {
     const endpoint = provider.endpoints[family]
     if (!endpoint) throw new Error(`provider ${providerId} has no endpoint: ${family}`)
 
-    return { provider, model, endpoint, apiModelId: model.apiModelId ?? model.id }
+    return {
+      provider,
+      model,
+      endpoint,
+      apiModelId: model.apiModelId ?? model.id,
+      family,
+    }
+  }
+
+  /** 启用中的多密钥 → 旧单密钥 → 环境变量；去重、去空。 */
+  resolveApiKeys(provider: ProviderConfig): string[] {
+    const keys: string[] = []
+    for (const entry of provider.apiKeys ?? []) {
+      if (entry.isEnabled === false) continue
+      if (typeof entry.key !== 'string' || entry.key.trim().length === 0) continue
+      keys.push(entry.key.trim())
+    }
+    if (typeof provider.apiKey === 'string' && provider.apiKey.trim()) {
+      keys.push(provider.apiKey.trim())
+    }
+    const env = provider.apiKeyEnv ? process.env[provider.apiKeyEnv]?.trim() : undefined
+    if (env) keys.push(env)
+    return [...new Set(keys)]
   }
 
   resolveApiKey(provider: ProviderConfig): string | undefined {
-    if (provider.apiKey) return provider.apiKey
-    if (provider.apiKeyEnv) return process.env[provider.apiKeyEnv]
-    return undefined
+    return this.resolveApiKeys(provider)[0]
   }
 
   load(path: string): readonly ProviderConfig[] {
@@ -120,6 +152,10 @@ export function resolveModel(providerId: string, modelId: string, apiFamily?: st
 
 export function resolveApiKey(provider: ProviderConfig): string | undefined {
   return defaultRegistry.resolveApiKey(provider)
+}
+
+export function resolveApiKeys(provider: ProviderConfig): string[] {
+  return defaultRegistry.resolveApiKeys(provider)
 }
 
 export function loadRegistry(path: string): readonly ProviderConfig[] {

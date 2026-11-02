@@ -7,7 +7,7 @@
 
 import { createServer } from 'node:http'
 import type { HistoryMessage } from '../projections/history.ts'
-import { chatOpenAI } from './openai.ts'
+import { chatModel } from './chat-model.ts'
 import { registerProvider, resolveModel } from './registry.ts'
 
 const sse = [
@@ -63,7 +63,7 @@ const messages: HistoryMessage[] = [
 ]
 
 const events: unknown[] = []
-for await (const event of chatOpenAI({
+for await (const event of chatModel({
   resolved,
   system: '你是示例助手。',
   messages,

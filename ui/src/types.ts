@@ -200,10 +200,18 @@ export interface ModelPricing {
   }
 }
 
+export interface ModelApiKeyView {
+  id: string
+  preview: string
+  isEnabled: boolean
+}
+
 export interface ModelConfigProvider {
   id: string
   name: string
   endpointFamily: string
+  endpointFamilies: string[]
+  endpoints: Array<{ family: string; baseUrl: string }>
   baseUrl: string
   models: Array<{
     id: string
@@ -213,6 +221,7 @@ export interface ModelConfigProvider {
     pricing?: ModelPricing
     enabled: boolean
   }>
+  apiKeys: ModelApiKeyView[]
   hasApiKey: boolean
   apiKeyEnv?: string
   enabled: boolean
@@ -228,6 +237,7 @@ export interface SaveModelConfigInput {
   provider: string
   apiKey?: string
   baseUrl?: string
+  format?: string
   enabled?: boolean
 }
 
@@ -255,6 +265,7 @@ export interface ModelProviderInput {
   apiKey?: string
   apiKeyEnv?: string
   format?: string
+  endpoints?: Record<string, { baseUrl: string }>
   models: ModelProviderModelInput[]
 }
 

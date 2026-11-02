@@ -2,7 +2,7 @@
  * 模型来源与模型卡：来源是配置，不是代码。
  *
  * 一个来源可以有多个端点（同厂商不同协议），模型卡声明能力与预算。
- * 密钥只走环境变量或运行时注入，不写进配置文件。
+ * 密钥可以来自配置里的多密钥列表或环境变量；UI 视图只回传脱敏预览。
  *
  * @module if/model/types
  */
@@ -67,6 +67,13 @@ export interface ModelCard {
   readonly enabled?: boolean
 }
 
+export interface ApiKeyConfig {
+  readonly id: string
+  readonly key: string
+  /** false = 停用；不填按启用算 */
+  readonly isEnabled?: boolean
+}
+
 export interface ProviderConfig {
   readonly id: string
   readonly name: string
@@ -74,7 +81,9 @@ export interface ProviderConfig {
   readonly defaultChatEndpoint?: ApiFamily
   readonly endpoints: Readonly<Record<string, EndpointConfig>>
   readonly models: readonly ModelCard[]
-  /** 直接给密钥（仅内存配置用） */
+  /** 多密钥；启用中的按顺序轮换 */
+  readonly apiKeys?: readonly ApiKeyConfig[]
+  /** 旧版单密钥字段，仍兼容 */
   readonly apiKey?: string
   /** 从环境变量读密钥 */
   readonly apiKeyEnv?: string

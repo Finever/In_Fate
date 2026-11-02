@@ -17,7 +17,7 @@ import type { SessionWriter } from '../core/session-writer.ts'
 import type { EventStore } from '../core/store.ts'
 import type { WorkspaceLeaseManager } from '../core/workspace-lease.ts'
 import { agentStream } from '../core/streams.ts'
-import { chatOpenAI } from '../model/openai.ts'
+import { chatModel } from '../model/chat-model.ts'
 import type { ModelGate } from '../model/gate.ts'
 import { resolveModel, type ModelRegistry, type ResolvedModel } from '../model/registry.ts'
 import type { ModelRetryPolicy } from '../model/retry.ts'
@@ -71,7 +71,7 @@ interface Collected {
 async function collectModel(
   model: ResolvedModel,
   system: string,
-  messages: Parameters<typeof chatOpenAI>[0]['messages'],
+  messages: Parameters<typeof chatModel>[0]['messages'],
   tools: readonly ToolSpec[],
   signal: AbortSignal,
   retry?: ModelRetryPolicy,
@@ -84,7 +84,7 @@ async function collectModel(
   const calls: { id: string; name: string; arguments: string }[] = []
   const usage: AgentUsage = { input: 0, output: 0, cacheRead: 0 }
 
-  for await (const event of chatOpenAI({
+  for await (const event of chatModel({
     resolved: model,
     system,
     messages,

@@ -263,6 +263,9 @@ async function handle(
         provider,
         ...(typeof body.apiKey === 'string' ? { apiKey: body.apiKey } : {}),
         ...(typeof body.baseUrl === 'string' ? { baseUrl: body.baseUrl } : {}),
+        ...(typeof body.format === 'string' && body.format.trim()
+          ? { format: body.format.trim() }
+          : {}),
         ...(typeof body.enabled === 'boolean' ? { enabled: body.enabled } : {}),
       })
       json(res, 200, { config })
@@ -282,6 +285,26 @@ async function handle(
       json(res, 400, { error: 'id, name and baseUrl are required' })
       return
     }
+    const endpointsInput: Record<string, { baseUrl: string }> = {}
+    if (body.endpoints !== undefined && body.endpoints !== null) {
+      if (typeof body.endpoints !== 'object' || Array.isArray(body.endpoints)) {
+        json(res, 400, { error: 'endpoints must be an object' })
+        return
+      }
+      for (const [family, value] of Object.entries(body.endpoints as Record<string, unknown>)) {
+        if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+          json(res, 400, { error: `endpoint ${family} must be an object` })
+          return
+        }
+        const endpointBase = (value as { baseUrl?: unknown }).baseUrl
+        if (typeof endpointBase !== 'string' || !endpointBase.trim()) {
+          json(res, 400, { error: `endpoint ${family} needs baseUrl` })
+          return
+        }
+        endpointsInput[family] = { baseUrl: endpointBase.trim() }
+      }
+    }
+
     const rawModels = Array.isArray(body.models) ? body.models : []
     const modelsInput: Array<{
       id: string
@@ -338,7 +361,67 @@ async function handle(
         ...(typeof body.format === 'string' && body.format.trim()
           ? { format: body.format.trim() }
           : {}),
+        ...(Object.keys(endpointsInput).length > 0 ? { endpoints: endpointsInput } : {}),
         models: modelsInput,
+      })
+      json(res, 200, { config })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  if (req.method === 'POST' && parts[1] === 'model-config' && parts[2] === 'providers'
+    && parts[3] && parts[4] === 'api-keys' && parts.length === 5) {
+    const body = await readOptionalJson(req)
+    const key = typeof body.key === 'string' ? body.key.trim() : ''
+    if (!key) {
+      json(res, 400, { error: 'key is required' })
+      return
+    }
+    if (body.isEnabled !== undefined && typeof body.isEnabled !== 'boolean') {
+      json(res, 400, { error: 'isEnabled must be a boolean' })
+      return
+    }
+    try {
+      const config = await app.addModelApiKey({
+        provider: parts[3]!,
+        key,
+        ...(typeof body.isEnabled === 'boolean' ? { isEnabled: body.isEnabled } : {}),
+      })
+      json(res, 200, { config })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  if (req.method === 'PATCH' && parts[1] === 'model-config' && parts[2] === 'providers'
+    && parts[3] && parts[4] === 'api-keys' && parts[5] && parts.length === 6) {
+    const body = await readOptionalJson(req)
+    if (typeof body.isEnabled !== 'boolean') {
+      json(res, 400, { error: 'isEnabled must be a boolean' })
+      return
+    }
+    try {
+      const config = await app.setModelApiKeyEnabled({
+        provider: parts[3]!,
+        keyId: parts[5]!,
+        isEnabled: body.isEnabled,
+      })
+      json(res, 200, { config })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  if (req.method === 'DELETE' && parts[1] === 'model-config' && parts[2] === 'providers'
+    && parts[3] && parts[4] === 'api-keys' && parts[5] && parts.length === 6) {
+    try {
+      const config = await app.removeModelApiKey({
+        provider: parts[3]!,
+        keyId: parts[5]!,
       })
       json(res, 200, { config })
     } catch (error) {
@@ -369,6 +452,9 @@ async function handle(
           : {}),
         ...(typeof body.baseUrl === 'string' && body.baseUrl.trim()
           ? { baseUrl: body.baseUrl.trim() }
+          : {}),
+        ...(typeof body.format === 'string' && body.format.trim()
+          ? { format: body.format.trim() }
           : {}),
       })
       json(res, 200, result)

@@ -9,6 +9,74 @@ import { buildBundle } from '../src/app/bundle.ts'
 import type { AppConfig } from '../src/app/config.ts'
 import { Container } from '../src/app/container.ts'
 
+test('探测按端点格式选接口与鉴权头', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'if-model-probe-format-'))
+  const dataRoot = join(dir, 'data')
+  mkdirSync(dataRoot, { recursive: true })
+
+  const mock = createServer((req, res) => {
+    if (req.url === '/v1/models' && req.headers['x-api-key'] === 'anthropic-key') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ data: [{ id: 'claude-1' }] }))
+      return
+    }
+    if (req.url === '/v1beta/models'
+      && req.headers['x-goog-api-key'] === 'google-key') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ models: [{ name: 'models/gemini-1' }] }))
+      return
+    }
+    res.writeHead(401, { 'content-type': 'text/plain' })
+    res.end('unauthorized')
+  })
+  await new Promise<void>(resolve => mock.listen(0, '127.0.0.1', resolve))
+  const port = (mock.address() as AddressInfo).port
+  const baseUrl = `http://127.0.0.1:${port}`
+
+  const config: AppConfig = {
+    version: 1,
+    profile: {
+      dataRoot,
+      timeZone: 'Asia/Shanghai',
+      principals: { user: { id: 'user' }, agents: [{ id: 'main' }] },
+    },
+    providers: [],
+    presets: [],
+    patch: { tools: { enabled: [] } },
+  }
+  const app = buildBundle(config, new Container())
+  try {
+    await app.addModelProvider({
+      id: 'native',
+      name: 'Native',
+      baseUrl,
+      format: 'anthropic-messages',
+      apiKey: 'anthropic-key',
+      endpoints: {
+        'anthropic-messages': { baseUrl },
+        'google-generate-content': { baseUrl },
+      },
+      models: [],
+    })
+    const anthropic = await app.probeModelProvider({
+      provider: 'native',
+      format: 'anthropic-messages',
+    })
+    assert.deepEqual(anthropic.models, ['claude-1'])
+
+    const google = await app.probeModelProvider({
+      provider: 'native',
+      format: 'google-generate-content',
+      apiKey: 'google-key',
+    })
+    assert.deepEqual(google.models, ['gemini-1'])
+  } finally {
+    await app.dispose()
+    await new Promise<void>(resolve => mock.close(() => resolve()))
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+  }
+})
+
 test('读取 provider 模型列表并手动追加模型', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'if-model-probe-'))
   const dataRoot = join(dir, 'data')
@@ -57,13 +125,16 @@ test('读取 provider 模型列表并手动追加模型', async () => {
     const probed = await app.probeModelProvider({ provider: 'fake' })
     assert.deepEqual(probed.models, ['m1', 'm2'])
 
-    await assert.rejects(() => app.addModelProvider({
+    const native = await app.addModelProvider({
       id: 'native',
       name: 'Native',
-      baseUrl: 'http://127.0.0.1:1/v1',
+      baseUrl: 'http://127.0.0.1:1',
       format: 'anthropic-messages',
       models: [],
-    }), /暂不支持/)
+    })
+    const nativeProvider = native.providers.find(provider => provider.id === 'native')
+    assert.equal(nativeProvider?.endpointFamily, 'anthropic-messages')
+    assert.deepEqual(nativeProvider?.endpointFamilies, ['anthropic-messages'])
 
     const withModel = await app.addProviderModels({
       provider: 'fake',

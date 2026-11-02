@@ -20,7 +20,8 @@ import type { SessionWriter } from '../core/session-writer.ts'
 import type { EventStore } from '../core/store.ts'
 import type { WorkspaceLeaseManager } from '../core/workspace-lease.ts'
 import { sessionStream } from '../core/streams.ts'
-import { chatOpenAI, type ChatRequest } from '../model/openai.ts'
+import type { ChatRequest } from '../model/chat.ts'
+import { chatModel } from '../model/chat-model.ts'
 import type { ResolvedModel } from '../model/registry.ts'
 import type { ModelGate, ModelPriority } from '../model/gate.ts'
 import type { ModelRetryPolicy } from '../model/retry.ts'
@@ -279,7 +280,7 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
     const modelStarted = Date.now()
 
     try {
-      for await (const event of chatOpenAI(request)) {
+      for await (const event of chatModel(request)) {
         options.onModelEvent?.(event)
         if (event.type === 'text') text.push(event.text)
         else if (event.type === 'reasoning') reasoning.push(event.text)
