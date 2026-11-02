@@ -3,11 +3,13 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
 import { api, getToken, setToken } from './api'
 import { AddMainAgentDialog } from './components/AddMainAgentDialog'
 import { AgentPanel } from './components/AgentPanel'
+import { ApprovalDialog } from './components/ApprovalDialog'
 import { FrameBoot, FrameCenter, FrameGate, FrameRight, FrameSidebar } from './components/Framework'
 import type { MainAgentListItem } from './components/Framework'
 import { SessionView } from './components/SessionView'
 import { SettingsDialog } from './components/SettingsDialog'
 import { TitleBar } from './components/TitleBar'
+import { useApprovals } from './hooks/useApprovals'
 import { useWorkspace } from './hooks/useWorkspace'
 import type { SessionInfo } from './types'
 
@@ -54,6 +56,7 @@ export default function App() {
 
 function Desktop() {
   const workspace = useWorkspace()
+  const approvalCenter = useApprovals()
   const [selectedId, setSelectedId] = useState<string | undefined>(() => {
     const fromUrl = new URLSearchParams(window.location.search).get('session')
     return fromUrl ?? localStorage.getItem(SELECTED_KEY) ?? undefined
@@ -340,6 +343,14 @@ function Desktop() {
       )}
 
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
+
+      <ApprovalDialog
+        approvals={approvalCenter.approvals}
+        proposals={approvalCenter.proposals}
+        sessions={workspace.sessions}
+        error={approvalCenter.error}
+        onRefresh={approvalCenter.refresh}
+      />
     </div>
   )
 }

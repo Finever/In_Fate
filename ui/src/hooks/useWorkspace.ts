@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api'
-import type { AgentRunInfo, AgentSummary, SessionInfo, SessionLink, UiApproval } from '../types'
+import type { AgentRunInfo, AgentSummary, SessionInfo, SessionLink } from '../types'
 
 export interface WorkspaceData {
   sessions: SessionInfo[]
   links: SessionLink[]
   agents: AgentRunInfo[]
   mainAgents: AgentSummary[]
-  approvals: UiApproval[]
 }
 
 const EMPTY: WorkspaceData = {
@@ -15,7 +14,6 @@ const EMPTY: WorkspaceData = {
   links: [],
   agents: [],
   mainAgents: [],
-  approvals: [],
 }
 
 export function useWorkspace() {
@@ -30,14 +28,13 @@ export function useWorkspace() {
     inFlight.current = true
     if (manual) setRefreshing(true)
     try {
-      const [sessions, links, agents, mainAgents, approvals] = await Promise.all([
+      const [sessions, links, agents, mainAgents] = await Promise.all([
         api.sessions({ includeArchived: true, includeDeleted: true }),
         api.links(),
         api.agents({ includeArchived: true, includeDeleted: true }),
         api.mainAgents(),
-        api.approvals(),
       ])
-      setData({ sessions, links, agents, mainAgents, approvals })
+      setData({ sessions, links, agents, mainAgents })
       setError(undefined)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))

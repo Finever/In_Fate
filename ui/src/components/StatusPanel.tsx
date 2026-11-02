@@ -3,13 +3,11 @@ import { api } from '../api'
 import { relativeTime } from '../lib/format'
 import type {
   AgentSummary,
-  MainAgentIdentity,
   ModelConfig,
   ModelRef,
   SessionInfo,
   ToolView,
 } from '../types'
-import { Icon } from './Icon'
 
 function sameModel(a: ModelRef | undefined, b: ModelRef | undefined): boolean {
   return a?.provider === b?.provider && a?.model === b?.model
@@ -36,10 +34,6 @@ function modelSummary(config: ModelConfig, choice: ModelRef | undefined): string
   return `上下文 ${model.contextWindow?.toLocaleString('en-US') ?? '未配置'} · 最大输出 ${model.maxOutputTokens?.toLocaleString('en-US') ?? '未配置'} · ${price}`
 }
 
-function firstLine(text: string): string {
-  return text.split('\n').find(line => line.trim().length > 0)?.slice(0, 100) ?? '（空文件）'
-}
-
 export function StatusPanel({
   agentId,
   agent,
@@ -57,14 +51,11 @@ export function StatusPanel({
 }) {
   const [config, setConfig] = useState<ModelConfig>()
   const [summary, setSummary] = useState<AgentSummary | undefined>(agent)
-  const [identity, setIdentity] = useState<MainAgentIdentity>()
   const [tools, setTools] = useState<ToolView[]>([])
   const [modelProvider, setModelProvider] = useState('')
   const [modelId, setModelId] = useState('')
   const [subagentModels, setSubagentModels] = useState<ModelRef[]>([])
   const [subagentPresets, setSubagentPresets] = useState<string[]>([])
-  const [openPpp, setOpenPpp] = useState<Record<string, boolean>>({})
-  const [pppDrafts, setPppDrafts] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
   const [notice, setNotice] = useState<string>()
@@ -94,10 +85,7 @@ export function StatusPanel({
     setLoading(true)
     setError(undefined)
     setNotice(undefined)
-    setIdentity(undefined)
     setTools([])
-    setOpenPpp({})
-    setPppDrafts({})
     setSubagentModels([])
     setSubagentPresets([])
     if (!agentId) {
@@ -107,13 +95,11 @@ export function StatusPanel({
     void Promise.all([
       api.modelConfig(),
       api.tools(agentId),
-      api.mainAgentIdentity(agentId).catch(() => undefined),
     ])
-      .then(([nextConfig, nextTools, nextIdentity]) => {
+      .then(([nextConfig, nextTools]) => {
         if (cancelled) return
         setConfig(nextConfig)
         setTools(nextTools)
-        setIdentity(nextIdentity)
         const nextSummary = agent
         const current = nextSummary?.model
         const firstProvider = nextConfig.providers[0]
@@ -200,29 +186,6 @@ export function StatusPanel({
       setSubagentModels(next.subagentModels)
       setNotice('子 agent 设置已保存')
       onChanged()
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason))
-    } finally {
-      setBusy(undefined)
-    }
-  }
-
-  async function savePpp(slotId: string): Promise<void> {
-    const content = pppDrafts[slotId]
-    if (content === undefined) return
-    setBusy(`ppp:${slotId}`)
-    setError(undefined)
-    setNotice(undefined)
-    try {
-      await api.writeMainAgentSlot(agentId, slotId, content)
-      setIdentity(current => current
-        ? {
-          ...current,
-          slots: current.slots.map(slot =>
-            slot.id === slotId ? { ...slot, content } : slot),
-        }
-        : current)
-      setNotice('PPP 文件已保存（已留备份）')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
@@ -461,58 +424,6 @@ export function StatusPanel({
             </button>
           ))}
         </div>
-      </section>
-
-      <section className="fw-status-section">
-        <div className="fw-status-section-head">
-          <span>PPP 文件</span>
-          <small>默认折叠，点开编辑</small>
-        </div>
-        {!identity && <div className="fw-status-empty">没有读到 PPP；可能没有配置记忆库。</div>}
-        {identity?.slots.map(slot => {
-          const open = Boolean(openPpp[slot.id])
-          const draft = pppDrafts[slot.id] ?? slot.content
-          return (
-            <div className="fw-status-ppp" key={slot.id}>
-              <button
-                type="button"
-                className="fw-status-ppp-head"
-                onClick={() => setOpenPpp(current => ({
-                  ...current,
-                  [slot.id]: !open,
-                }))}
-              >
-                <span className="fw-status-ppp-label">{slot.label}</span>
-                <span className="fw-status-ppp-path" title={slot.path}>{slot.path}</span>
-                <span className="fw-status-ppp-preview">{firstLine(draft)}</span>
-                <Icon name="down" size={13} className={open ? 'is-open' : ''} />
-              </button>
-              {open && (
-                <div className="fw-status-ppp-body">
-                  <textarea
-                    value={draft}
-                    onChange={event => setPppDrafts(current => ({
-                      ...current,
-                      [slot.id]: event.target.value,
-                    }))}
-                    spellCheck={false}
-                  />
-                  <div className="fw-status-ppp-actions">
-                    <span>保存时先备份原文件</span>
-                    <button
-                      type="button"
-                      className="fw-status-save"
-                      onClick={() => void savePpp(slot.id)}
-                      disabled={busy === `ppp:${slot.id}`}
-                    >
-                      {busy === `ppp:${slot.id}` ? '保存中…' : '保存'}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )
-        })}
       </section>
 
       <section className="fw-status-section">

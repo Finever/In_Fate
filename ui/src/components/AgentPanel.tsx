@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { AgentSummary, SessionInfo } from '../types'
 import { MemoryPanel } from './MemoryPanel'
+import { PppPanel } from './PppPanel'
 import { StatusPanel } from './StatusPanel'
 
-type PanelTab = 'status' | 'memory'
+type PanelTab = 'status' | 'memory' | 'ppp'
 
 export function AgentPanel({
   agentId,
@@ -24,10 +25,6 @@ export function AgentPanel({
 }) {
   const [tab, setTab] = useState<PanelTab>('status')
 
-  useEffect(() => {
-    setTab('status')
-  }, [agentId])
-
   return (
     <div className="fw-agent-panel">
       <div className="fw-panel-tabs">
@@ -44,6 +41,13 @@ export function AgentPanel({
           onClick={() => setTab('memory')}
         >
           记忆
+        </button>
+        <button
+          type="button"
+          className={tab === 'ppp' ? 'is-active' : ''}
+          onClick={() => setTab('ppp')}
+        >
+          PPP
         </button>
         <button
           type="button"
@@ -69,7 +73,11 @@ export function AgentPanel({
               />
             )
             : <div className="fw-panel-empty">先添加或选择一个主 agent。</div>)
-          : <MemoryPanel />}
+          : tab === 'ppp'
+            ? (agentId
+              ? <PppPanel agentId={agentId} />
+              : <div className="fw-panel-empty">先添加或选择一个主 agent。</div>)
+            : <MemoryPanel />}
       </div>
     </div>
   )
