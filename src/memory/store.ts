@@ -374,6 +374,7 @@ export class MemoryStore {
 
   add(value: string, input: MemoryAddInput): Promise<MemoryEntry> {
     const target = this.target(value)
+    mkdirSync(dirname(target.path), { recursive: true })
     return this.writer.run(target.path, () => withFileLock(target.path, () => {
       const existing = readDocument(target.path)
       const doc: MemoryDocument = existing ?? {

@@ -50,7 +50,13 @@ import { MemoryAccess, type MemoryRole } from '../memory/access.ts'
 import { MemoryCommitter } from '../memory/committer.ts'
 import { MemoryLogService } from '../memory/internal-log.ts'
 import { MemoryIdentityStore } from '../memory/identity.ts'
+import {
+  MemoryPolicyStore,
+  type MemoryPolicy,
+  type ResolvedMemoryPolicy,
+} from '../memory/policy.ts'
 import { ensureMemoryLayout, resolveMemoryRoot } from '../memory/root.ts'
+import { MemorySearchIndex } from '../memory/search-index.ts'
 import { MemoryProposalStore, type MemoryAcceptResult, type MemoryProposal, type ProposalStatus } from '../memory/proposals.ts'
 import { MemoryStore, type MemoryDocument, type MemoryEntry, type MemoryFileSummary, type MemorySearchHit } from '../memory/store.ts'
 import type { Issue } from '../memory/validate.ts'
@@ -187,6 +193,13 @@ export interface CreateSessionInput {
 export interface SessionListOptions {
   readonly includeArchived?: boolean
   readonly includeDeleted?: boolean
+}
+
+export interface MemoryPolicyUpdate {
+  readonly scope: 'default' | 'agent' | 'session'
+  /** agent/session 作用域必填 */
+  readonly id?: string
+  readonly policy: MemoryPolicy
 }
 
 export interface SessionLifecycleInput {
@@ -329,6 +342,12 @@ export interface App {
   /** 全局工具启停/审批；有 configPath 时写回配置文件。 */
   setToolGlobal(name: string, input: ToolGlobalUpdate): Promise<ToolView[]>
 
+  /** 内置记忆库根；关闭记忆时 undefined。 */
+  memoryRoot(): string | undefined
+  /** 当前会话/agent 的记忆策略；不传 session 只看默认与 agent。 */
+  memoryPolicy(sessionId?: string, agentId?: string): ResolvedMemoryPolicy
+  /** 修改全局 / agent / session 策略。 */
+  setMemoryPolicy(input: MemoryPolicyUpdate): ResolvedMemoryPolicy
   /** 当前会话的记忆角色；未配置记忆返回 undefined。 */
   memoryRole(sessionId: string): MemoryRole | undefined
   /** 只由用户/App 调用：给任意会话授予记忆角色。 */
@@ -1638,10 +1657,23 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       enabled: config.patch?.runtime?.memory?.autoCommit === true,
     })
     : undefined
+  let memorySearchIndex: MemorySearchIndex | undefined
   const memoryStore = memoryRoot
     ? new MemoryStore(memoryRoot, {
       timeZone: config.profile.timeZone,
-      ...(memoryCommitter ? { onWrite: target => memoryCommitter.markDirty(target) } : {}),
+      onWrite: target => {
+        memoryCommitter?.markDirty(target)
+        memorySearchIndex?.markDirty()
+      },
+    })
+    : undefined
+  if (memoryRoot && memoryStore) {
+    memorySearchIndex = new MemorySearchIndex(memoryRoot, memoryStore)
+  }
+  const memoryPolicyStore = memoryRoot
+    ? new MemoryPolicyStore(memoryRoot, {
+      agentIdFor: sessionId => sessionInfo(config.profile.dataRoot, sessionId)?.agentId
+        ?? mainAgentId,
     })
     : undefined
   const memoryAccess = memoryStore
@@ -1673,12 +1705,19 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       store: memoryStore,
       access: memoryAccess,
       proposals: memoryProposals,
+      ...(memoryPolicyStore ? { policy: memoryPolicyStore } : {}),
+      ...(memorySearchIndex ? { searchIndex: memorySearchIndex } : {}),
     })) {
       tools.register(tool, 'builtin')
     }
     container.register('memoryStore', memoryStore)
     container.register('memoryAccess', memoryAccess)
     container.register('memoryProposals', memoryProposals)
+    if (memoryPolicyStore) container.register('memoryPolicy', memoryPolicyStore)
+    if (memorySearchIndex) {
+      container.register('memorySearch', memorySearchIndex)
+      container.onDispose('memorySearch', () => memorySearchIndex?.close())
+    }
     if (memoryIdentity) container.register('memoryIdentity', memoryIdentity)
     if (memoryCommitter) {
       container.register('memoryCommitter', memoryCommitter)
@@ -2692,6 +2731,31 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     probeModelProvider,
     saveModelCard,
 
+    memoryRoot() {
+      return memoryRoot
+    },
+
+    memoryPolicy(sessionId, agentId) {
+      if (!memoryPolicyStore) throw new Error('memory is not configured')
+      return memoryPolicyStore.resolve(sessionId ?? '', agentId)
+    },
+
+    setMemoryPolicy(input) {
+      if (!memoryPolicyStore) throw new Error('memory is not configured')
+      if (input.scope === 'default') {
+        memoryPolicyStore.setDefault(input.policy)
+        return memoryPolicyStore.resolve('')
+      }
+      const id = input.id?.trim()
+      if (!id) throw new Error(`${input.scope} policy needs id`)
+      if (input.scope === 'agent') {
+        memoryPolicyStore.setAgent(id, input.policy)
+        return memoryPolicyStore.resolve('', id)
+      }
+      memoryPolicyStore.setSession(id, input.policy)
+      return memoryPolicyStore.resolve(id)
+    },
+
     memoryRole(sessionId) {
       return memoryAccess?.roleFor(sessionId)
     },
@@ -2702,6 +2766,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     },
 
     memorySearch(query, limit = 20) {
+      if (memorySearchIndex) return memorySearchIndex.search(query, { limit })
       return memoryStore?.search(query, limit) ?? []
     },
 

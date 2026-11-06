@@ -7,7 +7,9 @@
  */
 
 import type { MemoryAccess } from './access.ts'
+import type { MemoryPolicyStore } from './policy.ts'
 import type { MemoryProposalStore } from './proposals.ts'
+import type { MemorySearchIndex } from './search-index.ts'
 import type { MemoryAddInput, MemoryQuote, MemoryTag, MemoryStore } from './store.ts'
 import type { ToolDefinition, ToolResult } from '../tools/types.ts'
 
@@ -46,7 +48,29 @@ export function createMemoryTools(deps: {
   readonly store: MemoryStore
   readonly access: MemoryAccess
   readonly proposals: MemoryProposalStore
+  readonly policy?: MemoryPolicyStore
+  readonly searchIndex?: MemorySearchIndex
 }): ToolDefinition[] {
+  const policyOf = (sessionId: string) =>
+    deps.policy?.resolve(sessionId) ?? {
+      mode: 'rag-tool' as const,
+      scope: 'agent' as const,
+      write: { approval: 'required' as const },
+      jev: {
+        enabled: 'off' as const,
+        backend: 'local' as const,
+        scope: 'agent' as const,
+        reanalyzeOnCompaction: false,
+      },
+      rag: { topK: 20 },
+      maxEntries: 12,
+      maxBytes: 24_000,
+    }
+
+  const canWrite = (sessionId: string): boolean =>
+    deps.access.canWrite(sessionId, 'shared')
+    || policyOf(sessionId).write.approval === 'off'
+
   const search: ToolDefinition = {
     name: 'memory_search',
     description: '在共享 detail 记忆里搜索内容；只返回命中预览，不返回全文。',
@@ -61,11 +85,21 @@ export function createMemoryTools(deps: {
     },
     meta: { readOnly: true },
     async run(args, context) {
+      if (policyOf(context.sessionId).mode === 'off') {
+        return denied('memory is turned off for this session')
+      }
       if (!deps.access.canRead(context.sessionId, 'shared')) {
         return denied('memory read not granted')
       }
       const input = args as { query: string; limit?: number }
-      const hits = deps.store.search(input.query, input.limit ?? 20)
+      let hits
+      try {
+        hits = deps.searchIndex
+          ? deps.searchIndex.search(input.query, { limit: input.limit ?? 20 })
+          : deps.store.search(input.query, input.limit ?? 20)
+      } catch {
+        hits = deps.store.search(input.query, input.limit ?? 20)
+      }
       return {
         text: hits.map(hit => `${hit.target}#${hit.id} [${hit.tag}] ${hit.preview}`).join('\n')
           || '（没有命中）',
@@ -88,6 +122,9 @@ export function createMemoryTools(deps: {
     },
     meta: { readOnly: true },
     async run(args, context) {
+      if (policyOf(context.sessionId).mode === 'off') {
+        return denied('memory is turned off for this session')
+      }
       if (!deps.access.canRead(context.sessionId, 'shared')) {
         return denied('memory read not granted')
       }
@@ -127,8 +164,11 @@ export function createMemoryTools(deps: {
       additionalProperties: false,
     },
     async run(args, context) {
-      if (!deps.access.canWrite(context.sessionId, 'shared')) {
-        return denied('memory write not granted; use memory_propose')
+      if (policyOf(context.sessionId).mode === 'off') {
+        return denied('memory is turned off for this session')
+      }
+      if (!canWrite(context.sessionId)) {
+        return denied('memory write not granted; use memory_propose or turn write approval off')
       }
       const input = args as Record<string, unknown>
       const entry = await deps.store.add(String(input.target), entryInput(input))
@@ -157,8 +197,11 @@ export function createMemoryTools(deps: {
       additionalProperties: false,
     },
     async run(args, context) {
-      if (!deps.access.canWrite(context.sessionId, 'shared')) {
-        return denied('memory write not granted; use memory_propose')
+      if (policyOf(context.sessionId).mode === 'off') {
+        return denied('memory is turned off for this session')
+      }
+      if (!canWrite(context.sessionId)) {
+        return denied('memory write not granted; use memory_propose or turn write approval off')
       }
       const input = args as Record<string, unknown>
       const entry = await deps.store.update(String(input.target), String(input.id), {
@@ -197,6 +240,9 @@ export function createMemoryTools(deps: {
       additionalProperties: false,
     },
     async run(args, context) {
+      if (policyOf(context.sessionId).mode === 'off') {
+        return denied('memory is turned off for this session')
+      }
       const input = args as Record<string, unknown>
       const target = String(input.target)
       if (target.startsWith('identity:')) {

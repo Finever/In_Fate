@@ -640,6 +640,51 @@ async function handle(
     return
   }
 
+  if (req.method === 'GET' && parts[1] === 'memory' && parts[2] === 'root' && parts.length === 3) {
+    json(res, 200, { root: app.memoryRoot() ?? null })
+    return
+  }
+
+  if (req.method === 'GET' && parts[1] === 'memory' && parts[2] === 'policy' && parts.length === 3) {
+    try {
+      json(res, 200, {
+        policy: app.memoryPolicy(
+          url.searchParams.get('sessionId') ?? undefined,
+          url.searchParams.get('agentId') ?? undefined,
+        ),
+      })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  if (req.method === 'POST' && parts[1] === 'memory' && parts[2] === 'policy' && parts.length === 3) {
+    const body = await readOptionalJson(req)
+    const scope = body.scope
+    if (scope !== 'default' && scope !== 'agent' && scope !== 'session') {
+      json(res, 400, { error: 'scope must be default, agent or session' })
+      return
+    }
+    if (body.policy === undefined || body.policy === null
+      || typeof body.policy !== 'object' || Array.isArray(body.policy)) {
+      json(res, 400, { error: 'policy must be an object' })
+      return
+    }
+    try {
+      json(res, 200, {
+        policy: app.setMemoryPolicy({
+          scope,
+          ...(typeof body.id === 'string' && body.id.trim() ? { id: body.id.trim() } : {}),
+          policy: body.policy as never,
+        }),
+      })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
   if (req.method === 'POST' && parts[1] === 'memory' && parts[2] === 'grant' && parts.length === 3) {
     const body = JSON.parse(await readBody(req)) as { sessionId?: unknown; role?: unknown }
     if (typeof body.sessionId !== 'string' || typeof body.role !== 'string') {
