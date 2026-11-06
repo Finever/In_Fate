@@ -70,6 +70,7 @@ export class EventStore {
   private dirty = false
   private readonly cache = new Map<string, SegmentCacheEntry>()
   private readonly cacheMaxSegments: number
+  private readonly listeners = new Set<(event: Event) => void>()
 
   constructor(file: string, options: EventStoreOptions = {}) {
     this.file = file
@@ -80,6 +81,14 @@ export class EventStore {
   /** 多进程临界区：加锁后追加。 */
   async appendLocked(input: NewEvent, options: { timeoutMs?: number } = {}): Promise<Event> {
     return withFileLock(this.file, () => this.append(input), options)
+  }
+
+  /** 只在本进程内通知追加；监听器抛错不影响事件落盘。 */
+  subscribe(listener: (event: Event) => void): () => void {
+    this.listeners.add(listener)
+    return () => {
+      this.listeners.delete(listener)
+    }
   }
 
   /** 追加一条事件。注册过的类型先过校验器。 */
@@ -111,6 +120,13 @@ export class EventStore {
       this.cache.delete(this.file)
     } catch (error) {
       throw new IfStorageError(`append failed: ${this.file}`, error)
+    }
+    for (const listener of this.listeners) {
+      try {
+        listener(event)
+      } catch {
+        // 旁路订阅不能影响事件写入。
+      }
     }
     return event
   }

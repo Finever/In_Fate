@@ -51,11 +51,47 @@ export function localDate(date: Date): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
 }
 
+export interface LocalLogStamp {
+  readonly day: string
+  readonly year: string
+  readonly month: string
+  readonly time: string
+}
+
+/** 按指定时区拆日期与时分秒；事件时间戳用 UTC，不能直接拿本地 getHours。 */
+export function localLogStamp(date: Date, timeZone: string): LocalLogStamp {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+    hourCycle: 'h23',
+  }).formatToParts(date)
+  const get = (type: string): string => parts.find(part => part.type === type)?.value ?? ''
+  const year = get('year')
+  const month = get('month')
+  const day = get('day')
+  return {
+    day: `${year}-${month}-${day}`,
+    year,
+    month,
+    time: `${get('hour')}:${get('minute')}:${get('second')}`,
+  }
+}
+
 /** 流水文件路径：<root>/<年>/<月>/<年-月-日>/<会话>.jsonl */
 export function logPath(memoryRoot: string, date: Date, session: string): string {
   const year = String(date.getFullYear())
   const month = String(date.getMonth() + 1).padStart(2, '0')
   return join(memoryRoot, 'log', year, month, localDate(date), `${session}.jsonl`)
+}
+
+export function logPathForDay(memoryRoot: string, stamp: LocalLogStamp, session: string): string {
+  return join(memoryRoot, 'log', stamp.year, stamp.month, stamp.day, `${session}.jsonl`)
 }
 
 export interface ReadLogOptions {

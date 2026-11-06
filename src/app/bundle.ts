@@ -48,7 +48,9 @@ import { AgentIdentityStore } from '../memory/identity-slots.ts'
 import { ManifestIdentityStore } from '../memory/identity-adapter.ts'
 import { MemoryAccess, type MemoryRole } from '../memory/access.ts'
 import { MemoryCommitter } from '../memory/committer.ts'
+import { MemoryLogService } from '../memory/internal-log.ts'
 import { MemoryIdentityStore } from '../memory/identity.ts'
+import { ensureMemoryLayout, resolveMemoryRoot } from '../memory/root.ts'
 import { MemoryProposalStore, type MemoryAcceptResult, type MemoryProposal, type ProposalStatus } from '../memory/proposals.ts'
 import { MemoryStore, type MemoryDocument, type MemoryEntry, type MemoryFileSummary, type MemorySearchHit } from '../memory/store.ts'
 import type { Issue } from '../memory/validate.ts'
@@ -591,6 +593,30 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   const config = applyPatches(rawConfig)
   const cwd = options.cwd ?? process.cwd()
   const now = options.now ?? ((): Date => new Date())
+  const memoryRoot = resolveMemoryRoot(config.profile)
+  if (memoryRoot) ensureMemoryLayout(memoryRoot)
+  const defaultAgentId = config.profile.principals.agents?.[0]?.id ?? 'main'
+  const memoryLog = memoryRoot && config.profile.memory?.log !== false
+    ? new MemoryLogService({
+      memoryRoot,
+      timeZone: config.profile.timeZone,
+      userName: config.profile.principals.user?.name ?? 'user',
+      metaFor: sessionId => {
+        const info = sessionInfo(config.profile.dataRoot, sessionId)
+        const agentId = info?.agentId ?? defaultAgentId
+        const agent = config.profile.principals.agents?.find(item => item.id === agentId)
+        return {
+          agentId,
+          agentName: agent?.name ?? agentId,
+          cwd,
+        }
+      },
+    })
+    : undefined
+  if (memoryLog) {
+    container.register('memoryLog', memoryLog)
+    container.onDispose('memoryLog', () => memoryLog.flush())
+  }
 
   // 一个 dataRoot 只允许一个 host。锁是内核事务，进程崩溃时自动释放；
   // 不设 TTL，避免抢走还活着但卡死的写者。
@@ -635,7 +661,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   }
 
   const fsPatch = config.patch?.runtime?.fs
-  const defaultFsRoots = [cwd, config.profile.memoryLogRoot, config.profile.agentDir]
+  const defaultFsRoots = [cwd, memoryRoot, config.profile.agentDir]
     .filter((root): root is string => typeof root === 'string' && root.length > 0)
   const fsPolicy = fsPatch?.enforce === false
     ? undefined
@@ -707,6 +733,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         segmentMaxBytes: 8 * 1024 * 1024,
       })
       stores.set(sessionId, store)
+      memoryLog?.attach(sessionId, store)
     }
     return store
   }
@@ -1467,15 +1494,15 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   const tools = new ToolRegistry()
   for (const tool of SAFE_TOOLS) tools.register(tool, 'builtin')
   tools.register(createRecallTool(storeFor, {
-    ...(config.profile.memoryLogRoot ? { memoryLogRoot: config.profile.memoryLogRoot } : {}),
+    ...(memoryRoot ? { memoryLogRoot: memoryRoot } : {}),
     blobs,
     spill: fileSpill,
     agentStore: storeFor,
   }), 'builtin')
 
-  const mainAgentId = config.profile.principals.agents?.[0]?.id ?? 'main'
-  const manifestStore = config.profile.memoryLogRoot
-    ? new AgentManifestStore(config.profile.memoryLogRoot)
+  const mainAgentId = defaultAgentId
+  const manifestStore = memoryRoot
+    ? new AgentManifestStore(memoryRoot)
     : undefined
   const agentManifest = (() => {
     if (!manifestStore) return undefined
@@ -1606,13 +1633,13 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   }
 
   // 记忆工具：能力位由 session 决定；没有 memoryRoot 就不注册。
-  const memoryCommitter = config.profile.memoryLogRoot
-    ? new MemoryCommitter(config.profile.memoryLogRoot, {
-      enabled: config.patch?.runtime?.memory?.autoCommit !== false,
+  const memoryCommitter = memoryRoot
+    ? new MemoryCommitter(memoryRoot, {
+      enabled: config.patch?.runtime?.memory?.autoCommit === true,
     })
     : undefined
-  const memoryStore = config.profile.memoryLogRoot
-    ? new MemoryStore(config.profile.memoryLogRoot, {
+  const memoryStore = memoryRoot
+    ? new MemoryStore(memoryRoot, {
       timeZone: config.profile.timeZone,
       ...(memoryCommitter ? { onWrite: target => memoryCommitter.markDirty(target) } : {}),
     })
@@ -1625,7 +1652,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     : undefined
   const memoryProposals = memoryStore
     ? new MemoryProposalStore(
-      config.profile.memoryLogRoot!,
+      memoryRoot!,
       now,
       memoryCommitter ? () => memoryCommitter.markDirty('proposals') : undefined,
     )
@@ -1633,7 +1660,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   const memoryIdentity = memoryStore
     ? agentManifest
       ? new ManifestIdentityStore(new AgentIdentityStore(
-        config.profile.memoryLogRoot!,
+        memoryRoot!,
         mainAgentId,
         { manifest: agentManifest },
       ))
@@ -1793,12 +1820,12 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   // 上下文：请求头 + 身份/记忆 + 时间。记忆读不到就跳过。
   const sections: ContextSection[] = []
   if (config.profile.header) sections.push(staticSection('header', config.profile.header, 100))
-  if (config.profile.memoryLogRoot || config.profile.agentDir) {
+  if (memoryRoot || config.profile.agentDir) {
     sections.push(sessionMemorySection('memory', sessionId => {
       const agentId = sessionInfo(config.profile.dataRoot, sessionId)?.agentId ?? mainAgentId
       return loadIdentitySources(
         config.profile.agentDir ?? '',
-        config.profile.memoryLogRoot,
+        memoryRoot,
         agentId,
       )
     }, 90))
@@ -2603,11 +2630,11 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     },
 
     mainAgentIdentity(agentId) {
-      if (!manifestStore || !config.profile.memoryLogRoot) {
+      if (!manifestStore || !memoryRoot) {
         throw new Error('memory is not configured')
       }
       const manifest = manifestStore.readOrThrow(agentId)
-      const store = new AgentIdentityStore(config.profile.memoryLogRoot, agentId, { manifest })
+      const store = new AgentIdentityStore(memoryRoot, agentId, { manifest })
       return {
         manifest,
         slots: store.slots().map(slot => ({
@@ -2619,11 +2646,11 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     },
 
     async writeMainAgentSlot(agentId, slotId, content) {
-      if (!manifestStore || !config.profile.memoryLogRoot) {
+      if (!manifestStore || !memoryRoot) {
         throw new Error('memory is not configured')
       }
       const manifest = manifestStore.readOrThrow(agentId)
-      const store = new AgentIdentityStore(config.profile.memoryLogRoot, agentId, { manifest })
+      const store = new AgentIdentityStore(memoryRoot, agentId, { manifest })
       return store.writeSlot(slotId, content)
     },
 

@@ -44,11 +44,10 @@ export interface IndexOptions {
 const DEFAULT_SKIP = ['_trash', '_archive', '__pycache__']
 
 const DEFAULT_EXTRA_DIRS: readonly ExtraDir[] = [
-  { path: 'log', what: '原始流水（hook 写，不过 LLM 的手）' },
-  { path: 'schema', what: '格式标准' },
-  { path: '_ui', what: '条目编辑器（open.bat）' },
-  { path: '_tools', what: '工具脚本' },
-  { path: '_hooks', what: 'hook' },
+  { path: 'log', what: '原始流水（IF 从会话事件生成）' },
+  { path: 'summaries', what: '条目摘要（供选择器用）' },
+  { path: 'proposals', what: '待处理的记忆提议' },
+  { path: 'agents', what: 'agent manifest 与身份槽位' },
 ]
 
 function pad(value: number): string {

@@ -18,11 +18,22 @@ export interface AgentPrincipal extends Principal {
   readonly role?: string
 }
 
+export interface MemoryProfileSettings {
+  /** false = 完全不启用内置记忆库 */
+  readonly enabled?: boolean
+  /** false = 不写内部记忆 log */
+  readonly log?: boolean
+}
+
 export interface Profile {
   /** 数据根：会话、归档状态都放这里 */
   readonly dataRoot: string
-  /** 记忆库 log 的根；不配就不归档 */
+  /** 记忆库根；默认 `<dataRoot>/memory` */
+  readonly memoryRoot?: string
+  /** @deprecated 旧名，等价于 memoryRoot */
   readonly memoryLogRoot?: string
+  /** 内置记忆库开关 */
+  readonly memory?: MemoryProfileSettings
   /** IANA 时区名，渲染给模型看的时间用它 */
   readonly timeZone: string
   /** 身份文件所在目录（SOUL/USER/FACT 的根） */
