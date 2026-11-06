@@ -287,6 +287,55 @@ export interface ModelProviderTemplate {
   }>
 }
 
+export interface EmbeddingModelPreset {
+  id: string
+  name: string
+  description: string
+  repo: string
+  file: string
+  size: number
+  sha256: string
+  dimensions: number
+  contextSize: number
+  license: string
+  quantization: string
+  queryPrefix: string
+}
+
+export interface EmbeddingModelManifest {
+  id: string
+  repo: string
+  file: string
+  path: string
+  size: number
+  sha256: string
+  dimensions: number
+  contextSize: number
+  license: string
+  quantization: string
+  installedAt: string
+}
+
+export interface EmbeddingModelStatus {
+  preset: EmbeddingModelPreset
+  installed: boolean
+  active: boolean
+  manifest?: EmbeddingModelManifest
+  totalBytes: number
+}
+
+export interface EmbeddingInstallJob {
+  id: string
+  modelId: string
+  status: 'running' | 'done' | 'error'
+  received: number
+  total: number
+  ratio: number
+  error?: string
+  startedAt: string
+  finishedAt?: string
+}
+
 export interface AgentPresetSummary {
   id: string
   description: string

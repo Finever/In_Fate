@@ -1826,6 +1826,141 @@ body.fw-resizing {
   opacity: .45;
   cursor: default;
 }
+.fw-local-models {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.fw-local-models-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.fw-local-models-head h3 {
+  margin: 0 0 4px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+.fw-local-models-head small {
+  color: var(--faint);
+  font-size: 10.5px;
+}
+.fw-local-mirror {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.fw-local-model-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.fw-local-model {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .015);
+}
+.fw-local-model.is-active {
+  border-color: rgba(143, 123, 255, .5);
+  background: var(--accent-soft);
+}
+.fw-local-model-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.fw-local-model-head b {
+  display: block;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+.fw-local-model-head small {
+  display: block;
+  margin-top: 2px;
+  color: var(--faint);
+  font-family: var(--mono, monospace);
+  font-size: 9.5px;
+}
+.fw-local-model-badge {
+  padding: 1px 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--faint);
+  font-size: 9.5px;
+  white-space: nowrap;
+}
+.fw-local-model-badge.is-active {
+  border-color: rgba(143, 123, 255, .5);
+  color: var(--accent);
+}
+.fw-local-model p {
+  min-height: 32px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.55;
+}
+.fw-local-model-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.fw-local-model-meta span {
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, .045);
+  color: var(--faint);
+  font-size: 9.5px;
+}
+.fw-local-model-actions {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  margin-top: auto;
+}
+.fw-local-model-actions .fw-dialog-submit {
+  padding: 5px 12px;
+  font-size: 10.5px;
+}
+.fw-local-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fw-local-progress-bar {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .08);
+}
+.fw-local-progress-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width .2s linear;
+}
+.fw-local-progress small {
+  color: var(--faint);
+  font-size: 9.5px;
+}
+.fw-local-model-note {
+  margin: 0;
+  color: var(--faint);
+  font-size: 10px;
+  line-height: 1.6;
+}
 .fw-settings-models {
   margin-top: 18px;
 }

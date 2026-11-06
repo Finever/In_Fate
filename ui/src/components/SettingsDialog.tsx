@@ -3,6 +3,7 @@ import { api } from '../api'
 import type { ModelConfig, ModelConfigProvider, ModelPricing } from '../types'
 import { AddProviderDialog } from './AddProviderDialog'
 import { Icon } from './Icon'
+import { LocalEmbeddingPanel } from './LocalEmbeddingPanel'
 import { MemoryBrowser } from './MemoryBrowser'
 import { ModelEditorDialog } from './ModelEditorDialog'
 
@@ -55,7 +56,7 @@ function pricingSummary(pricing: ModelPricing | undefined): string {
 
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [config, setConfig] = useState<ModelConfig>()
-  const [view, setView] = useState<'models' | 'memory'>('models')
+  const [view, setView] = useState<'models' | 'memory' | 'local'>('models')
   const [memoryDirty, setMemoryDirty] = useState(false)
   const [providerId, setProviderId] = useState('')
   const [drafts, setDrafts] = useState<Record<string, ProviderDraft>>({})
@@ -534,11 +535,31 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                     <small>detail 记忆库</small>
                   </span>
                 </button>
+                <button
+                  type="button"
+                  className={`fw-settings-category${view === 'local' ? ' is-active' : ''}`}
+                  onClick={() => {
+                    setView('local')
+                    setError(undefined)
+                    setNotice(undefined)
+                  }}
+                  disabled={saving || Boolean(editing)}
+                >
+                  <span className="fw-settings-category-mark">
+                    <Icon name="tool" size={13} />
+                  </span>
+                  <span className="fw-settings-category-text">
+                    <b>本地模型</b>
+                    <small>embedding 权重</small>
+                  </span>
+                </button>
               </aside>
 
               <div className={`fw-settings-main${view === 'memory' ? ' is-memory' : ''}`}>
                 {view === 'memory' ? (
                   <MemoryBrowser onDirtyChange={setMemoryDirty} />
+                ) : view === 'local' ? (
+                  <LocalEmbeddingPanel />
                 ) : (
                   <>
                     <div className="fw-model-head">
@@ -1014,6 +1035,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               <div className="fw-settings-feedback">
                 {view === 'memory' ? (
                   <span className="fw-settings-hint">全局 detail 记忆库 · 保存前校验</span>
+                ) : view === 'local' ? (
+                  <span className="fw-settings-hint">权重按需下载到 data/models/embeddings</span>
                 ) : (
                   <>
                     {error && <div className="fw-dialog-error">{error}</div>}

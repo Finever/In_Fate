@@ -57,6 +57,7 @@ import {
 } from '../memory/policy.ts'
 import { ensureMemoryLayout, resolveMemoryRoot } from '../memory/root.ts'
 import { MemorySearchIndex } from '../memory/search-index.ts'
+import { SemanticMemoryIndex } from '../memory/semantic-index.ts'
 import { MemoryProposalStore, type MemoryAcceptResult, type MemoryProposal, type ProposalStatus } from '../memory/proposals.ts'
 import { MemoryStore, type MemoryDocument, type MemoryEntry, type MemoryFileSummary, type MemorySearchHit } from '../memory/store.ts'
 import type { Issue } from '../memory/validate.ts'
@@ -72,6 +73,12 @@ import {
 import { createMemoryTools } from '../memory/tools.ts'
 import { readFileSync, renameSync, writeFileSync } from 'node:fs'
 import type { ModelRegistry, ResolvedModel } from '../model/registry.ts'
+import { EmbeddingInstallJobs, type EmbeddingInstallJob } from '../model/local/embedding-jobs.ts'
+import { LocalEmbeddingService } from '../model/local/embedding-service.ts'
+import {
+  LocalEmbeddingStore,
+  type EmbeddingModelStatus,
+} from '../model/local/embedding-store.ts'
 import type { ApiKeyConfig, ModelCard, ModelPricing, ProviderConfig } from '../model/types.ts'
 import { BUILTIN_PROVIDERS } from '../model/builtin.ts'
 import { apiUrl } from '../model/urls.ts'
@@ -291,6 +298,14 @@ export interface App {
   waitForAgents(timeoutMs?: number): Promise<{ active: number; queued: number }>
   /** 进程内指标快照；关闭指标时返回空快照。 */
   metrics(): MetricsSnapshot
+
+  /** 本地 embedding 模型清单与安装状态。 */
+  embeddingModels(): EmbeddingModelStatus[]
+  /** 启动一键下载/安装任务；返回可轮询的 job。 */
+  startEmbeddingInstall(id: string, options?: { mirror?: boolean }): EmbeddingInstallJob
+  embeddingInstallJob(id: string): EmbeddingInstallJob | undefined
+  activateEmbeddingModel(id: string): EmbeddingModelStatus
+  removeEmbeddingModel(id: string): EmbeddingModelStatus[]
 
   /** 当前模型配置的脱敏视图（不回传 API key）。 */
   modelConfig(): ModelConfigView
@@ -614,6 +629,18 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   const now = options.now ?? ((): Date => new Date())
   const memoryRoot = resolveMemoryRoot(config.profile)
   if (memoryRoot) ensureMemoryLayout(memoryRoot)
+  const embeddingStore = new LocalEmbeddingStore(
+    join(config.profile.dataRoot, 'models', 'embeddings'),
+  )
+  let semanticMemoryIndex: SemanticMemoryIndex | undefined
+  const embeddingJobs = new EmbeddingInstallJobs(embeddingStore, () => {
+    void semanticMemoryIndex?.build().catch(() => undefined)
+  })
+  const embeddingService = new LocalEmbeddingService(embeddingStore)
+  container.register('embeddingStore', embeddingStore)
+  container.register('embeddingJobs', embeddingJobs)
+  container.register('embeddingService', embeddingService)
+  container.onDispose('embeddingService', () => embeddingService.dispose())
   const defaultAgentId = config.profile.principals.agents?.[0]?.id ?? 'main'
   const memoryLog = memoryRoot && config.profile.memory?.log !== false
     ? new MemoryLogService({
@@ -1664,11 +1691,16 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       onWrite: target => {
         memoryCommitter?.markDirty(target)
         memorySearchIndex?.markDirty()
+        semanticMemoryIndex?.markDirty()
       },
     })
     : undefined
   if (memoryRoot && memoryStore) {
     memorySearchIndex = new MemorySearchIndex(memoryRoot, memoryStore)
+    semanticMemoryIndex = new SemanticMemoryIndex(memoryRoot, memoryStore, embeddingService)
+    if (embeddingService.isAvailable()) {
+      void semanticMemoryIndex.build().catch(() => undefined)
+    }
   }
   const memoryPolicyStore = memoryRoot
     ? new MemoryPolicyStore(memoryRoot, {
@@ -1707,6 +1739,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       proposals: memoryProposals,
       ...(memoryPolicyStore ? { policy: memoryPolicyStore } : {}),
       ...(memorySearchIndex ? { searchIndex: memorySearchIndex } : {}),
+      ...(semanticMemoryIndex ? { semanticIndex: semanticMemoryIndex } : {}),
     })) {
       tools.register(tool, 'builtin')
     }
@@ -1717,6 +1750,10 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     if (memorySearchIndex) {
       container.register('memorySearch', memorySearchIndex)
       container.onDispose('memorySearch', () => memorySearchIndex?.close())
+    }
+    if (semanticMemoryIndex) {
+      container.register('memorySemantic', semanticMemoryIndex)
+      container.onDispose('memorySemantic', () => semanticMemoryIndex?.close())
     }
     if (memoryIdentity) container.register('memoryIdentity', memoryIdentity)
     if (memoryCommitter) {
@@ -2711,6 +2748,30 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         histograms: [],
         gauges: [],
       }
+    },
+
+    embeddingModels() {
+      return embeddingStore.list()
+    },
+
+    startEmbeddingInstall(id, options) {
+      return embeddingJobs.start(id, options)
+    },
+
+    embeddingInstallJob(id) {
+      return embeddingJobs.get(id)
+    },
+
+    activateEmbeddingModel(id) {
+      const status = embeddingStore.activate(id)
+      void semanticMemoryIndex?.build().catch(() => undefined)
+      return status
+    },
+
+    removeEmbeddingModel(id) {
+      embeddingStore.remove(id)
+      semanticMemoryIndex?.markDirty()
+      return embeddingStore.list()
     },
 
     modelConfig() {

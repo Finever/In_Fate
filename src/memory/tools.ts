@@ -10,6 +10,7 @@ import type { MemoryAccess } from './access.ts'
 import type { MemoryPolicyStore } from './policy.ts'
 import type { MemoryProposalStore } from './proposals.ts'
 import type { MemorySearchIndex } from './search-index.ts'
+import type { SemanticMemoryIndex } from './semantic-index.ts'
 import type { MemoryAddInput, MemoryQuote, MemoryTag, MemoryStore } from './store.ts'
 import type { ToolDefinition, ToolResult } from '../tools/types.ts'
 
@@ -50,6 +51,7 @@ export function createMemoryTools(deps: {
   readonly proposals: MemoryProposalStore
   readonly policy?: MemoryPolicyStore
   readonly searchIndex?: MemorySearchIndex
+  readonly semanticIndex?: SemanticMemoryIndex
 }): ToolDefinition[] {
   const policyOf = (sessionId: string) =>
     deps.policy?.resolve(sessionId) ?? {
@@ -94,11 +96,16 @@ export function createMemoryTools(deps: {
       const input = args as { query: string; limit?: number }
       let hits
       try {
+        const semanticReady = deps.semanticIndex?.status().ready
+        hits = semanticReady && deps.semanticIndex
+          ? await deps.semanticIndex.search(input.query, { limit: input.limit ?? 20 })
+          : deps.searchIndex
+            ? deps.searchIndex.search(input.query, { limit: input.limit ?? 20 })
+            : deps.store.search(input.query, input.limit ?? 20)
+      } catch {
         hits = deps.searchIndex
           ? deps.searchIndex.search(input.query, { limit: input.limit ?? 20 })
           : deps.store.search(input.query, input.limit ?? 20)
-      } catch {
-        hits = deps.store.search(input.query, input.limit ?? 20)
       }
       return {
         text: hits.map(hit => `${hit.target}#${hit.id} [${hit.tag}] ${hit.preview}`).join('\n')

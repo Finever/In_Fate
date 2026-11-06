@@ -2,6 +2,8 @@ import type {
   AgentRunInfo,
   AgentSettingsUpdate,
   AgentSummary,
+  EmbeddingInstallJob,
+  EmbeddingModelStatus,
   MainAgentIdentity,
   MainAgentInfo,
   ModelConfig,
@@ -179,6 +181,45 @@ export const api = {
   async agents(options: WorkspaceQuery = {}): Promise<AgentRunInfo[]> {
     const body = await request<{ agents: AgentRunInfo[] }>(`/api/agents${query(options)}`)
     return body.agents
+  },
+
+  async embeddingModels(): Promise<EmbeddingModelStatus[]> {
+    const body = await request<{ models: EmbeddingModelStatus[] }>('/api/local-models/embeddings')
+    return body.models
+  },
+
+  async startEmbeddingInstall(
+    id: string,
+    mirror = true,
+  ): Promise<EmbeddingInstallJob> {
+    const body = await request<{ job: EmbeddingInstallJob }>(
+      `/api/local-models/embeddings/${encodeURIComponent(id)}/install`,
+      { method: 'POST', body: JSON.stringify({ mirror }) },
+    )
+    return body.job
+  },
+
+  async embeddingInstallJob(id: string): Promise<EmbeddingInstallJob> {
+    const body = await request<{ job: EmbeddingInstallJob }>(
+      `/api/local-models/jobs/${encodeURIComponent(id)}`,
+    )
+    return body.job
+  },
+
+  async activateEmbeddingModel(id: string): Promise<EmbeddingModelStatus> {
+    const body = await request<{ model: EmbeddingModelStatus }>(
+      `/api/local-models/embeddings/${encodeURIComponent(id)}/activate`,
+      { method: 'POST' },
+    )
+    return body.model
+  },
+
+  async removeEmbeddingModel(id: string): Promise<EmbeddingModelStatus[]> {
+    const body = await request<{ models: EmbeddingModelStatus[] }>(
+      `/api/local-models/embeddings/${encodeURIComponent(id)}`,
+      { method: 'DELETE' },
+    )
+    return body.models
   },
 
   async modelConfig(): Promise<ModelConfig> {

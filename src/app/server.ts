@@ -236,6 +236,61 @@ async function handle(
     return
   }
 
+  if (req.method === 'GET' && parts[1] === 'local-models' && parts[2] === 'embeddings'
+    && parts.length === 3) {
+    json(res, 200, { models: app.embeddingModels() })
+    return
+  }
+
+  if (req.method === 'POST' && parts[1] === 'local-models' && parts[2] === 'embeddings'
+    && parts[3] && parts[4] === 'install' && parts.length === 5) {
+    const body = await readOptionalJson(req)
+    if (body.mirror !== undefined && typeof body.mirror !== 'boolean') {
+      json(res, 400, { error: 'mirror must be a boolean' })
+      return
+    }
+    try {
+      const job = app.startEmbeddingInstall(parts[3]!, {
+        ...(typeof body.mirror === 'boolean' ? { mirror: body.mirror } : {}),
+      })
+      json(res, 202, { job })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  if (req.method === 'GET' && parts[1] === 'local-models' && parts[2] === 'jobs'
+    && parts[3] && parts.length === 4) {
+    const job = app.embeddingInstallJob(parts[3]!)
+    if (!job) {
+      json(res, 404, { error: 'job not found' })
+      return
+    }
+    json(res, 200, { job })
+    return
+  }
+
+  if (req.method === 'POST' && parts[1] === 'local-models' && parts[2] === 'embeddings'
+    && parts[3] && parts[4] === 'activate' && parts.length === 5) {
+    try {
+      json(res, 200, { model: app.activateEmbeddingModel(parts[3]!) })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  if (req.method === 'DELETE' && parts[1] === 'local-models' && parts[2] === 'embeddings'
+    && parts[3] && parts.length === 4) {
+    try {
+      json(res, 200, { models: app.removeEmbeddingModel(parts[3]!) })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
   if (req.method === 'GET' && parts[1] === 'model-config' && parts.length === 2) {
     json(res, 200, { config: app.modelConfig() })
     return
