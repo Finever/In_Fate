@@ -77,6 +77,23 @@ test('记忆工具：worker 默认只能 propose，approval off 后可直接写�
     policy.setDefault({ write: { approval: 'off' } })
     const written = await tools.get('memory_add')!.run(input, context('agent-session'))
     assert.equal(written.isError, undefined)
+
+    // approval off 只放开有 propose 能力的会话；observer 仍是只读。
+    access.grant('observer-session', 'observer')
+    const observerDenied = await tools.get('memory_add')!.run(
+      input,
+      context('observer-session'),
+    )
+    assert.equal(observerDenied.isError, true)
+
+    // shared 工具不能借 detail:_... 绕过私域隐藏。
+    await assert.rejects(
+      () => tools.get('memory_read')!.run(
+        { target: 'detail:_私域/秘密' },
+        context('user-session'),
+      ),
+      /private memory target/,
+    )
     index.markDirty()
 
     const searched = await tools.get('memory_search')!.run(

@@ -30,6 +30,21 @@ function denied(text: string): ToolResult {
   return { text, isError: true }
 }
 
+/**
+ * 共享工具只认公开 detail；下划线域是私域，不能被 memory_read 之类的直读绕过。
+ */
+function sharedTarget(value: string): string {
+  const body = value.startsWith('detail:') ? value.slice('detail:'.length) : ''
+  const segments = body.split('/')
+  if (
+    segments.length < 2
+    || segments.some(part => !part || part.startsWith('_') || part.startsWith('.'))
+  ) {
+    throw new Error(`private memory target is not accessible through shared tools: ${value}`)
+  }
+  return value
+}
+
 function parseTag(value: unknown): MemoryTag {
   if (value === '确信' || value === '可信' || value === '有疑') return value
   throw new Error(`invalid memory tag: ${String(value)}`)
@@ -71,7 +86,8 @@ export function createMemoryTools(deps: {
 
   const canWrite = (sessionId: string): boolean =>
     deps.access.canWrite(sessionId, 'shared')
-    || policyOf(sessionId).write.approval === 'off'
+    || (policyOf(sessionId).write.approval === 'off'
+      && deps.access.canPropose(sessionId, 'shared'))
 
   const search: ToolDefinition = {
     name: 'memory_search',
@@ -136,7 +152,7 @@ export function createMemoryTools(deps: {
         return denied('memory read not granted')
       }
       const input = args as { target: string; id?: string }
-      const doc = deps.store.read(input.target)
+      const doc = deps.store.read(sharedTarget(input.target))
       if (input.id) {
         const entry = doc.entries.find(item => item.id === input.id)
         if (!entry) return { text: `memory entry not found: ${input.id}`, isError: true }
@@ -178,7 +194,7 @@ export function createMemoryTools(deps: {
         return denied('memory write not granted; use memory_propose or turn write approval off')
       }
       const input = args as Record<string, unknown>
-      const entry = await deps.store.add(String(input.target), entryInput(input))
+      const entry = await deps.store.add(sharedTarget(String(input.target)), entryInput(input))
       return {
         text: `已写入 ${String(input.target)}#${entry.id}`,
         structured: entry,
@@ -211,7 +227,7 @@ export function createMemoryTools(deps: {
         return denied('memory write not granted; use memory_propose or turn write approval off')
       }
       const input = args as Record<string, unknown>
-      const entry = await deps.store.update(String(input.target), String(input.id), {
+      const entry = await deps.store.update(sharedTarget(String(input.target)), String(input.id), {
         ...(input.content !== undefined ? { content: String(input.content) } : {}),
         ...(input.tag !== undefined ? { tag: parseTag(input.tag) } : {}),
         ...(input.at !== undefined ? { at: input.at === null ? null : String(input.at) } : {}),
@@ -285,7 +301,7 @@ export function createMemoryTools(deps: {
         return denied('memory propose not granted')
       }
       const proposal = deps.proposals.propose({
-        target,
+        target: sharedTarget(target),
         sourceSession: context.sessionId,
         entry: entryInput(input),
         ...(typeof input.reason === 'string' ? { reason: input.reason } : {}),

@@ -93,6 +93,7 @@ export interface MemorySearchHit {
 
 export interface MemoryFileSummary {
   domain: string
+  namespace?: string
   project: string
   filename: string
   target: string
@@ -101,6 +102,50 @@ export interface MemoryFileSummary {
   quotes: number
   bytes: number
   updatedAt: string
+  private?: boolean
+  invalid?: string
+}
+
+export type MemoryLibraryArea = 'detail' | 'summaries' | 'proposals' | 'agents' | 'root'
+
+export interface MemoryLibraryNode {
+  path: string
+  name: string
+  kind: 'directory' | 'file'
+  area: MemoryLibraryArea
+  readOnly: boolean
+  target?: string
+  private?: boolean
+  invalid?: string
+  entries?: number
+  bytes?: number
+  updatedAt?: string
+}
+
+export interface MemoryLibraryFile {
+  path: string
+  area: MemoryLibraryArea
+  readOnly: boolean
+  text: string
+  bytes: number
+  updatedAt: string
+  json?: unknown
+  document?: MemoryDocument
+  invalid?: string
+}
+
+export interface MemoryTrashEntry {
+  id: string
+  original: string
+  name: string
+  kind: 'directory' | 'file'
+  movedAt: string
+}
+
+export interface MemoryCommitStatus {
+  gitRoot?: string
+  enabled: boolean
+  dirty: string[]
 }
 
 export interface MemoryValidationIssue {

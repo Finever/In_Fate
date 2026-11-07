@@ -18,8 +18,12 @@ import type {
   MemoryDocument,
   MemoryFileSummary,
   MemoryIndexList,
+  MemoryCommitStatus,
+  MemoryLibraryFile,
+  MemoryLibraryNode,
   MemoryProposal,
   MemorySearchHit,
+  MemoryTrashEntry,
   MemoryValidationIssue,
   SessionInfo,
   SessionInspection,
@@ -441,6 +445,71 @@ export const api = {
   async memoryIndex(): Promise<MemoryFileSummary[]> {
     const body = await request<{ files: MemoryFileSummary[] }>('/api/memory/index')
     return body.files
+  },
+
+  async memoryLibraryTree(): Promise<MemoryLibraryNode[]> {
+    const body = await request<{ tree: MemoryLibraryNode[] }>('/api/memory/library/tree')
+    return body.tree
+  },
+
+  async memoryLibraryRead(path: string): Promise<MemoryLibraryFile> {
+    const params = new URLSearchParams({ path })
+    const body = await request<{ file: MemoryLibraryFile }>(
+      `/api/memory/library/file?${params.toString()}`,
+    )
+    return body.file
+  },
+
+  async writeMemoryLibrary(path: string, text: string): Promise<MemoryLibraryFile> {
+    const body = await request<{ file: MemoryLibraryFile }>('/api/memory/library/file', {
+      method: 'PUT',
+      body: JSON.stringify({ path, text }),
+    })
+    return body.file
+  },
+
+  async mkdirMemoryLibrary(path: string): Promise<void> {
+    await request('/api/memory/library/mkdir', {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    })
+  },
+
+  async moveMemoryLibrary(from: string, to: string): Promise<void> {
+    await request('/api/memory/library/move', {
+      method: 'POST',
+      body: JSON.stringify({ from, to }),
+    })
+  },
+
+  async removeMemoryLibrary(path: string, permanent = false): Promise<void> {
+    await request('/api/memory/library/delete', {
+      method: 'POST',
+      body: JSON.stringify({ path, permanent }),
+    })
+  },
+
+  async memoryLibraryTrash(): Promise<MemoryTrashEntry[]> {
+    const body = await request<{ entries: MemoryTrashEntry[] }>('/api/memory/library/trash')
+    return body.entries
+  },
+
+  async restoreMemoryLibrary(id: string, to?: string): Promise<void> {
+    await request('/api/memory/library/restore', {
+      method: 'POST',
+      body: JSON.stringify({ id, ...(to ? { to } : {}) }),
+    })
+  },
+
+  async memoryCommitStatus(): Promise<MemoryCommitStatus> {
+    return request<MemoryCommitStatus>('/api/memory/commit')
+  },
+
+  async commitMemory(): Promise<MemoryCommitStatus> {
+    return request<MemoryCommitStatus>('/api/memory/commit', {
+      method: 'POST',
+      body: '{}',
+    })
   },
 
   async memoryIndexList(): Promise<MemoryIndexList> {

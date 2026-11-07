@@ -4527,3 +4527,74 @@ body.fw-resizing {
 .fw-model-provider-grid .fw-settings-provider.is-disabled {
   opacity: .58;
 }
+
+/* 记忆库结构面板 */
+.fw-mem-library {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  gap: 10px;
+}
+.fw-mem-library-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.fw-mem-library-head h3 {
+  margin: 0 0 4px;
+}
+.fw-mem-library-head small {
+  color: var(--muted);
+}
+.fw-mem-library-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.fw-mem-library-actions .fw-mem-btn.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.fw-mem-library .fw-mem-layout {
+  min-height: 0;
+  flex: 1;
+}
+.fw-mem-library-text {
+  min-height: 48vh;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  line-height: 1.55;
+  tab-size: 2;
+}
+.fw-mem-library-note {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 4px 2px;
+}
+.fw-mem-trash-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin: 8px 0;
+}
+.fw-mem-trash-row span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.fw-mem-trash-row small {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fw-mem-library .fw-mem-file {
+  width: 100%;
+}

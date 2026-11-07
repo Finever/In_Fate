@@ -124,7 +124,7 @@ export class MemorySearchIndex {
 
   private rebuild(): void {
     const db = this.db!
-    const docs = this.store.listDocuments()
+    const docs = this.store.listDocuments({ includePrivate: false, includeInvalid: false })
     db.exec('BEGIN')
     try {
       db.exec('DELETE FROM entries')

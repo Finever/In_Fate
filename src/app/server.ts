@@ -774,6 +774,139 @@ async function handle(
     return
   }
 
+  if (req.method === 'GET' && parts[1] === 'memory' && parts[2] === 'commit' && parts.length === 3) {
+    try {
+      json(res, 200, app.memoryCommitStatus())
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  if (req.method === 'POST' && parts[1] === 'memory' && parts[2] === 'commit' && parts.length === 3) {
+    try {
+      await app.commitMemory()
+      json(res, 200, app.memoryCommitStatus())
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  if (req.method === 'GET' && parts[1] === 'memory' && parts[2] === 'library' && parts[3] === 'tree') {
+    try {
+      json(res, 200, { tree: app.memoryLibraryTree() })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  if (req.method === 'GET' && parts[1] === 'memory' && parts[2] === 'library' && parts[3] === 'file') {
+    const path = url.searchParams.get('path') ?? ''
+    if (!path) {
+      json(res, 400, { error: 'path is required' })
+      return
+    }
+    try {
+      json(res, 200, { file: app.memoryLibraryRead(path) })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  if (req.method === 'PUT' && parts[1] === 'memory' && parts[2] === 'library' && parts[3] === 'file') {
+    const body = await readOptionalJson(req)
+    if (typeof body.path !== 'string' || typeof body.text !== 'string') {
+      json(res, 400, { error: 'path and text are required' })
+      return
+    }
+    try {
+      json(res, 200, { file: await app.memoryLibraryWrite(body.path, body.text) })
+    } catch (error) {
+      if (error instanceof MemoryValidationError) {
+        json(res, 400, {
+          error: '记忆文件校验失败',
+          issues: error.result.errors,
+          warnings: error.result.warnings,
+        })
+      } else {
+        json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+      }
+    }
+    return
+  }
+
+  if (req.method === 'POST' && parts[1] === 'memory' && parts[2] === 'library' && parts[3] === 'mkdir') {
+    const body = await readOptionalJson(req)
+    if (typeof body.path !== 'string' || !body.path) {
+      json(res, 400, { error: 'path is required' })
+      return
+    }
+    try {
+      await app.memoryLibraryMkdir(body.path)
+      json(res, 200, { ok: true })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  if (req.method === 'POST' && parts[1] === 'memory' && parts[2] === 'library' && parts[3] === 'move') {
+    const body = await readOptionalJson(req)
+    if (typeof body.from !== 'string' || typeof body.to !== 'string') {
+      json(res, 400, { error: 'from and to are required' })
+      return
+    }
+    try {
+      await app.memoryLibraryMove(body.from, body.to)
+      json(res, 200, { ok: true })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  if (req.method === 'POST' && parts[1] === 'memory' && parts[2] === 'library' && parts[3] === 'delete') {
+    const body = await readOptionalJson(req)
+    if (typeof body.path !== 'string' || !body.path) {
+      json(res, 400, { error: 'path is required' })
+      return
+    }
+    try {
+      await app.memoryLibraryRemove(body.path, body.permanent === true)
+      json(res, 200, { ok: true })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  if (req.method === 'GET' && parts[1] === 'memory' && parts[2] === 'library' && parts[3] === 'trash') {
+    try {
+      json(res, 200, { entries: app.memoryLibraryTrash() })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  if (req.method === 'POST' && parts[1] === 'memory' && parts[2] === 'library' && parts[3] === 'restore') {
+    const body = await readOptionalJson(req)
+    if (typeof body.id !== 'string' || !body.id) {
+      json(res, 400, { error: 'id is required' })
+      return
+    }
+    try {
+      await app.memoryLibraryRestore(body.id, typeof body.to === 'string' ? body.to : undefined)
+      json(res, 200, { ok: true })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
   if (req.method === 'GET' && parts[1] === 'memory' && parts[2] === 'log' && parts[3] === 'tree') {
     try {
       json(res, 200, app.memoryLogTree())

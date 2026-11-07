@@ -63,6 +63,12 @@ import { MemoryStore, type MemoryDocument, type MemoryEntry, type MemoryFileSumm
 import type { Issue } from '../memory/validate.ts'
 import { generateIndex, writeIndex, type IndexList } from '../memory/index.ts'
 import {
+  MemoryLibrary,
+  type MemoryLibraryFile,
+  type MemoryLibraryNode,
+  type MemoryTrashEntry,
+} from '../memory/library.ts'
+import {
   listLogTree,
   readLogPage,
   searchLogs,
@@ -371,6 +377,26 @@ export interface App {
   memorySearch(query: string, limit?: number): MemorySearchHit[]
   /** 全局 detail 记忆文件索引（域 / 文件 / 条数）。 */
   memoryIndex(): MemoryFileSummary[]
+  /** 记忆库完整树（含私域、坏文件、结构目录）。 */
+  memoryLibraryTree(): MemoryLibraryNode[]
+  /** 读任意可编辑库文件；detail 坏文件也返回 raw text。 */
+  memoryLibraryRead(path: string): MemoryLibraryFile
+  /** 写任意可编辑库文件；detail 走 MemoryStore 校验。 */
+  memoryLibraryWrite(path: string, text: string): Promise<MemoryLibraryFile>
+  /** 新建目录。 */
+  memoryLibraryMkdir(path: string): Promise<void>
+  /** 移动/重命名文件或目录。 */
+  memoryLibraryMove(from: string, to: string): Promise<void>
+  /** 删除到回收站；permanent=true 永久删除。 */
+  memoryLibraryRemove(path: string, permanent?: boolean): Promise<void>
+  /** 回收站列表。 */
+  memoryLibraryTrash(): MemoryTrashEntry[]
+  /** 从回收站恢复。 */
+  memoryLibraryRestore(id: string, to?: string): Promise<void>
+  /** 记忆库 git 提交状态。 */
+  memoryCommitStatus(): { gitRoot?: string; enabled: boolean; dirty: readonly string[] }
+  /** 手动提交当前 dirty（autoCommit 关闭时也可用）。 */
+  commitMemory(): Promise<void>
   /** indexlist 索引（只读，自动生成）。 */
   memoryIndexList(): IndexList
   /** 重算并写回 detail/indexlist.json。 */
@@ -1688,10 +1714,16 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   const memoryStore = memoryRoot
     ? new MemoryStore(memoryRoot, {
       timeZone: config.profile.timeZone,
+      libraryLock: join(memoryRoot, '.state', 'library.lock'),
       onWrite: target => {
         memoryCommitter?.markDirty(target)
         memorySearchIndex?.markDirty()
         semanticMemoryIndex?.markDirty()
+        try {
+          writeIndex({ memoryRoot })
+        } catch {
+          // 索引更新失败不阻塞记忆写入。
+        }
       },
     })
     : undefined
@@ -1706,6 +1738,28 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     ? new MemoryPolicyStore(memoryRoot, {
       agentIdFor: sessionId => sessionInfo(config.profile.dataRoot, sessionId)?.agentId
         ?? mainAgentId,
+    })
+    : undefined
+  const memoryLibrary = memoryRoot && memoryStore
+    ? new MemoryLibrary({
+      root: memoryRoot,
+      store: memoryStore,
+      onChange: paths => {
+        for (const path of paths) memoryCommitter?.markDirty(path)
+        memorySearchIndex?.markDirty()
+        semanticMemoryIndex?.markDirty()
+        try {
+          writeIndex({ memoryRoot })
+        } catch {
+          // 索引生成失败不阻塞结构操作。
+        }
+      },
+      validateWrite: (path, text) => {
+        if (path === 'policy.json') memoryPolicyStore?.validateText(text)
+      },
+      afterWrite: path => {
+        if (path === 'policy.json') memoryPolicyStore?.reload()
+      },
     })
     : undefined
   const memoryAccess = memoryStore
@@ -1744,6 +1798,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       tools.register(tool, 'builtin')
     }
     container.register('memoryStore', memoryStore)
+    if (memoryLibrary) container.register('memoryLibrary', memoryLibrary)
     container.register('memoryAccess', memoryAccess)
     container.register('memoryProposals', memoryProposals)
     if (memoryPolicyStore) container.register('memoryPolicy', memoryPolicyStore)
@@ -2832,7 +2887,57 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     },
 
     memoryIndex() {
-      return memoryStore?.listDocuments() ?? []
+      return memoryStore?.listDocuments({ includePrivate: true, includeInvalid: true }) ?? []
+    },
+
+    memoryLibraryTree() {
+      if (!memoryLibrary) throw new Error('memory is not configured')
+      return memoryLibrary.tree()
+    },
+
+    memoryLibraryRead(path) {
+      if (!memoryLibrary) throw new Error('memory is not configured')
+      return memoryLibrary.read(path)
+    },
+
+    async memoryLibraryWrite(path, text) {
+      if (!memoryLibrary) throw new Error('memory is not configured')
+      return memoryLibrary.write(path, text)
+    },
+
+    async memoryLibraryMkdir(path) {
+      if (!memoryLibrary) throw new Error('memory is not configured')
+      return memoryLibrary.mkdir(path)
+    },
+
+    async memoryLibraryMove(from, to) {
+      if (!memoryLibrary) throw new Error('memory is not configured')
+      return memoryLibrary.move(from, to)
+    },
+
+    async memoryLibraryRemove(path, permanent = false) {
+      if (!memoryLibrary) throw new Error('memory is not configured')
+      return memoryLibrary.remove(path, { permanent })
+    },
+
+    memoryLibraryTrash() {
+      if (!memoryLibrary) throw new Error('memory is not configured')
+      return memoryLibrary.trash()
+    },
+
+    async memoryLibraryRestore(id, to) {
+      if (!memoryLibrary) throw new Error('memory is not configured')
+      return memoryLibrary.restore(id, to)
+    },
+
+    memoryCommitStatus() {
+      if (!memoryCommitter) throw new Error('memory is not configured')
+      return memoryCommitter.status()
+    },
+
+    async commitMemory() {
+      if (!memoryCommitter) throw new Error('memory is not configured')
+      await memoryCommitter.commitNow()
     },
 
     memoryIndexList() {

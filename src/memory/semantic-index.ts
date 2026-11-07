@@ -165,7 +165,7 @@ export class SemanticMemoryIndex {
 
   private async rebuild(modelId: string): Promise<void> {
     const db = this.db!
-    const docs = this.store.listDocuments()
+    const docs = this.store.listDocuments({ includePrivate: false, includeInvalid: false })
     db.exec('BEGIN')
     try {
       db.exec('DELETE FROM vectors')

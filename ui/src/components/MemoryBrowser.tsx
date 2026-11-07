@@ -11,6 +11,7 @@ import type {
 } from '../types'
 import { Icon } from './Icon'
 import { MemoryIndexView } from './MemoryIndexView'
+import { MemoryLibraryPanel } from './MemoryLibraryPanel'
 import { MemoryLogView } from './MemoryLogView'
 
 const PAGE_SIZE = 20
@@ -227,7 +228,8 @@ function EntryEditor({
 export function MemoryBrowser({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => void }) {
   const [files, setFiles] = useState<MemoryFileSummary[]>([])
   const [indexLoading, setIndexLoading] = useState(true)
-  const [view, setView] = useState<'entries' | 'index' | 'log'>('entries')
+  const [view, setView] = useState<'entries' | 'index' | 'log' | 'structure'>('entries')
+  const [structureDirty, setStructureDirty] = useState(false)
   const [logTarget, setLogTarget] = useState<{ addr: string; key: number }>()
   const [selected, setSelected] = useState<string>()
   const [draft, setDraft] = useState<MemoryDocument>()
@@ -269,8 +271,8 @@ export function MemoryBrowser({ onDirtyChange }: { onDirtyChange?: (dirty: boole
   }, [loadIndex])
 
   useEffect(() => {
-    onDirtyChange?.(dirty)
-  }, [dirty, onDirtyChange])
+    onDirtyChange?.(dirty || structureDirty)
+  }, [dirty, structureDirty, onDirtyChange])
 
   useEffect(() => () => onDirtyChange?.(false), [onDirtyChange])
 
@@ -411,6 +413,13 @@ export function MemoryBrowser({ onDirtyChange }: { onDirtyChange?: (dirty: boole
     setView('log')
   }
 
+  function switchView(next: typeof view): void {
+    if (view === 'structure' && next !== 'structure' && structureDirty) {
+      if (!window.confirm('库结构里有未保存的改动，切换会丢失。继续？')) return
+    }
+    setView(next)
+  }
+
   const entries = draft ? draft.entries.slice(0, visible) : []
   const remaining = draft ? draft.entries.length - entries.length : 0
 
@@ -419,6 +428,7 @@ export function MemoryBrowser({ onDirtyChange }: { onDirtyChange?: (dirty: boole
       <div className="fw-mem-tabs">
         {([
           ['entries', '条目'],
+          ['structure', '结构'],
           ['index', '索引'],
           ['log', '日志'],
         ] as const).map(([id, label]) => (
@@ -426,7 +436,7 @@ export function MemoryBrowser({ onDirtyChange }: { onDirtyChange?: (dirty: boole
             key={id}
             type="button"
             className={view === id ? 'is-active' : ''}
-            onClick={() => setView(id)}
+            onClick={() => switchView(id)}
           >
             {label}
           </button>
@@ -638,6 +648,8 @@ export function MemoryBrowser({ onDirtyChange }: { onDirtyChange?: (dirty: boole
           )}
         </div>
       </div>
+      ) : view === 'structure' ? (
+        <MemoryLibraryPanel onDirtyChange={setStructureDirty} />
       ) : view === 'index' ? (
         <MemoryIndexView
           onOpenFile={target => {

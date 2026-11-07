@@ -9,6 +9,7 @@
 
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -45,13 +46,19 @@ export interface MemoryDocument {
   readonly filename: string
   readonly introduction: string
   readonly entries: readonly MemoryEntry[]
+  /** 保留未知顶层字段，避免编辑器保存时静默丢数据。 */
+  readonly [key: string]: unknown
 }
 
 export interface MemoryTarget {
   readonly target: string
+  /** 顶层目录，沿用 project 的语义。 */
   readonly domain: string
+  /** 完整相对目录，可含多层，例如 `_未凉/us`。 */
+  readonly namespace: string
   readonly file: string
   readonly path: string
+  readonly private: boolean
 }
 
 export interface MemoryAddInput {
@@ -80,8 +87,18 @@ export interface MemorySearchHit {
   readonly filename: string
 }
 
+export interface MemoryListOptions {
+  /** 是否把任意一段以 `_` 开头的私域也列出来；共享检索默认 false。 */
+  readonly includePrivate?: boolean
+  /** 是否把解析失败/filename 不一致的文件也列出来；给编辑器修复用。 */
+  readonly includeInvalid?: boolean
+}
+
 export interface MemoryFileSummary {
+  /** 顶层目录，保持旧字段语义。 */
   readonly domain: string
+  /** 完整相对目录，例如 `_未凉/us`。 */
+  readonly namespace?: string
   readonly project: string
   readonly filename: string
   readonly target: string
@@ -90,6 +107,8 @@ export interface MemoryFileSummary {
   readonly quotes: number
   readonly bytes: number
   readonly updatedAt: string
+  readonly private?: boolean
+  readonly invalid?: string
 }
 
 export class MemoryValidationError extends Error {
@@ -109,6 +128,13 @@ const BAD_SEGMENT = /[<>:"/\\|?*\u0000-\u001f]/
 const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i
 const LOG_ADDR = /^\d{4}-\d{2}-\d{2}-[A-Za-z0-9-]+-\d+$/
 
+const PROTECTED_DIRS = new Set(['_trash', '_archive'])
+
+/** 系统件/回收站/点目录不进入普通记忆 target。 */
+export function isProtectedMemorySegment(value: string): boolean {
+  return value.startsWith('.') || PROTECTED_DIRS.has(value)
+}
+
 function assertMemorySegment(value: string, label: string): string {
   if (
     value.length === 0
@@ -117,6 +143,7 @@ function assertMemorySegment(value: string, label: string): string {
     || BAD_SEGMENT.test(value)
     || /[. ]$/.test(value)
     || RESERVED.test(value)
+    || isProtectedMemorySegment(value)
   ) {
     throw new Error(`unsafe memory ${label}: ${JSON.stringify(value)}`)
   }
@@ -128,18 +155,38 @@ export function parseDetailTarget(memoryRoot: string, value: string): MemoryTarg
     throw new Error(`memory target must start with detail:: ${value}`)
   }
   const body = value.slice('detail:'.length)
-  const slash = body.indexOf('/')
-  if (slash <= 0 || slash === body.length - 1) {
-    throw new Error(`memory target must be detail:<domain>/<file>: ${value}`)
+  const parts = body.split('/')
+  const rawFile = parts.pop()
+  if (!rawFile || parts.length === 0) {
+    throw new Error(`memory target must be detail:<dir>/<file>: ${value}`)
   }
-  const domain = assertMemorySegment(body.slice(0, slash), 'domain')
-  const rawFile = assertMemorySegment(body.slice(slash + 1), 'file')
-  const file = rawFile.endsWith('.json') ? rawFile.slice(0, -'.json'.length) : rawFile
-  if (file.length === 0) throw new Error(`memory target has empty file: ${value}`)
+  const namespaceParts = parts.map((part, index) =>
+    assertMemorySegment(part, index === 0 ? 'domain' : 'namespace'))
+  const rawFileName = assertMemorySegment(rawFile, 'file')
+  const file = rawFileName.endsWith('.json')
+    ? rawFileName.slice(0, -'.json'.length)
+    : rawFileName
+  if (file.length === 0 || file === 'indexlist') {
+    throw new Error(`memory target has protected/empty file: ${value}`)
+  }
 
+  const namespace = namespaceParts.join('/')
+  const domain = namespaceParts[0]!
+  const privateTarget = namespaceParts.some(part => part.startsWith('_'))
   const detailRoot = join(memoryRoot, 'detail')
-  const path = assertWithin(detailRoot, join(detailRoot, domain, `${file}.json`), 'memory file')
-  return { target: `detail:${domain}/${file}`, domain, file, path }
+  const path = assertWithin(
+    detailRoot,
+    join(detailRoot, ...namespaceParts, `${file}.json`),
+    'memory file',
+  )
+  return {
+    target: `detail:${namespace}/${file}`,
+    domain,
+    namespace,
+    file,
+    path,
+    private: privateTarget,
+  }
 }
 
 function formatStamp(now: Date, timeZone: string): string {
@@ -186,12 +233,16 @@ function validateEntry(entry: MemoryEntry): void {
 
 function readDocument(path: string): MemoryDocument | undefined {
   if (!existsSync(path)) return undefined
-  const raw = JSON.parse(readFileSync(path, 'utf8')) as Partial<MemoryDocument>
+  if (lstatSync(path).isSymbolicLink()) {
+    throw new Error(`memory file symlink is not allowed: ${path}`)
+  }
+  const raw = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
   if (!Array.isArray(raw.entries)) throw new Error(`memory file has no entries: ${path}`)
   if (typeof raw.project !== 'string' || typeof raw.filename !== 'string') {
     throw new Error(`memory file has no project/filename: ${path}`)
   }
   return {
+    ...raw,
     project: raw.project,
     filename: raw.filename,
     introduction: typeof raw.introduction === 'string' ? raw.introduction : '',
@@ -200,6 +251,9 @@ function readDocument(path: string): MemoryDocument | undefined {
 }
 
 function writeDocument(path: string, doc: MemoryDocument): void {
+  if (existsSync(path) && lstatSync(path).isSymbolicLink()) {
+    throw new Error(`memory file symlink is not allowed: ${path}`)
+  }
   mkdirSync(dirname(path), { recursive: true })
   const temp = `${path}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`
   writeFileSync(temp, `${JSON.stringify(doc, null, 2)}\n`, 'utf8')
@@ -215,6 +269,50 @@ function nextId(doc: MemoryDocument): string {
     if (match) max = Math.max(max, Number(match[1]))
   }
   return `${prefix}-${String(max + 1).padStart(4, '0')}`
+}
+
+interface DetailFileRef {
+  readonly path: string
+  readonly namespace: string
+  readonly stem: string
+  readonly private: boolean
+}
+
+function collectDetailFiles(
+  detailRoot: string,
+  options: MemoryListOptions,
+  out: DetailFileRef[] = [],
+  segments: readonly string[] = [],
+): DetailFileRef[] {
+  let entries
+  try {
+    entries = readdirSync(
+      segments.length === 0 ? detailRoot : join(detailRoot, ...segments),
+      { withFileTypes: true },
+    )
+  } catch {
+    return out
+  }
+  for (const entry of entries) {
+    if (entry.name.startsWith('.') || PROTECTED_DIRS.has(entry.name)) continue
+    if (entry.isDirectory()) {
+      collectDetailFiles(detailRoot, options, out, [...segments, entry.name])
+      continue
+    }
+    if (!entry.isFile() || !entry.name.endsWith('.json')) continue
+    if (entry.name === 'indexlist.json' || segments.length === 0) continue
+    const stem = entry.name.slice(0, -'.json'.length)
+    if (!stem || stem === 'indexlist') continue
+    const isPrivate = segments.some(part => part.startsWith('_'))
+    if (isPrivate && !options.includePrivate) continue
+    out.push({
+      path: join(detailRoot, ...segments, entry.name),
+      namespace: segments.join('/'),
+      stem,
+      private: isPrivate,
+    })
+  }
+  return out
 }
 
 /** 每个 target 一条 Promise 链；不同 target 并行。 */
@@ -241,6 +339,8 @@ export interface MemoryStoreOptions {
   readonly now?: () => Date
   readonly writer?: MemoryShardWriter
   readonly onWrite?: (target: string) => void
+  /** 与 MemoryLibrary 共用的库级锁；所有 detail 写入先拿它，再拿 target 锁。 */
+  readonly libraryLock?: string
 }
 
 export class MemoryStore {
@@ -249,13 +349,22 @@ export class MemoryStore {
   private readonly now: () => Date
   private readonly writer: MemoryShardWriter
   private readonly onWrite?: (target: string) => void
+  private readonly libraryLock?: string
 
   constructor(root: string, options: MemoryStoreOptions = {}) {
     this.root = root
     this.timeZone = options.timeZone ?? 'Asia/Shanghai'
     this.now = options.now ?? (() => new Date())
     this.writer = options.writer ?? new MemoryShardWriter()
+    this.libraryLock = options.libraryLock
     if (options.onWrite) this.onWrite = options.onWrite
+  }
+
+  /** 所有 detail 写入都先过库级锁；锁顺序固定为 library → target。 */
+  private withLibrary<T>(task: () => Promise<T>): Promise<T> {
+    if (!this.libraryLock) return task()
+    mkdirSync(dirname(this.libraryLock), { recursive: true })
+    return withFileLock(this.libraryLock, task, { timeoutMs: 15_000 })
   }
 
   target(value: string): MemoryTarget {
@@ -269,42 +378,57 @@ export class MemoryStore {
     return doc
   }
 
-  /** 扫 detail 目录，给 UI 的文件树用；坏文件跳过，读文件时再报。 */
-  listDocuments(): MemoryFileSummary[] {
+  /**
+   * 扫 detail 目录，给 UI/索引用。
+   *
+   * 默认只列共享域且跳过坏文件；编辑器传 includePrivate/includeInvalid，
+   * 才能在树里看到 `_未凉` 和需要修复的文件。
+   */
+  listDocuments(options: MemoryListOptions = {}): MemoryFileSummary[] {
     const detailRoot = join(this.root, 'detail')
     if (!existsSync(detailRoot)) return []
+    const files = collectDetailFiles(detailRoot, options)
     const out: MemoryFileSummary[] = []
-    for (const domain of readdirSync(detailRoot, { withFileTypes: true })) {
-      if (!domain.isDirectory() || domain.name.startsWith('_')) continue
-      const dir = join(detailRoot, domain.name)
-      for (const file of readdirSync(dir, { withFileTypes: true })) {
-        if (!file.isFile() || !file.name.endsWith('.json')) continue
-        const path = join(dir, file.name)
-        try {
-          const doc = readDocument(path)
-          if (!doc) continue
-          const stat = statSync(path)
-          out.push({
-            domain: domain.name,
-            project: doc.project,
-            filename: doc.filename,
-            target: `detail:${domain.name}/${doc.filename}`,
-            introduction: doc.introduction,
-            entries: doc.entries.length,
-            quotes: doc.entries.reduce(
-              (sum, entry) => sum + (entry.quotes?.length ?? 0),
-              0,
-            ),
-            bytes: stat.size,
-            updatedAt: stat.mtime.toISOString(),
-          })
-        } catch {
-          // 坏文件不阻塞索引。
+    for (const file of files) {
+      let doc: MemoryDocument | undefined
+      let invalid: string | undefined
+      try {
+        doc = readDocument(file.path)
+        if (!doc) invalid = 'file disappeared'
+        else if (doc.filename !== file.stem) {
+          invalid = `filename mismatch: ${doc.filename} vs ${file.stem}`
         }
+      } catch (error) {
+        invalid = error instanceof Error ? error.message : String(error)
       }
+      if (invalid && !options.includeInvalid) continue
+      let stat
+      try {
+        stat = statSync(file.path)
+      } catch {
+        continue
+      }
+      const entries = doc?.entries ?? []
+      out.push({
+        domain: file.namespace.split('/')[0] ?? '',
+        namespace: file.namespace,
+        project: doc?.project ?? '',
+        filename: file.stem,
+        target: `detail:${file.namespace}/${file.stem}`,
+        introduction: doc?.introduction ?? '',
+        entries: entries.length,
+        quotes: entries.reduce(
+          (sum, entry) => sum + (entry.quotes?.length ?? 0),
+          0,
+        ),
+        bytes: stat.size,
+        updatedAt: stat.mtime.toISOString(),
+        ...(file.private ? { private: true } : {}),
+        ...(invalid ? { invalid } : {}),
+      })
     }
     return out.sort((a, b) =>
-      a.domain.localeCompare(b.domain, 'zh')
+      (a.namespace ?? a.domain).localeCompare(b.namespace ?? b.domain, 'zh')
       || a.filename.localeCompare(b.filename, 'zh'))
   }
 
@@ -314,7 +438,7 @@ export class MemoryStore {
     doc: MemoryDocument,
   ): Promise<{ document: MemoryDocument; warnings: readonly Issue[] }> {
     const target = this.target(value)
-    return this.writer.run(target.path, () => withFileLock(target.path, () => {
+    return this.withLibrary(() => this.writer.run(target.path, () => withFileLock(target.path, () => {
       if (doc.filename !== target.file) {
         throw new Error(`memory filename mismatch: ${doc.filename} vs ${target.file}`)
       }
@@ -327,46 +451,40 @@ export class MemoryStore {
       writeDocument(target.path, next)
       this.onWrite?.(target.target)
       return { document: next, warnings: result.warnings }
-    }, { timeoutMs: 5_000 }))
+    }, { timeoutMs: 5_000 })))
   }
 
-  search(query: string, limit = 20): MemorySearchHit[] {
+  search(query: string, limit = 20, options: MemoryListOptions = {}): MemorySearchHit[] {
     const needle = query.trim().toLowerCase()
     if (needle.length === 0) return []
-    const detailRoot = join(this.root, 'detail')
-    if (!existsSync(detailRoot)) return []
-
     const hits: MemorySearchHit[] = []
-    for (const domain of readdirSync(detailRoot, { withFileTypes: true })) {
-      if (!domain.isDirectory() || domain.name.startsWith('_')) continue
-      const domainDir = join(detailRoot, domain.name)
-      for (const file of readdirSync(domainDir, { withFileTypes: true })) {
-        if (!file.isFile() || !file.name.endsWith('.json')) continue
-        let doc: MemoryDocument | undefined
-        try {
-          doc = readDocument(join(domainDir, file.name))
-        } catch {
-          continue
-        }
-        if (!doc) continue
-        for (const entry of doc.entries) {
-          const haystack = [
-            entry.id,
-            entry.content,
-            ...(entry.quotes ?? []).map(quote => quote.say),
-          ].join('\n').toLowerCase()
-          if (!haystack.includes(needle)) continue
-          hits.push({
-            target: `detail:${domain.name}/${doc.filename}`,
-            id: entry.id,
-            tag: entry.tag,
-            preview: entry.content.length > 240
-              ? `${entry.content.slice(0, 240)}…`
-              : entry.content,
-            filename: doc.filename,
-          })
-          if (hits.length >= limit) return hits
-        }
+    for (const summary of this.listDocuments({
+      includePrivate: options.includePrivate === true,
+      includeInvalid: false,
+    })) {
+      let doc: MemoryDocument
+      try {
+        doc = this.read(summary.target)
+      } catch {
+        continue
+      }
+      for (const entry of doc.entries) {
+        const haystack = [
+          entry.id,
+          entry.content,
+          ...(entry.quotes ?? []).map(quote => quote.say),
+        ].join('\n').toLowerCase()
+        if (!haystack.includes(needle)) continue
+        hits.push({
+          target: summary.target,
+          id: entry.id,
+          tag: entry.tag,
+          preview: entry.content.length > 240
+            ? `${entry.content.slice(0, 240)}…`
+            : entry.content,
+          filename: summary.filename,
+        })
+        if (hits.length >= limit) return hits
       }
     }
     return hits
@@ -375,7 +493,7 @@ export class MemoryStore {
   add(value: string, input: MemoryAddInput): Promise<MemoryEntry> {
     const target = this.target(value)
     mkdirSync(dirname(target.path), { recursive: true })
-    return this.writer.run(target.path, () => withFileLock(target.path, () => {
+    return this.withLibrary(() => this.writer.run(target.path, () => withFileLock(target.path, () => {
       const existing = readDocument(target.path)
       const doc: MemoryDocument = existing ?? {
         project: target.domain,
@@ -402,12 +520,12 @@ export class MemoryStore {
       })
       this.onWrite?.(target.target)
       return entry
-    }, { timeoutMs: 5_000 }))
+    }, { timeoutMs: 5_000 })))
   }
 
   update(value: string, id: string, patch: MemoryUpdateInput): Promise<MemoryEntry> {
     const target = this.target(value)
-    return this.writer.run(target.path, () => withFileLock(target.path, () => {
+    return this.withLibrary(() => this.writer.run(target.path, () => withFileLock(target.path, () => {
       const doc = readDocument(target.path)
       if (!doc) throw new Error(`memory target not found: ${target.target}`)
       const index = doc.entries.findIndex(entry => entry.id === id)
@@ -433,7 +551,7 @@ export class MemoryStore {
       writeDocument(target.path, { ...doc, entries })
       this.onWrite?.(target.target)
       return next
-    }, { timeoutMs: 5_000 }))
+    }, { timeoutMs: 5_000 })))
   }
 
   async flush(): Promise<void> {

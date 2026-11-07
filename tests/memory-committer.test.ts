@@ -65,3 +65,32 @@ test('记忆根没有 .git、detail 是仓库时也能提交', async () => {
     rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   }
 })
+
+test('自动提交关闭时仍记录 dirty，可手动提交', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'if-committer-manual-'))
+  try {
+    try {
+      execFileSync('git', ['init'], { cwd: dir, stdio: 'ignore' })
+      execFileSync('git', ['config', 'user.email', 'if@test.local'], { cwd: dir })
+      execFileSync('git', ['config', 'user.name', 'IF Test'], { cwd: dir })
+    } catch {
+      return
+    }
+    mkdirSync(join(dir, 'detail', 'test'), { recursive: true })
+    writeFileSync(join(dir, 'detail', 'test', 'notes.json'), '{"entries":[]}\n', 'utf8')
+    execFileSync('git', ['add', 'detail'], { cwd: dir })
+    execFileSync('git', ['commit', '-m', 'init'], { cwd: dir, stdio: 'ignore' })
+
+    writeFileSync(join(dir, 'detail', 'test', 'notes.json'), '{"entries":[1]}\n', 'utf8')
+    const committer = new MemoryCommitter(dir, { enabled: false })
+    committer.markDirty('detail:test/notes')
+    assert.deepEqual(committer.status().dirty, ['detail:test/notes'])
+    await committer.commitNow()
+
+    const message = execFileSync('git', ['log', '-1', '--pretty=%s'], { cwd: dir, encoding: 'utf8' })
+    assert.match(message, /memory: 手动提交/)
+    assert.deepEqual(committer.status().dirty, [])
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+  }
+})
