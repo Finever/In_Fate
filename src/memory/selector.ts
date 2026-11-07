@@ -1,8 +1,8 @@
 /**
  * Jev 选择器的契约与轻量本地实现。
  *
- * 选择器只负责“从共享记忆里挑几条”，不负责推理；后续可以换成
- * Jev 小模型或外部 selector，只要实现 MemorySelector。
+ * 选择器直接按正文/原话打分；模型生成的摘要只是加分项和展示文本，
+ * 缺失时仍能选择，不会退回抽取式摘要。
  *
  * @module if/memory/selector
  */
@@ -10,7 +10,7 @@
 import { createHash } from 'node:crypto'
 import type { HistoryMessage } from '../projections/history.ts'
 import type { ResolvedMemoryPolicy } from './policy.ts'
-import type { MemoryTag, MemoryStore } from './store.ts'
+import type { MemoryEntry, MemoryStore, MemoryTag } from './store.ts'
 import { MemorySummaryStore, type MemorySummaryDocument, type MemoryEntrySummary } from './summary.ts'
 
 export interface MemorySelectionInput {
@@ -77,13 +77,27 @@ function termsOf(text: string): string[] {
     .match(/[\p{Script=Han}]{2,}|[a-z0-9_]{2,}/gu) ?? []
 }
 
+function entrySummary(
+  summary: MemorySummaryDocument | undefined,
+  entry: MemoryEntry,
+): MemoryEntrySummary | undefined {
+  return summary?.entries.find(item => item.entryId === entry.id)
+}
+
 function scoreEntry(
-  summary: MemoryEntrySummary,
+  entry: MemoryEntry,
+  cached: MemoryEntrySummary | undefined,
   query: string,
   queryTerms: readonly string[],
 ): number {
-  let score = TAG_WEIGHT[summary.tag]
-  const haystack = `${summary.title}\n${summary.summary}\n${summary.keywords.join(' ')}`.toLowerCase()
+  const haystack = [
+    entry.content,
+    ...(entry.quotes ?? []).map(quote => quote.say),
+    cached?.title ?? '',
+    cached?.summary ?? '',
+    cached?.keywords.join(' ') ?? '',
+  ].join('\n').toLowerCase()
+  let score = TAG_WEIGHT[entry.tag]
   for (const term of queryTerms) {
     if (haystack.includes(term)) score += 4
   }
@@ -92,18 +106,20 @@ function scoreEntry(
 }
 
 function scopeAllows(
-  summary: MemorySummaryDocument,
+  target: string,
+  domain: string,
   policy: ResolvedMemoryPolicy,
 ): boolean {
   const scope = policy.jev.scope ?? policy.scope
   const value = policy.jev.scopeValue ?? policy.scopeValue
   if (!value) return true
   if (scope === 'target') {
-    return summary.target === value || summary.target.startsWith(`${value}#`)
+    return target === value || target.startsWith(`${value}#`)
   }
   if (scope === 'domain') {
-    return summary.domain === value || summary.namespace === value
-      || summary.namespace.startsWith(`${value}/`)
+    return target === value
+      || target.startsWith(`detail:${value}/`)
+      || domain === value
   }
   return true
 }
@@ -126,46 +142,47 @@ export class HeuristicMemorySelector implements MemorySelector {
     const maxBytes = Math.max(512, input.policy.maxBytes)
 
     const candidates: {
-      summary: MemorySummaryDocument
-      entry: MemoryEntrySummary
+      target: string
+      entry: MemoryEntry
+      cached?: MemoryEntrySummary
       score: number
     }[] = []
-    for (const summary of this.summaries.ensureAll()) {
-      if (!scopeAllows(summary, input.policy)) continue
-      for (const entry of summary.entries) {
+    for (const file of this.store.listDocuments({ includePrivate: false, includeInvalid: false })) {
+      if (!scopeAllows(file.target, file.domain, input.policy)) continue
+      let doc
+      try {
+        doc = this.store.read(file.target)
+      } catch {
+        continue
+      }
+      const summary = this.summaries.read(file.target)
+      for (const entry of doc.entries) {
+        const cached = entrySummary(summary, entry)
         candidates.push({
-          summary,
+          target: file.target,
           entry,
-          score: scoreEntry(entry, query, queryTerms),
+          ...(cached ? { cached } : {}),
+          score: scoreEntry(entry, cached, query, queryTerms),
         })
       }
     }
     candidates.sort((a, b) =>
       b.score - a.score
-      || a.summary.target.localeCompare(b.summary.target, 'zh')
-      || a.entry.entryId.localeCompare(b.entry.entryId, 'zh'))
+      || a.target.localeCompare(b.target, 'zh')
+      || a.entry.id.localeCompare(b.entry.id, 'zh'))
     if (candidates.length === 0) return undefined
 
     const entries: MemoryPacketEntry[] = []
     let bytes = 0
     for (const candidate of candidates) {
       if (entries.length >= maxEntries) break
-      const doc = (() => {
-        try {
-          return this.store.read(candidate.summary.target)
-        } catch {
-          return undefined
-        }
-      })()
-      const entry = doc?.entries.find(item => item.id === candidate.entry.entryId)
-      if (!entry) continue
-      const content = entry.content.slice(0, MAX_CONTENT_CHARS)
+      const content = candidate.entry.content.slice(0, MAX_CONTENT_CHARS)
       const packetEntry: MemoryPacketEntry = {
-        target: candidate.summary.target,
-        entryId: entry.id,
-        tag: entry.tag,
-        title: candidate.entry.title,
-        summary: candidate.entry.summary,
+        target: candidate.target,
+        entryId: candidate.entry.id,
+        tag: candidate.entry.tag,
+        title: candidate.cached?.title ?? candidate.entry.id,
+        summary: candidate.cached?.summary ?? '',
         content,
         score: candidate.score,
       }

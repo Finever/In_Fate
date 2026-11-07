@@ -1,8 +1,8 @@
 /**
- * 记忆条目摘要：给选择器用的轻量索引，不替代 detail。
+ * 记忆条目摘要：给选择器/展示用的生成式摘要，不替代 detail。
  *
- * 摘要是派生物，写在 summaries/<namespace>/<file>.json；detail 变了就重算。
- * 默认 extractive；以后可以换成 Jev / 本地模型生成，接口保持不变。
+ * 摘要由模型生成，写在 summaries/<namespace>/<file>.json；没有模型时
+ * 不偷偷退回抽取式，选择器直接用正文。摘要是派生缓存，不是记忆真相。
  *
  * @module if/memory/summary
  */
@@ -18,12 +18,7 @@ import {
 } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { assertWithin } from '../core/safe-path.ts'
-import type {
-  MemoryEntry,
-  MemoryFileSummary,
-  MemoryStore,
-  MemoryTag,
-} from './store.ts'
+import type { MemoryEntry, MemoryFileSummary, MemoryStore } from './store.ts'
 
 export interface MemoryEntrySummary {
   readonly target: string
@@ -31,7 +26,7 @@ export interface MemoryEntrySummary {
   readonly title: string
   readonly summary: string
   readonly keywords: readonly string[]
-  readonly tag: MemoryTag
+  readonly tag: '确信' | '可信' | '有疑'
   readonly bytes: number
   readonly digest: string
 }
@@ -43,15 +38,24 @@ export interface MemorySummaryDocument {
   readonly domain: string
   readonly namespace: string
   readonly generatedAt: string
+  readonly generator?: string
   readonly entries: readonly MemoryEntrySummary[]
 }
 
+export interface GeneratedEntrySummary {
+  readonly entryId: string
+  readonly title: string
+  readonly summary: string
+  readonly keywords?: readonly string[]
+}
+
 export interface MemorySummaryGenerator {
-  generate(input: {
+  readonly name: string
+  generateDocument(input: {
     readonly target: string
-    readonly entry: MemoryEntry
+    readonly entries: readonly MemoryEntry[]
     readonly now: Date
-  }): MemoryEntrySummary
+  }): Promise<readonly GeneratedEntrySummary[]>
 }
 
 export interface MemorySummaryStoreOptions {
@@ -62,87 +66,29 @@ export interface MemorySummaryStoreOptions {
   readonly onWrite?: (target: string) => void
 }
 
-const MAX_SUMMARY_CHARS = 220
-const MAX_KEYWORDS = 12
-
-function plain(text: string): string {
-  return text
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/[*_~`>#-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-function titleOf(text: string): string {
-  const line = text.split('\n').map(line => line.trim()).find(Boolean) ?? ''
-  return plain(line).slice(0, 48) || '（无标题）'
-}
-
-function summaryOf(text: string): string {
-  const value = plain(text)
-  if (value.length <= MAX_SUMMARY_CHARS) return value
-  return `${value.slice(0, MAX_SUMMARY_CHARS)}…`
-}
-
-function keywordsOf(text: string): string[] {
-  const words = text.match(/[\p{Script=Han}]{2,}|[A-Za-z0-9_]{2,}/gu) ?? []
-  const stop = new Set([
-    '这个', '那个', '我们', '你们', '他们', '自己', '因为', '所以', '如果',
-    '但是', '然后', '已经', '可以', '没有', '不是', '就是', '一个', '什么',
-    'the', 'and', 'for', 'with', 'this', 'that', 'from', 'have', 'will',
-  ])
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const word of words) {
-    const key = word.toLowerCase()
-    if (stop.has(key) || seen.has(key)) continue
-    seen.add(key)
-    out.push(word)
-    if (out.length >= MAX_KEYWORDS) break
-  }
-  return out
-}
-
 function digestOf(entry: MemoryEntry): string {
   return createHash('sha1')
     .update(`${entry.content}\n${(entry.quotes ?? []).map(quote => quote.say).join('\n')}`)
     .digest('hex')
 }
 
-export class ExtractiveSummaryGenerator implements MemorySummaryGenerator {
-  generate(input: { readonly target: string; readonly entry: MemoryEntry; readonly now: Date }): MemoryEntrySummary {
-    const text = [
-      input.entry.content,
-      ...(input.entry.quotes ?? []).map(quote => quote.say),
-    ].join('\n')
-    return {
-      target: input.target,
-      entryId: input.entry.id,
-      title: titleOf(input.entry.content),
-      summary: summaryOf(text),
-      keywords: keywordsOf(text),
-      tag: input.entry.tag,
-      bytes: Buffer.byteLength(input.entry.content, 'utf8'),
-      digest: digestOf(input.entry),
-    }
-  }
+function cleanText(value: unknown, max: number): string {
+  return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, max) : ''
 }
 
 export class MemorySummaryStore {
   readonly root: string
   readonly store: MemoryStore
   private readonly now: () => Date
-  private readonly generator: MemorySummaryGenerator
+  private readonly generator?: MemorySummaryGenerator
   private readonly onWrite?: (target: string) => void
 
   constructor(options: MemorySummaryStoreOptions) {
     this.root = options.root
     this.store = options.store
     this.now = options.now ?? (() => new Date())
-    this.generator = options.generator ?? new ExtractiveSummaryGenerator()
-    this.onWrite = options.onWrite
+    this.generator = options.generator
+    if (options.onWrite) this.onWrite = options.onWrite
   }
 
   pathFor(target: string): string {
@@ -161,15 +107,71 @@ export class MemorySummaryStore {
     if (!existsSync(path)) return undefined
     try {
       const raw = JSON.parse(readFileSync(path, 'utf8')) as MemorySummaryDocument
-      if (raw.version !== 1 || raw.target !== target || !Array.isArray(raw.entries)) return undefined
+      if (
+        raw.version !== 1
+        || raw.target !== target
+        || !Array.isArray(raw.entries)
+        || typeof raw.generator !== 'string'
+        || raw.generator.length === 0
+      ) return undefined
       return raw
     } catch {
       return undefined
     }
   }
 
-  /** 同步生成；选择器在 renderContext 里调用，因此不能异步。 */
-  ensure(target: string): MemorySummaryDocument {
+  /** 显式重建用；没有配置模型时直接报错，不退回抽取。 */
+  async generate(target: string): Promise<MemorySummaryDocument> {
+    if (!this.generator) throw new Error('memory summary generator is not configured')
+    const doc = this.store.read(target)
+    const parsed = this.store.target(target)
+    const generated = await this.generator.generateDocument({
+      target,
+      entries: doc.entries,
+      now: this.now(),
+    })
+    const byId = new Map(generated.map(item => [item.entryId, item]))
+    const entries: MemoryEntrySummary[] = []
+    for (const entry of doc.entries) {
+      const summary = byId.get(entry.id)
+      if (!summary) continue
+      entries.push({
+        target,
+        entryId: entry.id,
+        title: cleanText(summary.title, 80) || entry.id,
+        summary: cleanText(summary.summary, 600),
+        keywords: (summary.keywords ?? [])
+          .filter((word): word is string => typeof word === 'string')
+          .map(word => word.trim())
+          .filter(Boolean)
+          .slice(0, 12),
+        tag: entry.tag,
+        bytes: Buffer.byteLength(entry.content, 'utf8'),
+        digest: digestOf(entry),
+      })
+    }
+    if (entries.length === 0) throw new Error(`summary generator returned no entries: ${target}`)
+    const path = this.pathFor(target)
+    const summary: MemorySummaryDocument = {
+      version: 1,
+      target,
+      filename: parsed.file,
+      domain: parsed.domain,
+      namespace: parsed.namespace,
+      generatedAt: this.now().toISOString(),
+      generator: this.generator.name,
+      entries,
+    }
+    mkdirSync(dirname(path), { recursive: true })
+    const temp = `${path}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`
+    writeFileSync(temp, `${JSON.stringify(summary, null, 2)}\n`, 'utf8')
+    renameSync(temp, path)
+    this.onWrite?.(target)
+    return summary
+  }
+
+  /** 只在摘要比 detail 新时复用；不会在 renderContext 里被调用。 */
+  async ensure(target: string): Promise<MemorySummaryDocument | undefined> {
     const path = this.pathFor(target)
     const detailPath = this.store.target(target).path
     if (existsSync(path) && existsSync(detailPath)) {
@@ -180,10 +182,12 @@ export class MemorySummaryStore {
         if (existing) return existing
       }
     }
+    if (!this.generator) return undefined
     return this.generate(target)
   }
 
-  ensureAll(targets?: readonly string[]): MemorySummaryDocument[] {
+  async ensureAll(targets?: readonly string[]): Promise<MemorySummaryDocument[]> {
+    if (!this.generator) throw new Error('memory summary generator is not configured')
     const list = targets ?? this.store.listDocuments({
       includePrivate: false,
       includeInvalid: false,
@@ -191,34 +195,13 @@ export class MemorySummaryStore {
     const out: MemorySummaryDocument[] = []
     for (const target of list) {
       try {
-        out.push(this.ensure(target))
+        const summary = await this.ensure(target)
+        if (summary) out.push(summary)
       } catch {
-        // 坏文件不阻塞选择器。
+        // 单个文件失败不阻塞其它摘要；调用方可看旧缓存。
       }
     }
     return out
-  }
-
-  generate(target: string): MemorySummaryDocument {
-    const doc = this.store.read(target)
-    const parsed = this.store.target(target)
-    const path = this.pathFor(target)
-    const summary: MemorySummaryDocument = {
-      version: 1,
-      target,
-      filename: parsed.file,
-      domain: parsed.domain,
-      namespace: parsed.namespace,
-      generatedAt: this.now().toISOString(),
-      entries: doc.entries.map(entry =>
-        this.generator.generate({ target, entry, now: this.now() })),
-    }
-    mkdirSync(dirname(path), { recursive: true })
-    const temp = `${path}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`
-    writeFileSync(temp, `${JSON.stringify(summary, null, 2)}\n`, 'utf8')
-    renameSync(temp, path)
-    this.onWrite?.(target)
-    return summary
   }
 }
 

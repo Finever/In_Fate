@@ -106,9 +106,10 @@ test('记忆库 HTTP：树、文件 CRUD、回收站与 log 只读', async () =>
       headers,
       body: '{}',
     })
-    assert.equal(summaries.status, 200)
-    const summaryBody = await summaries.json() as { count: number }
-    assert.equal(summaryBody.count >= 1, true)
+    // 测试配置没有主 agent 模型，摘要器未配置；这里只验证路由明确失败。
+    assert.equal(summaries.status, 400)
+    const summaryBody = await summaries.json() as { error?: string }
+    assert.match(summaryBody.error ?? '', /summary generator/)
 
     const commit = await fetch(`${handle.url}/api/memory/commit`, { headers })
     assert.equal(commit.status, 200)

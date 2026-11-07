@@ -777,7 +777,7 @@ async function handle(
   if (req.method === 'POST' && parts[1] === 'memory' && parts[2] === 'summaries'
     && parts[3] === 'rebuild' && parts.length === 4) {
     try {
-      json(res, 200, app.rebuildMemorySummaries())
+      json(res, 200, await app.rebuildMemorySummaries())
     } catch (error) {
       json(res, 400, { error: error instanceof Error ? error.message : String(error) })
     }

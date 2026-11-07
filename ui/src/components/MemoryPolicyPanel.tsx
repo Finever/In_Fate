@@ -161,7 +161,7 @@ export function MemoryPolicyPanel() {
         </div>
       )}
       <div className="fw-mem-library-note">
-        Jev 推送只使用共享 detail，不包含 `_` 私域；摘要由“结构 → 重建摘要”生成。
+        Jev 推送只使用共享 detail，不包含 `_` 私域；摘要在“结构 → 重建摘要”里由主 agent 模型生成。
       </div>
     </div>
   )

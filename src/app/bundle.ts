@@ -59,6 +59,7 @@ import {
 import { ensureMemoryLayout, resolveMemoryRoot } from '../memory/root.ts'
 import { MemorySearchIndex } from '../memory/search-index.ts'
 import { MemorySummaryStore } from '../memory/summary.ts'
+import { ModelSummaryGenerator } from '../memory/summary-model.ts'
 import { HeuristicMemorySelector } from '../memory/selector.ts'
 import { MemoryPushService } from '../memory/push.ts'
 import { SemanticMemoryIndex } from '../memory/semantic-index.ts'
@@ -402,7 +403,7 @@ export interface App {
   /** 手动提交当前 dirty（autoCommit 关闭时也可用）。 */
   commitMemory(): Promise<void>
   /** 重建所有共享 detail 的摘要文件。 */
-  rebuildMemorySummaries(): { count: number; targets: readonly string[] }
+  rebuildMemorySummaries(): Promise<{ count: number; targets: readonly string[] }>
   /** indexlist 索引（只读，自动生成）。 */
   memoryIndexList(): IndexList
   /** 重算并写回 detail/indexlist.json。 */
@@ -1748,10 +1749,20 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         ?? mainAgentId,
     })
     : undefined
+  const summaryModel = (() => {
+    try {
+      return resolveAgentModel(mainAgentId)
+    } catch {
+      return undefined
+    }
+  })()
   const memorySummaries = memoryRoot && memoryStore
     ? new MemorySummaryStore({
       root: memoryRoot,
       store: memoryStore,
+      ...(summaryModel
+        ? { generator: new ModelSummaryGenerator({ model: summaryModel }) }
+        : {}),
       onWrite: target => memoryCommitter?.markDirty(target),
     })
     : undefined
@@ -2980,9 +2991,9 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       await memoryCommitter.commitNow()
     },
 
-    rebuildMemorySummaries() {
+    async rebuildMemorySummaries() {
       if (!memorySummaries) throw new Error('memory is not configured')
-      const docs = memorySummaries.ensureAll()
+      const docs = await memorySummaries.ensureAll()
       return { count: docs.length, targets: docs.map(doc => doc.target) }
     },
 

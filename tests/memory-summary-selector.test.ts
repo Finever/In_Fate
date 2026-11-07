@@ -10,8 +10,20 @@ import { renderContext } from '../src/context/pipeline.ts'
 import { ensureMemoryLayout } from '../src/memory/root.ts'
 import { HeuristicMemorySelector } from '../src/memory/selector.ts'
 import { MemoryStore } from '../src/memory/store.ts'
-import { MemorySummaryStore } from '../src/memory/summary.ts'
+import { MemorySummaryStore, type MemorySummaryGenerator } from '../src/memory/summary.ts'
 import type { HistoryMessage } from '../src/projections/history.ts'
+
+const fakeGenerator: MemorySummaryGenerator = {
+  name: 'fake-model',
+  async generateDocument({ entries }) {
+    return entries.map(entry => ({
+      entryId: entry.id,
+      title: entry.id,
+      summary: `模型摘要：${entry.content.slice(0, 80)}`,
+      keywords: ['深夜', '代码'],
+    }))
+  },
+}
 
 function fixture(): {
   root: string
@@ -23,7 +35,7 @@ function fixture(): {
   const root = mkdtempSync(join(tmpdir(), 'if-memory-selector-'))
   ensureMemoryLayout(root)
   const store = new MemoryStore(root)
-  const summaries = new MemorySummaryStore({ root, store })
+  const summaries = new MemorySummaryStore({ root, store, generator: fakeGenerator })
   return {
     root,
     store,
@@ -58,10 +70,10 @@ test('摘要：生成到 summaries，选择器按查询命中，私域不进入�
       tag: '确信',
       introduction: '私域',
     })
-    const summary = ctx.summaries.ensure('detail:环境/深夜')
+    const summary = (await ctx.summaries.ensure('detail:环境/深夜'))!
     assert.equal(summary.entries.length, 1)
     assert.equal(existsSync(join(ctx.root, 'summaries', '环境', '深夜.json')), true)
-    assert.match(summary.entries[0]!.summary, /深夜/)
+    assert.match(summary.entries[0]!.summary, /模型摘要/)
 
     const selector = new HeuristicMemorySelector({ store: ctx.store, summaries: ctx.summaries })
     const packet = selector.select({
@@ -85,7 +97,7 @@ test('Jev once：同段复用，压缩换段默认复用旧包，开启重分析
       tag: '确信',
       introduction: '环境',
     })
-    const summaries = new MemorySummaryStore({ root: ctx.root, store: ctx.store })
+    const summaries = new MemorySummaryStore({ root: ctx.root, store: ctx.store, generator: fakeGenerator })
     const selector = new HeuristicMemorySelector({ store: ctx.store, summaries })
     const policy = new MemoryPolicyStore(ctx.root)
     policy.setDefault({ mode: 'jev-push', jev: { enabled: 'once', reanalyzeOnCompaction: false } })
@@ -125,7 +137,7 @@ test('Jev 段把选择结果注入 dynamic 上下文', async () => {
       tag: '确信',
       introduction: '环境',
     })
-    const summaries = new MemorySummaryStore({ root: ctx.root, store: ctx.store })
+    const summaries = new MemorySummaryStore({ root: ctx.root, store: ctx.store, generator: fakeGenerator })
     const selector = new HeuristicMemorySelector({ store: ctx.store, summaries })
     const policy = new MemoryPolicyStore(ctx.root)
     policy.setDefault({ mode: 'jev-push', jev: { enabled: 'once' } })
@@ -140,6 +152,30 @@ test('Jev 段把选择结果注入 dynamic 上下文', async () => {
     })
     assert.equal(rendered.system, '')
     assert.match(JSON.stringify(rendered.messages), /框架推送的记忆/)
+  } finally {
+    ctx.close()
+  }
+})
+
+
+test('没有模型摘要时，选择器仍按正文选择', async () => {
+  const ctx = fixture()
+  try {
+    await ctx.store.add('detail:环境/深夜', {
+      content: '触久喜欢在深夜写代码',
+      tag: '确信',
+      introduction: '环境',
+    })
+    const noSummary = new MemorySummaryStore({ root: ctx.root, store: ctx.store })
+    const selector = new HeuristicMemorySelector({ store: ctx.store, summaries: noSummary })
+    const packet = selector.select({
+      sessionId: 's1',
+      history: history('深夜写代码'),
+      policy: ctx.policy,
+    })
+    assert.ok(packet)
+    assert.equal(packet.entries[0]?.summary, '')
+    assert.match(packet.entries[0]?.content ?? '', /深夜写代码/)
   } finally {
     ctx.close()
   }

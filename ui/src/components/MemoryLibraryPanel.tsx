@@ -318,7 +318,7 @@ export function MemoryLibraryPanel({
         <div>
           <h3>库结构</h3>
           <small>
-            detail / summaries / proposals / agents；log 只读
+            detail / summaries / proposals / agents；摘要由主 agent 模型生成，共享记忆会发给该模型，log 只读
             {commitStatus?.dirty.length
               ? ` · ${commitStatus.dirty.length} 项待提交`
               : commitStatus?.gitRoot
