@@ -206,6 +206,22 @@ export class MemoryPolicyStore {
     this.save()
   }
 
+  /** 从磁盘重载；policy.json 被库编辑器改过后调用。 */
+  reload(): void {
+    this.doc = this.load()
+  }
+
+  /** 写前校验：至少保证 version 和三级对象形状正确。 */
+  validateText(text: string): void {
+    const raw = JSON.parse(text) as Partial<MemoryPolicyDocument>
+    if (raw.version !== 1) throw new Error('unsupported policy version')
+    for (const key of ['default', 'agents', 'sessions'] as const) {
+      if (raw[key] !== undefined && (typeof raw[key] !== 'object' || raw[key] === null || Array.isArray(raw[key]))) {
+        throw new Error(`policy.${key} must be an object`)
+      }
+    }
+  }
+
   private load(): MemoryPolicyDocument {
     if (!existsSync(this.file)) {
       return { version: 1, default: {}, agents: {}, sessions: {} }
