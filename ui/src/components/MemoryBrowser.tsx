@@ -12,6 +12,7 @@ import type {
 import { Icon } from './Icon'
 import { MemoryIndexView } from './MemoryIndexView'
 import { MemoryLibraryPanel } from './MemoryLibraryPanel'
+import { MemoryPolicyPanel } from './MemoryPolicyPanel'
 import { MemoryLogView } from './MemoryLogView'
 
 const PAGE_SIZE = 20
@@ -228,7 +229,7 @@ function EntryEditor({
 export function MemoryBrowser({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => void }) {
   const [files, setFiles] = useState<MemoryFileSummary[]>([])
   const [indexLoading, setIndexLoading] = useState(true)
-  const [view, setView] = useState<'entries' | 'index' | 'log' | 'structure'>('entries')
+  const [view, setView] = useState<'entries' | 'structure' | 'policy' | 'index' | 'log'>('entries')
   const [structureDirty, setStructureDirty] = useState(false)
   const [logTarget, setLogTarget] = useState<{ addr: string; key: number }>()
   const [selected, setSelected] = useState<string>()
@@ -429,6 +430,7 @@ export function MemoryBrowser({ onDirtyChange }: { onDirtyChange?: (dirty: boole
         {([
           ['entries', '条目'],
           ['structure', '结构'],
+          ['policy', '策略'],
           ['index', '索引'],
           ['log', '日志'],
         ] as const).map(([id, label]) => (
@@ -650,6 +652,8 @@ export function MemoryBrowser({ onDirtyChange }: { onDirtyChange?: (dirty: boole
       </div>
       ) : view === 'structure' ? (
         <MemoryLibraryPanel onDirtyChange={setStructureDirty} />
+      ) : view === 'policy' ? (
+        <MemoryPolicyPanel />
       ) : view === 'index' ? (
         <MemoryIndexView
           onOpenFile={target => {

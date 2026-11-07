@@ -70,7 +70,7 @@ export const DEFAULT_MEMORY_POLICY: ResolvedMemoryPolicy = {
     enabled: 'off',
     backend: 'local',
     scope: 'agent',
-    reanalyzeOnCompaction: false,
+    reanalyzeOnCompaction: true,
   },
   rag: { topK: 20 },
   maxEntries: 12,

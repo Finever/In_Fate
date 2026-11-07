@@ -4598,3 +4598,46 @@ body.fw-resizing {
 .fw-mem-library .fw-mem-file {
   width: 100%;
 }
+
+.fw-mem-policy {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 2px;
+}
+.fw-mem-policy-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px 14px;
+}
+.fw-mem-policy-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.fw-mem-policy-grid input,
+.fw-mem-policy-grid select {
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+}
+.fw-mem-policy-grid .fw-mem-policy-check {
+  flex-direction: row;
+  align-items: center;
+  padding-top: 18px;
+}
+.fw-mem-policy-grid .fw-mem-policy-check input {
+  min-height: 0;
+}
+.fw-mem-policy-warning {
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--line));
+  border-radius: 7px;
+  color: var(--danger);
+  font-size: 12px;
+}

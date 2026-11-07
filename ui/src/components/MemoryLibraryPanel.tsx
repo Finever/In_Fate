@@ -256,6 +256,21 @@ export function MemoryLibraryPanel({
     }
   }
 
+  async function rebuildSummaries(): Promise<void> {
+    setBusy('op')
+    setError(undefined)
+    setNotice(undefined)
+    try {
+      const result = await api.rebuildMemorySummaries()
+      setNotice(`已重建 ${result.count} 份摘要`)
+      await refresh()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusy(undefined)
+    }
+  }
+
   function renderNodes(parent: string, depth: number): ReactNode {
     return (tree.get(parent) ?? []).map(node => {
       const isDir = node.kind === 'directory'
@@ -322,6 +337,14 @@ export function MemoryLibraryPanel({
             disabled={Boolean(busy) || !commitStatus?.dirty.length}
           >
             提交
+          </button>
+          <button
+            type="button"
+            className="fw-mem-btn"
+            onClick={() => void rebuildSummaries()}
+            disabled={Boolean(busy)}
+          >
+            重建摘要
           </button>
           <button type="button" className="fw-mem-btn" onClick={() => void createFolder()} disabled={Boolean(busy)}>
             新建目录

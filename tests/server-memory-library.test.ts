@@ -101,6 +101,15 @@ test('记忆库 HTTP：树、文件 CRUD、回收站与 log 只读', async () =>
     )
     assert.equal(log.status, 400)
 
+    const summaries = await fetch(`${handle.url}/api/memory/summaries/rebuild`, {
+      method: 'POST',
+      headers,
+      body: '{}',
+    })
+    assert.equal(summaries.status, 200)
+    const summaryBody = await summaries.json() as { count: number }
+    assert.equal(summaryBody.count >= 1, true)
+
     const commit = await fetch(`${handle.url}/api/memory/commit`, { headers })
     assert.equal(commit.status, 200)
     const commitBody = await commit.json() as { enabled: boolean; dirty: string[] }

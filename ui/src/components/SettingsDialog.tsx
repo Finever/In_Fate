@@ -1034,7 +1034,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             <footer className="fw-settings-footer">
               <div className="fw-settings-feedback">
                 {view === 'memory' ? (
-                  <span className="fw-settings-hint">全局记忆库 · 条目 / 结构 / 索引 / 日志</span>
+                  <span className="fw-settings-hint">全局记忆库 · 条目 / 结构 / 策略 / 索引 / 日志</span>
                 ) : view === 'local' ? (
                   <span className="fw-settings-hint">权重按需下载到 data/models/embeddings</span>
                 ) : (

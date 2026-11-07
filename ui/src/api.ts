@@ -20,6 +20,7 @@ import type {
   MemoryIndexList,
   MemoryCommitStatus,
   MemoryLibraryFile,
+  ResolvedMemoryPolicy,
   MemoryLibraryNode,
   MemoryProposal,
   MemorySearchHit,
@@ -430,6 +431,29 @@ export const api = {
     return body.result
   },
 
+  async memoryPolicy(sessionId?: string, agentId?: string): Promise<ResolvedMemoryPolicy> {
+    const params = new URLSearchParams()
+    if (sessionId) params.set('sessionId', sessionId)
+    if (agentId) params.set('agentId', agentId)
+    const query = params.toString()
+    const body = await request<{ policy: ResolvedMemoryPolicy }>(
+      `/api/memory/policy${query ? `?${query}` : ''}`,
+    )
+    return body.policy
+  },
+
+  async setMemoryPolicy(
+    scope: 'default' | 'agent' | 'session',
+    id: string | undefined,
+    policy: unknown,
+  ): Promise<ResolvedMemoryPolicy> {
+    const body = await request<{ policy: ResolvedMemoryPolicy }>('/api/memory/policy', {
+      method: 'POST',
+      body: JSON.stringify({ scope, ...(id ? { id } : {}), policy }),
+    })
+    return body.policy
+  },
+
   async memorySearch(query: string, limit = 20): Promise<MemorySearchHit[]> {
     const params = new URLSearchParams({ q: query, limit: String(limit) })
     const body = await request<{ hits: MemorySearchHit[] }>(`/api/memory/search?${params.toString()}`)
@@ -507,6 +531,13 @@ export const api = {
 
   async commitMemory(): Promise<MemoryCommitStatus> {
     return request<MemoryCommitStatus>('/api/memory/commit', {
+      method: 'POST',
+      body: '{}',
+    })
+  },
+
+  async rebuildMemorySummaries(): Promise<{ count: number; targets: string[] }> {
+    return request('/api/memory/summaries/rebuild', {
       method: 'POST',
       body: '{}',
     })

@@ -30,6 +30,7 @@ import { archiveCompactedSegments } from '../compaction/archive.ts'
 import { compactIfNeeded } from '../compaction/fold.ts'
 import type { CompactionConfig, CompactionPayload } from '../compaction/types.ts'
 import { staticSection, sessionMemorySection, timeSection } from '../context/sections.ts'
+import { memoryPushSection } from '../context/memory-push.ts'
 import type { ContextSection } from '../context/types.ts'
 import { BlobStore } from '../core/blobs.ts'
 import { FsPolicy } from '../core/fs-policy.ts'
@@ -57,6 +58,9 @@ import {
 } from '../memory/policy.ts'
 import { ensureMemoryLayout, resolveMemoryRoot } from '../memory/root.ts'
 import { MemorySearchIndex } from '../memory/search-index.ts'
+import { MemorySummaryStore } from '../memory/summary.ts'
+import { HeuristicMemorySelector } from '../memory/selector.ts'
+import { MemoryPushService } from '../memory/push.ts'
 import { SemanticMemoryIndex } from '../memory/semantic-index.ts'
 import { MemoryProposalStore, type MemoryAcceptResult, type MemoryProposal, type ProposalStatus } from '../memory/proposals.ts'
 import { MemoryStore, type MemoryDocument, type MemoryEntry, type MemoryFileSummary, type MemorySearchHit } from '../memory/store.ts'
@@ -397,6 +401,8 @@ export interface App {
   memoryCommitStatus(): { gitRoot?: string; enabled: boolean; dirty: readonly string[] }
   /** 手动提交当前 dirty（autoCommit 关闭时也可用）。 */
   commitMemory(): Promise<void>
+  /** 重建所有共享 detail 的摘要文件。 */
+  rebuildMemorySummaries(): { count: number; targets: readonly string[] }
   /** indexlist 索引（只读，自动生成）。 */
   memoryIndexList(): IndexList
   /** 重算并写回 detail/indexlist.json。 */
@@ -1711,6 +1717,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     })
     : undefined
   let memorySearchIndex: MemorySearchIndex | undefined
+  let memoryPush: MemoryPushService | undefined
   const memoryStore = memoryRoot
     ? new MemoryStore(memoryRoot, {
       timeZone: config.profile.timeZone,
@@ -1719,6 +1726,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         memoryCommitter?.markDirty(target)
         memorySearchIndex?.markDirty()
         semanticMemoryIndex?.markDirty()
+        memoryPush?.invalidate()
         try {
           writeIndex({ memoryRoot })
         } catch {
@@ -1740,6 +1748,30 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         ?? mainAgentId,
     })
     : undefined
+  const memorySummaries = memoryRoot && memoryStore
+    ? new MemorySummaryStore({
+      root: memoryRoot,
+      store: memoryStore,
+      onWrite: target => memoryCommitter?.markDirty(target),
+    })
+    : undefined
+  const memorySelector = memoryStore && memorySummaries
+    ? new HeuristicMemorySelector({ store: memoryStore, summaries: memorySummaries })
+    : undefined
+  if (memoryPolicyStore && memorySelector) {
+    memoryPush = new MemoryPushService({
+      selector: memorySelector,
+      policy: memoryPolicyStore,
+      segmentKeyFor: sessionId => {
+        const events = storeFor(sessionId).read()
+        for (let index = events.length - 1; index >= 0; index -= 1) {
+          if (events[index]!.type === 'context.compacted') return events[index]!.id
+        }
+        return 'initial'
+      },
+    })
+  }
+
   const memoryLibrary = memoryRoot && memoryStore
     ? new MemoryLibrary({
       root: memoryRoot,
@@ -1748,6 +1780,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         for (const path of paths) memoryCommitter?.markDirty(path)
         memorySearchIndex?.markDirty()
         semanticMemoryIndex?.markDirty()
+        memoryPush?.invalidate()
         try {
           writeIndex({ memoryRoot })
         } catch {
@@ -1758,7 +1791,10 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         if (path === 'policy.json') memoryPolicyStore?.validateText(text)
       },
       afterWrite: path => {
-        if (path === 'policy.json') memoryPolicyStore?.reload()
+        if (path === 'policy.json') {
+          memoryPolicyStore?.reload()
+          memoryPush?.invalidate()
+        }
       },
     })
     : undefined
@@ -1960,6 +1996,9 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         agentId,
       )
     }, 90))
+  }
+  if (memoryPush) {
+    sections.push(memoryPushSection('jev-memory', memoryPush, 95))
   }
   sections.push(timeSection())
 
@@ -2858,6 +2897,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
 
     setMemoryPolicy(input) {
       if (!memoryPolicyStore) throw new Error('memory is not configured')
+      memoryPush?.invalidate()
       if (input.scope === 'default') {
         memoryPolicyStore.setDefault(input.policy)
         return memoryPolicyStore.resolve('')
@@ -2938,6 +2978,12 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     async commitMemory() {
       if (!memoryCommitter) throw new Error('memory is not configured')
       await memoryCommitter.commitNow()
+    },
+
+    rebuildMemorySummaries() {
+      if (!memorySummaries) throw new Error('memory is not configured')
+      const docs = memorySummaries.ensureAll()
+      return { count: docs.length, targets: docs.map(doc => doc.target) }
     },
 
     memoryIndexList() {

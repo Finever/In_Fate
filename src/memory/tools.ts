@@ -77,7 +77,7 @@ export function createMemoryTools(deps: {
         enabled: 'off' as const,
         backend: 'local' as const,
         scope: 'agent' as const,
-        reanalyzeOnCompaction: false,
+        reanalyzeOnCompaction: true,
       },
       rag: { topK: 20 },
       maxEntries: 12,

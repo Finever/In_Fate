@@ -624,3 +624,23 @@ export interface TurnResponse {
   turn: number
   items: UiTimelineItem[]
 }
+
+export type MemoryMode = 'off' | 'rag-tool' | 'jev-push'
+export type MemoryPolicyScope = 'session' | 'agent' | 'domain' | 'target' | 'all'
+
+export interface ResolvedMemoryPolicy {
+  mode: MemoryMode
+  scope: MemoryPolicyScope
+  scopeValue?: string
+  write: { approval: 'required' | 'off' }
+  jev: {
+    enabled: 'off' | 'once' | 'always'
+    backend: 'local' | 'api'
+    scope: MemoryPolicyScope
+    scopeValue?: string
+    reanalyzeOnCompaction: boolean
+  }
+  rag: { topK: number }
+  maxEntries: number
+  maxBytes: number
+}
