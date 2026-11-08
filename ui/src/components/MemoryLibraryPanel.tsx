@@ -4,6 +4,7 @@ import type {
   MemoryCommitStatus,
   MemoryLibraryFile,
   MemoryLibraryNode,
+  MemorySummaryWorkerStatus,
   MemoryTrashEntry,
 } from '../types'
 
@@ -45,6 +46,7 @@ export function MemoryLibraryPanel({
   const [trash, setTrash] = useState<MemoryTrashEntry[]>()
   const [showTrash, setShowTrash] = useState(false)
   const [commitStatus, setCommitStatus] = useState<MemoryCommitStatus>()
+  const [summaryStatus, setSummaryStatus] = useState<MemorySummaryWorkerStatus>()
 
   const tree = useMemo(() => {
     const children = new Map<string, MemoryLibraryNode[]>()
@@ -81,10 +83,25 @@ export function MemoryLibraryPanel({
     }
   }, [])
 
+  const refreshSummaryStatus = useCallback(async (): Promise<void> => {
+    try {
+      setSummaryStatus(await api.memorySummaryStatus())
+    } catch {
+      // 未配置记忆或模型时，状态不是核心功能。
+    }
+  }, [])
+
   useEffect(() => {
     void refresh()
     void refreshCommit()
-  }, [refresh, refreshCommit])
+    void refreshSummaryStatus()
+  }, [refresh, refreshCommit, refreshSummaryStatus])
+
+  useEffect(() => {
+    if (!summaryStatus?.running && !summaryStatus?.queued) return
+    const timer = window.setInterval(() => void refreshSummaryStatus(), 1000)
+    return () => window.clearInterval(timer)
+  }, [summaryStatus?.running, summaryStatus?.queued, refreshSummaryStatus])
 
   useEffect(() => {
     onDirtyChange?.(dirty)
@@ -262,7 +279,8 @@ export function MemoryLibraryPanel({
     setNotice(undefined)
     try {
       const result = await api.rebuildMemorySummaries()
-      setNotice(`已重建 ${result.count} 份摘要`)
+      setSummaryStatus(result.status)
+      setNotice(result.queued > 0 ? `已排队 ${result.queued} 份摘要` : '没有需要更新的摘要')
       await refresh()
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
@@ -324,6 +342,9 @@ export function MemoryLibraryPanel({
               : commitStatus?.gitRoot
                 ? ' · 已提交'
                 : ' · 不在 git 库'}
+            {summaryStatus
+              ? ` · 摘要 ${summaryStatus.queued} 排队${summaryStatus.running ? ' / 运行中' : ''}`
+              : ''}
           </small>
         </div>
         <div className="fw-mem-library-actions">

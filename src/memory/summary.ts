@@ -13,7 +13,7 @@ import {
   mkdirSync,
   readFileSync,
   renameSync,
-  statSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -39,6 +39,8 @@ export interface MemorySummaryDocument {
   readonly namespace: string
   readonly generatedAt: string
   readonly generator?: string
+  /** 生成摘要时 detail 的内容指纹；指纹不变就不重复摘要。 */
+  readonly sourceDigest: string
   readonly entries: readonly MemoryEntrySummary[]
 }
 
@@ -72,6 +74,12 @@ function digestOf(entry: MemoryEntry): string {
     .digest('hex')
 }
 
+function sourceDigestOf(entries: readonly MemoryEntry[]): string {
+  return createHash('sha1')
+    .update(entries.map(entry => `${entry.id}\n${digestOf(entry)}`).join('\n'))
+    .digest('hex')
+}
+
 function cleanText(value: unknown, max: number): string {
   return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, max) : ''
 }
@@ -102,6 +110,25 @@ export class MemorySummaryStore {
     return assertWithin(this.root, path, 'memory summary path')
   }
 
+  hasGenerator(): boolean {
+    return Boolean(this.generator)
+  }
+
+  /** 当前 detail 的内容指纹；和摘要文件里的 sourceDigest 比。 */
+  sourceDigest(target: string): string {
+    return sourceDigestOf(this.store.read(target).entries)
+  }
+
+  needsUpdate(target: string): boolean {
+    const existing = this.read(target)
+    if (!existing) return true
+    try {
+      return existing.sourceDigest !== this.sourceDigest(target)
+    } catch {
+      return true
+    }
+  }
+
   read(target: string): MemorySummaryDocument | undefined {
     const path = this.pathFor(target)
     if (!existsSync(path)) return undefined
@@ -113,6 +140,7 @@ export class MemorySummaryStore {
         || !Array.isArray(raw.entries)
         || typeof raw.generator !== 'string'
         || raw.generator.length === 0
+        || typeof raw.sourceDigest !== 'string'
       ) return undefined
       return raw
     } catch {
@@ -160,6 +188,7 @@ export class MemorySummaryStore {
       namespace: parsed.namespace,
       generatedAt: this.now().toISOString(),
       generator: this.generator.name,
+      sourceDigest: sourceDigestOf(doc.entries),
       entries,
     }
     mkdirSync(dirname(path), { recursive: true })
@@ -172,18 +201,19 @@ export class MemorySummaryStore {
 
   /** 只在摘要比 detail 新时复用；不会在 renderContext 里被调用。 */
   async ensure(target: string): Promise<MemorySummaryDocument | undefined> {
-    const path = this.pathFor(target)
-    const detailPath = this.store.target(target).path
-    if (existsSync(path) && existsSync(detailPath)) {
-      const summaryStat = statSync(path)
-      const detailStat = statSync(detailPath)
-      if (summaryStat.mtimeMs >= detailStat.mtimeMs) {
-        const existing = this.read(target)
-        if (existing) return existing
-      }
-    }
+    if (!this.needsUpdate(target)) return this.read(target)
     if (!this.generator) return undefined
     return this.generate(target)
+  }
+
+  /** 删除 detail 对应的摘要缓存。 */
+  remove(target: string): void {
+    const path = this.pathFor(target)
+    try {
+      if (existsSync(path)) rmSync(path)
+    } catch {
+      // 缓存删除失败不阻塞主流程。
+    }
   }
 
   async ensureAll(targets?: readonly string[]): Promise<MemorySummaryDocument[]> {

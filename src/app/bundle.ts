@@ -60,6 +60,7 @@ import { ensureMemoryLayout, resolveMemoryRoot } from '../memory/root.ts'
 import { MemorySearchIndex } from '../memory/search-index.ts'
 import { MemorySummaryStore } from '../memory/summary.ts'
 import { ModelSummaryGenerator } from '../memory/summary-model.ts'
+import { MemorySummaryWorker, type SummaryWorkerStatus } from '../memory/summary-worker.ts'
 import { HeuristicMemorySelector } from '../memory/selector.ts'
 import { MemoryPushService } from '../memory/push.ts'
 import { SemanticMemoryIndex } from '../memory/semantic-index.ts'
@@ -402,8 +403,10 @@ export interface App {
   memoryCommitStatus(): { gitRoot?: string; enabled: boolean; dirty: readonly string[] }
   /** 手动提交当前 dirty（autoCommit 关闭时也可用）。 */
   commitMemory(): Promise<void>
-  /** 重建所有共享 detail 的摘要文件。 */
-  rebuildMemorySummaries(): Promise<{ count: number; targets: readonly string[] }>
+  /** 把需要更新的共享 detail 摘要排进后台队列；不占对话会话。 */
+  rebuildMemorySummaries(): { queued: number; status: SummaryWorkerStatus }
+  /** 摘要后台队列的实时状态。 */
+  memorySummaryStatus(): SummaryWorkerStatus
   /** indexlist 索引（只读，自动生成）。 */
   memoryIndexList(): IndexList
   /** 重算并写回 detail/indexlist.json。 */
@@ -1719,6 +1722,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     : undefined
   let memorySearchIndex: MemorySearchIndex | undefined
   let memoryPush: MemoryPushService | undefined
+  let memorySummaryWorker: MemorySummaryWorker | undefined
   const memoryStore = memoryRoot
     ? new MemoryStore(memoryRoot, {
       timeZone: config.profile.timeZone,
@@ -1728,6 +1732,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         memorySearchIndex?.markDirty()
         semanticMemoryIndex?.markDirty()
         memoryPush?.invalidate()
+        if (target.startsWith('detail:')) memorySummaryWorker?.enqueue(target)
         try {
           writeIndex({ memoryRoot })
         } catch {
@@ -1766,6 +1771,9 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       onWrite: target => memoryCommitter?.markDirty(target),
     })
     : undefined
+  if (memorySummaries) {
+    memorySummaryWorker = new MemorySummaryWorker({ summaries: memorySummaries })
+  }
   const memorySelector = memoryStore && memorySummaries
     ? new HeuristicMemorySelector({ store: memoryStore, summaries: memorySummaries })
     : undefined
@@ -1792,6 +1800,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         memorySearchIndex?.markDirty()
         semanticMemoryIndex?.markDirty()
         memoryPush?.invalidate()
+        memorySummaryWorker?.enqueueAll()
         try {
           writeIndex({ memoryRoot })
         } catch {
@@ -2991,10 +3000,18 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       await memoryCommitter.commitNow()
     },
 
-    async rebuildMemorySummaries() {
-      if (!memorySummaries) throw new Error('memory is not configured')
-      const docs = await memorySummaries.ensureAll()
-      return { count: docs.length, targets: docs.map(doc => doc.target) }
+    rebuildMemorySummaries() {
+      if (!memorySummaryWorker) throw new Error('memory is not configured')
+      if (!memorySummaryWorker.canGenerate) {
+        throw new Error('memory summary generator is not configured')
+      }
+      const queued = memorySummaryWorker.enqueueAll()
+      return { queued, status: memorySummaryWorker.status() }
+    },
+
+    memorySummaryStatus() {
+      if (!memorySummaryWorker) throw new Error('memory is not configured')
+      return memorySummaryWorker.status()
     },
 
     memoryIndexList() {

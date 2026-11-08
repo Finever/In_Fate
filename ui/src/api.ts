@@ -21,6 +21,7 @@ import type {
   MemoryCommitStatus,
   MemoryLibraryFile,
   ResolvedMemoryPolicy,
+  MemorySummaryWorkerStatus,
   MemoryLibraryNode,
   MemoryProposal,
   MemorySearchHit,
@@ -536,11 +537,15 @@ export const api = {
     })
   },
 
-  async rebuildMemorySummaries(): Promise<{ count: number; targets: string[] }> {
+  async rebuildMemorySummaries(): Promise<{ queued: number; status: MemorySummaryWorkerStatus }> {
     return request('/api/memory/summaries/rebuild', {
       method: 'POST',
       body: '{}',
     })
+  },
+
+  async memorySummaryStatus(): Promise<MemorySummaryWorkerStatus> {
+    return request<MemorySummaryWorkerStatus>('/api/memory/summaries/status')
   },
 
   async memoryIndexList(): Promise<MemoryIndexList> {

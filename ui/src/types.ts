@@ -644,3 +644,21 @@ export interface ResolvedMemoryPolicy {
   maxEntries: number
   maxBytes: number
 }
+
+export type MemorySummaryJobStatus = 'queued' | 'running' | 'done' | 'skipped' | 'error' | 'unavailable'
+
+export interface MemorySummaryJob {
+  target: string
+  status: MemorySummaryJobStatus
+  error?: string
+  startedAt?: string
+  finishedAt?: string
+}
+
+export interface MemorySummaryWorkerStatus {
+  generator: boolean
+  running: boolean
+  queued: number
+  jobs: MemorySummaryJob[]
+  lastError?: string
+}
