@@ -12,6 +12,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -122,6 +123,7 @@ export class MemorySummaryStore {
   needsUpdate(target: string): boolean {
     const existing = this.read(target)
     if (!existing) return true
+    if (this.generator && existing.generator !== this.generator.name) return true
     try {
       return existing.sourceDigest !== this.sourceDigest(target)
     } catch {
@@ -206,6 +208,33 @@ export class MemorySummaryStore {
     return this.generate(target)
   }
 
+  /** 清掉已经不存在/已移走的 detail 对应的孤儿摘要。 */
+  prune(validTargets: ReadonlySet<string>): void {
+    const walk = (dir: string): void => {
+      let entries
+      try {
+        entries = readdirSync(dir, { withFileTypes: true })
+      } catch {
+        return
+      }
+      for (const entry of entries) {
+        const path = join(dir, entry.name)
+        if (entry.isDirectory()) {
+          walk(path)
+          continue
+        }
+        if (!entry.isFile() || !entry.name.endsWith('.json')) continue
+        try {
+          const raw = JSON.parse(readFileSync(path, 'utf8')) as { target?: unknown }
+          if (typeof raw.target === 'string' && !validTargets.has(raw.target)) rmSync(path)
+        } catch {
+          // 坏摘要不阻塞清理。
+        }
+      }
+    }
+    walk(join(this.root, 'summaries'))
+  }
+
   /** 删除 detail 对应的摘要缓存。 */
   remove(target: string): void {
     const path = this.pathFor(target)
@@ -213,6 +242,33 @@ export class MemorySummaryStore {
       if (existsSync(path)) rmSync(path)
     } catch {
       // 缓存删除失败不阻塞主流程。
+    }
+  }
+
+  /** detail 移动/改名时搬摘要，避免留下孤儿文件。 */
+  move(from: string, to: string): void {
+    const sourcePath = this.pathFor(from)
+    if (!existsSync(sourcePath)) return
+    const target = this.store.target(to)
+    try {
+      const raw = JSON.parse(readFileSync(sourcePath, 'utf8')) as MemorySummaryDocument
+      const next: MemorySummaryDocument = {
+        ...raw,
+        target: to,
+        filename: target.file,
+        domain: target.domain,
+        namespace: target.namespace,
+        entries: raw.entries.map(entry => ({ ...entry, target: to })),
+      }
+      const destination = this.pathFor(to)
+      mkdirSync(dirname(destination), { recursive: true })
+      const temp = `${destination}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`
+      writeFileSync(temp, `${JSON.stringify(next, null, 2)}\n`, 'utf8')
+      renameSync(temp, destination)
+      rmSync(sourcePath, { force: true })
+    } catch {
+      // 摘要搬移失败时删旧缓存；新目标会进后台队列。
+      this.remove(from)
     }
   }
 

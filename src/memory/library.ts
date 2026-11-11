@@ -70,6 +70,10 @@ export interface MemoryLibraryOptions {
   readonly root: string
   readonly store: MemoryStore
   readonly onChange?: (paths: readonly string[]) => void
+  /** detail 文件/目录移动后，通知派生缓存（摘要）跟着搬。 */
+  readonly onDetailMove?: (moves: readonly { readonly from: string; readonly to: string }[]) => void
+  /** detail 文件/目录删除前，通知派生缓存清理。 */
+  readonly onDetailRemove?: (targets: readonly string[]) => void
   /** 写前校验系统文件（例如 policy.json / agent.json）。 */
   readonly validateWrite?: (path: string, text: string) => void
   /** 写后刷新对应运行时缓存。 */
@@ -153,6 +157,8 @@ export class MemoryLibrary {
   readonly root: string
   readonly store: MemoryStore
   private readonly onChange?: (paths: readonly string[]) => void
+  private readonly onDetailMove?: (moves: readonly { readonly from: string; readonly to: string }[]) => void
+  private readonly onDetailRemove?: (targets: readonly string[]) => void
   private readonly validateWrite?: (path: string, text: string) => void
   private readonly afterWrite?: (path: string) => void
   private readonly lockPath: string
@@ -162,6 +168,8 @@ export class MemoryLibrary {
     this.root = options.root
     this.store = options.store
     this.onChange = options.onChange
+    this.onDetailMove = options.onDetailMove
+    this.onDetailRemove = options.onDetailRemove
     this.validateWrite = options.validateWrite
     this.afterWrite = options.afterWrite
     this.lockPath = join(this.root, '.state', 'library.lock')
@@ -280,6 +288,19 @@ export class MemoryLibrary {
       throw new Error('cannot move a directory into itself')
     }
 
+    const oldTargets = source.area === 'detail'
+      ? (sourceIsDirectory
+          ? this.detailTargetsUnder(source.abs)
+          : source.target ? [source.target] : [])
+      : []
+    const oldPrefix = source.parts.slice(1).join('/')
+    const newPrefix = target.parts.slice(1).join('/')
+    const moves = oldTargets.map(old => {
+      if (!sourceIsDirectory) return { from: old, to: target.target! }
+      const rest = old.slice('detail:'.length).slice(oldPrefix.length + 1)
+      return { from: old, to: `detail:${newPrefix}/${rest}` }
+    })
+
     await this.locked(async () => {
       mkdirSync(dirname(target.abs), { recursive: true })
       const sourceStat = lstatSync(source.abs)
@@ -306,6 +327,7 @@ export class MemoryLibrary {
         )
       }
 
+      this.onDetailMove?.(moves)
       this.changed([source.area])
     })
   }
@@ -316,7 +338,13 @@ export class MemoryLibrary {
     if (ref.area === 'root') throw new Error('cannot remove root files from the library')
     if (!existsSync(ref.abs)) throw new Error(`memory library path not found: ${path}`)
     rejectSymlink(ref.abs)
+    const removedTargets = ref.area === 'detail'
+      ? (isDirectory(ref.abs)
+          ? this.detailTargetsUnder(ref.abs)
+          : ref.target ? [ref.target] : [])
+      : []
     await this.locked(async () => {
+      this.onDetailRemove?.(removedTargets)
       if (options.permanent) {
         rmSync(ref.abs, { recursive: true, force: true })
       } else {
@@ -503,6 +531,33 @@ export class MemoryLibrary {
   private detailTargetOf(path: string): string {
     const body = path.slice('detail/'.length).replace(/\.json$/i, '')
     return `detail:${body}`
+  }
+
+  private detailTargetsUnder(abs: string): string[] {
+    const out: string[] = []
+    const walk = (dir: string): void => {
+      let entries
+      try {
+        entries = readdirSync(dir, { withFileTypes: true })
+      } catch {
+        return
+      }
+      for (const entry of entries) {
+        if (isHiddenName(entry.name) || entry.name === TRASH_DIR || entry.name === '_archive') continue
+        const child = join(dir, entry.name)
+        if (entry.isDirectory()) walk(child)
+        else if (entry.isFile() && entry.name.endsWith('.json')) {
+          const rel = slash(relative(join(this.root, 'detail'), child))
+          out.push(`detail:${rel.replace(/\.json$/i, '')}`)
+        }
+      }
+    }
+    if (isDirectory(abs)) walk(abs)
+    else if (abs.endsWith('.json')) {
+      const rel = slash(relative(join(this.root, 'detail'), abs))
+      out.push(`detail:${rel.replace(/\.json$/i, '')}`)
+    }
+    return out
   }
 
   private rootFiles(out: MemoryLibraryNode[]): void {

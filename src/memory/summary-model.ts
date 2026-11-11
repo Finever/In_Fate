@@ -74,7 +74,7 @@ export class ModelSummaryGenerator implements MemorySummaryGenerator {
     this.model = options.model
     this.timeoutMs = options.timeoutMs ?? 60_000
     this.batchSize = Math.max(1, options.batchSize ?? 8)
-    this.name = `model:${options.model.provider.id}/${options.model.model.id}`
+    this.name = `model:${options.model.provider.id}/${options.model.model.id}:summary-v1`
   }
 
   async generateDocument(input: {

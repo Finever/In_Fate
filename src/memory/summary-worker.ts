@@ -45,6 +45,7 @@ export class MemorySummaryWorker {
   private running = false
   private stopped = false
   private lastError?: string
+  private timer?: NodeJS.Timeout
 
   constructor(options: MemorySummaryWorkerOptions) {
     this.summaries = options.summaries
@@ -78,11 +79,13 @@ export class MemorySummaryWorker {
 
   enqueueAll(options: { readonly force?: boolean } = {}): number {
     if (this.stopped || !this.canGenerate) return 0
-    let count = 0
-    for (const file of this.summaries.store.listDocuments({
+    const files = this.summaries.store.listDocuments({
       includePrivate: false,
       includeInvalid: false,
-    })) {
+    })
+    this.summaries.prune(new Set(files.map(file => file.target)))
+    let count = 0
+    for (const file of files) {
       if (this.enqueue(file.target, options)) count += 1
     }
     return count
@@ -107,8 +110,19 @@ export class MemorySummaryWorker {
     }
   }
 
+  /** 周期扫描外部编辑；没有生成器时什么都不做。 */
+  start(intervalMs = 30_000): void {
+    if (this.timer || !this.canGenerate) return
+    this.timer = setInterval(() => this.enqueueAll(), Math.max(1_000, intervalMs))
+    this.timer.unref?.()
+  }
+
   stop(): void {
     this.stopped = true
+    if (this.timer) {
+      clearInterval(this.timer)
+      this.timer = undefined
+    }
     this.queue.length = 0
     this.queued.clear()
   }

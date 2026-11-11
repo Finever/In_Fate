@@ -48,6 +48,7 @@ export class MemorySearchIndex {
   private readonly store: MemoryStore
   private db?: DatabaseSync
   private dirty = true
+  private signature = ''
 
   constructor(root: string, store: MemoryStore, dbPath = join(root, '.state', 'search.sqlite')) {
     this.root = root
@@ -119,6 +120,14 @@ export class MemorySearchIndex {
       `)
       this.dirty = true
     }
+    const signature = this.store.listDocuments({
+      includePrivate: false,
+      includeInvalid: false,
+    }).map(item => `${item.target}:${item.updatedAt}:${item.bytes}:${item.entries}`).join('\n')
+    if (signature !== this.signature) {
+      this.signature = signature
+      this.dirty = true
+    }
     if (this.dirty) this.rebuild()
   }
 
@@ -155,6 +164,7 @@ export class MemorySearchIndex {
       }
       db.exec('COMMIT')
       this.dirty = false
+      this.signature = docs.map(item => `${item.target}:${item.updatedAt}:${item.bytes}:${item.entries}`).join('\n')
     } catch (error) {
       try {
         db.exec('ROLLBACK')

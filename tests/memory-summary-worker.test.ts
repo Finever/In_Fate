@@ -47,6 +47,11 @@ test('摘要 worker：写入入队、未变跳过、变更后重算', async () =
     assert.equal(worker.enqueue('detail:测试/队列'), true)
     await worker.waitIdle()
     assert.equal(calls, 2)
+
+    const moved = summaries.move('detail:测试/队列', 'detail:测试/改名')
+    void moved
+    assert.equal(summaries.read('detail:测试/队列'), undefined)
+    assert.equal(summaries.read('detail:测试/改名')?.target, 'detail:测试/改名')
   } finally {
     rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   }
@@ -63,6 +68,40 @@ test('摘要 worker：没有生成器时不排队', () => {
     assert.equal(worker.canGenerate, false)
     assert.equal(worker.enqueue('detail:测试/无模型'), false)
     assert.equal(worker.status().generator, false)
+  } finally {
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+  }
+})
+
+
+test('摘要指纹包含生成器版本', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'if-summary-generator-'))
+  try {
+    ensureMemoryLayout(root)
+    const store = new MemoryStore(root)
+    await store.add('detail:测试/版本', { content: '同一份内容', tag: '确信', introduction: '测试' })
+    const one = new MemorySummaryStore({
+      root,
+      store,
+      generator: {
+        name: 'generator-a',
+        async generateDocument({ entries }) {
+          return entries.map(entry => ({ entryId: entry.id, title: entry.id, summary: 'A', keywords: [] }))
+        },
+      },
+    })
+    await one.ensure('detail:测试/版本')
+    const two = new MemorySummaryStore({
+      root,
+      store,
+      generator: {
+        name: 'generator-b',
+        async generateDocument({ entries }) {
+          return entries.map(entry => ({ entryId: entry.id, title: entry.id, summary: 'B', keywords: [] }))
+        },
+      },
+    })
+    assert.equal(two.needsUpdate('detail:测试/版本'), true)
   } finally {
     rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   }

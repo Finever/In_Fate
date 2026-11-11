@@ -1773,6 +1773,8 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     : undefined
   if (memorySummaries) {
     memorySummaryWorker = new MemorySummaryWorker({ summaries: memorySummaries })
+    memorySummaryWorker.start()
+    container.onDispose('memorySummaryWorker', () => memorySummaryWorker?.stop())
   }
   const memorySelector = memoryStore && memorySummaries
     ? new HeuristicMemorySelector({ store: memoryStore, summaries: memorySummaries })
@@ -1806,6 +1808,12 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         } catch {
           // 索引生成失败不阻塞结构操作。
         }
+      },
+      onDetailMove: moves => {
+        for (const move of moves) memorySummaries?.move(move.from, move.to)
+      },
+      onDetailRemove: targets => {
+        for (const target of targets) memorySummaries?.remove(target)
       },
       validateWrite: (path, text) => {
         if (path === 'policy.json') memoryPolicyStore?.validateText(text)

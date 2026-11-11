@@ -51,6 +51,7 @@ export class SemanticMemoryIndex {
   private readonly embedder: MemoryEmbedder
   private db?: DatabaseSync
   private dirty = true
+  private signature = ''
   private building?: Promise<void>
   private lastError?: string
 
@@ -148,6 +149,14 @@ export class SemanticMemoryIndex {
     const modelId = this.embedder.modelId()
     if (!modelId) throw new Error('embedding model is not activated')
     this.open()
+    const signature = this.store.listDocuments({
+      includePrivate: false,
+      includeInvalid: false,
+    }).map(item => `${item.target}:${item.updatedAt}:${item.bytes}:${item.entries}`).join('\n')
+    if (signature !== this.signature) {
+      this.signature = signature
+      this.dirty = true
+    }
     const current = this.meta('modelId')
     if (!this.dirty && current === modelId && this.count() > 0) return
     this.building = this.rebuild(modelId)
@@ -200,6 +209,7 @@ export class SemanticMemoryIndex {
       }
       db.prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)').run('modelId', modelId)
       db.exec('COMMIT')
+      this.signature = docs.map(item => `${item.target}:${item.updatedAt}:${item.bytes}:${item.entries}`).join('\n')
     } catch (error) {
       try {
         db.exec('ROLLBACK')
