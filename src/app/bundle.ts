@@ -11,7 +11,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AgentManager as AgentManagerType } from '../agents/manager.ts'
 import { AgentManager } from '../agents/manager.ts'
@@ -200,6 +200,8 @@ export interface ChatOptions {
 }
 
 export interface CreateSessionInput {
+  /** 用户自定义会话 ID；不传则生成 session-时间戳-随机。 */
+  readonly id?: string
   readonly createdBy?: string
   readonly createdFrom?: { readonly sessionId: string; readonly eventId?: string }
   /** 所属主 agent；不传时按配置 mainAgentId 回退。 */
@@ -2533,9 +2535,23 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     },
 
     createSession(input) {
-      const sessionId = newSessionId(now(), config.profile.timeZone)
+      const requested = input?.id?.trim()
+      let sessionId: string
+      if (requested) {
+        // sessionFile 会先做安全段校验；再查重，避免复用已归档/已软删的 ID。
+        const file = sessionFile(config.profile.dataRoot, requested)
+        if (requested.startsWith('agent-')) {
+          throw new Error('session id prefix agent- is reserved for agent runs')
+        }
+        if (existsSync(file) || pendingProvenance.has(requested)) {
+          throw new Error(`session id already exists: ${requested}`)
+        }
+        sessionId = requested
+      } else {
+        sessionId = newSessionId(now(), config.profile.timeZone)
+      }
       if (input) {
-        const { materialize: _materialize, ...provenance } = input
+        const { id: _id, materialize: _materialize, ...provenance } = input
         pendingProvenance.set(sessionId, provenance)
         if (input.materialize === true) ensureSession(sessionId)
       }

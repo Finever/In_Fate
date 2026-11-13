@@ -248,7 +248,12 @@ function Desktop() {
         ? agentFilter
         : selectedSession?.agentId
           ?? workspace.mainAgents.find(agent => agent.id === FALLBACK_AGENT)?.id
-      const id = await api.createSession(targetAgent)
+      const desired = window.prompt(
+        '会话 ID（留空自动生成；可用字母、数字、点、下划线、连字符）',
+        '',
+      )
+      if (desired === null) return
+      const id = await api.createSession(targetAgent, desired.trim() || undefined)
       await workspace.refresh(true)
       setSelectedId(id)
     } catch (reason) {

@@ -65,6 +65,38 @@ test('POST /api/sessions 直接落 session.created', async () => {
     assert.equal(session.lifecycle, 'active')
     assert.equal(session.createdBy, 'user')
     assert.equal(session.reason, 'ui-test')
+
+    const custom = await fetch(`${handle.url}/api/sessions`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer test-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ id: 'work-log-2026', createdBy: 'user', reason: 'custom' }),
+    })
+    assert.equal(custom.status, 200)
+    const customBody = await custom.json() as { sessionId: string }
+    assert.equal(customBody.sessionId, 'work-log-2026')
+
+    const duplicate = await fetch(`${handle.url}/api/sessions`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer test-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ id: 'work-log-2026' }),
+    })
+    assert.equal(duplicate.status, 400)
+
+    const unsafe = await fetch(`${handle.url}/api/sessions`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer test-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ id: '../escape' }),
+    })
+    assert.equal(unsafe.status, 400)
   } finally {
     await handle.close()
     await app.dispose()

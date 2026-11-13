@@ -1088,15 +1088,20 @@ async function handle(
 
   if (req.method === 'POST' && parts[1] === 'sessions' && parts.length === 2) {
     const body = await readOptionalJson(req)
-    const sessionId = app.createSession({
-      createdBy: typeof body.createdBy === 'string' ? body.createdBy : 'user',
-      ...(typeof body.agentId === 'string' && body.agentId.trim()
-        ? { agentId: body.agentId }
-        : {}),
-      ...(typeof body.reason === 'string' ? { reason: body.reason } : { reason: 'ui' }),
-      materialize: true,
-    })
-    json(res, 200, { sessionId })
+    try {
+      const sessionId = app.createSession({
+        ...(typeof body.id === 'string' && body.id.trim() ? { id: body.id.trim() } : {}),
+        createdBy: typeof body.createdBy === 'string' ? body.createdBy : 'user',
+        ...(typeof body.agentId === 'string' && body.agentId.trim()
+          ? { agentId: body.agentId }
+          : {}),
+        ...(typeof body.reason === 'string' ? { reason: body.reason } : { reason: 'ui' }),
+        materialize: true,
+      })
+      json(res, 200, { sessionId })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
     return
   }
 

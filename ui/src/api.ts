@@ -132,10 +132,11 @@ export const api = {
     return body.sessions
   },
 
-  async createSession(agentId?: string): Promise<string> {
+  async createSession(agentId?: string, sessionId?: string): Promise<string> {
     const body = await request<{ sessionId: string }>('/api/sessions', {
       method: 'POST',
       body: JSON.stringify({
+        ...(sessionId?.trim() ? { id: sessionId.trim() } : {}),
         createdBy: 'user',
         reason: 'ui',
         ...(agentId ? { agentId } : {}),
