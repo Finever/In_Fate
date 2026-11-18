@@ -294,6 +294,56 @@ export interface ModelBalance {
   balances: BalanceAmount[]
 }
 
+export type UpdateLayout = 'dev' | 'portable' | 'installed'
+export type UpdateJobState = 'idle' | 'checking' | 'downloading' | 'staging' | 'ready' | 'error'
+
+export interface UpdateJob {
+  state: UpdateJobState
+  version?: string
+  downloaded: number
+  total?: number
+  error?: string
+  startedAt?: string
+  finishedAt?: string
+}
+
+export interface PendingUpdate {
+  action: 'apply' | 'rollback'
+  version: string
+  fromVersion: string
+  program?: string
+  requestedAt: string
+}
+
+export interface UpdateManifest {
+  version: string
+  url: string
+  sha256: string
+  size?: number
+  notes?: string
+  publishedAt?: string
+}
+
+export interface UpdateCheckResult {
+  currentVersion: string
+  manifest: UpdateManifest
+  resolvedUrl: string
+  available: boolean
+}
+
+export interface UpdateStatus {
+  currentVersion: string
+  layout: UpdateLayout
+  installRoot: string
+  programRoot: string
+  appDir: string
+  dataRoot: string
+  manifestUrl?: string
+  pending?: PendingUpdate
+  previousVersion?: string
+  job: UpdateJob
+}
+
 export interface ModelConfig {
   timeZone: string
   providers: ModelConfigProvider[]

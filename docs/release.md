@@ -26,8 +26,8 @@ npm run release
 产物：
 
 ```text
-release/if-v0.0.1/                    独立目录
-release/if-v0.0.1-win32-x64.zip       Windows 当前平台压缩包
+release/In_First/                        独立目录
+release/In_First-v0.0.1-win32-x64.zip     Windows 当前平台压缩包
 ```
 
 如果只想出后端 + UI 的便携包，不带 Electron：
@@ -39,44 +39,87 @@ npm run release:portable
 ## 包内结构
 
 ```text
-if-v0.0.1/
-  app/current/      程序：bin/src/ui/dist/desktop/package
+In_First/
+  In_Fate/          程序：bin/src/ui/dist/desktop/package（整体可替换）
+  data/             数据根：会话、记忆、插件数据（更新时不动）
+  previous/         上一版本（更新后可回滚；运行时生成）
+  .updates/         更新暂存与 pending（运行时生成）
   runtime/          当前平台 Node（拷贝失败则回退系统 node）
   config/           可变配置
-  data/             可变数据：会话、记忆、插件数据
-  logs/             运行日志（预留）
+  logs/             运行日志
   backups/          完整数据备份（预留）
+  tools/            安装器与启动前更新切换
+  install.cmd/.sh   安装到本机（Windows 双击）
   smoke.mjs         独立冒烟测试
   start-if.cmd/.sh  浏览器/CLI 启动
   start-desktop     桌面启动（包含 desktop 时）
   VERSION
-  release.json      构建清单
+  release.json      构建清单（含 zip 的 sha256/size）
 ```
 
-`app/current` 是程序层，`data/` 是数据层。升级时只替换程序层；数据层不动。
+`In_Fate/` 是程序层，`data/` 是数据层。升级时整体替换 `In_Fate/`；`data/` 不动。
+
+## 安装到本机
+
+Windows 双击 `install.cmd`，Linux/macOS 运行 `./install.sh`。
+
+默认位置（Windows；Linux/macOS 对应 `~/In_First`）：
+
+```text
+%USERPROFILE%\In_First\In_Fate    程序
+%USERPROFILE%\In_First\data       数据
+```
+
+都是用户目录下的可见文件夹，不写 AppData，也不请求管理员权限。`--dir` 和 `--data-dir` 可以改成任意位置。
+
+安装器复制 `In_Fate`、`runtime`、`tools` 和配置模板，写 `install.json` 与 `if-home.txt`，创建桌面/开始菜单快捷方式和卸载注册表项。`--no-shortcuts`、`--no-registry`、`--portable`、`--data-dir`、`--uninstall`、`--purge`、`--force` 可用。`--portable` 表示就地注册当前发布包，不复制到默认安装根；目标目录非空且不像 In_First 安装根时安装器会拒绝，`--force` 可跳过。升级安装保留数据与配置，旧程序层留在 `previous/`。
+
+## 内置更新
+
+设置 → 关于与更新。
+
+- 更新源是 `latest.json`；支持 `http(s)`、`file:` 或本地路径。发布时它和 zip 一起放在 `release/` 根（同一目录）。
+- 清单格式：
+
+```json
+{
+  "version": "0.0.2",
+  "url": "if-v0.0.2-win32-x64.zip",
+  "sha256": "64 位十六进制",
+  "size": 123456,
+  "notes": "可选",
+  "publishedAt": "可选"
+}
+```
+
+- `url` 可以是相对路径，按清单地址解析。
+- 下载后校验 size 与 sha256；解压前检查 zip 条目（拒绝绝对路径和 `..`），解压后校验 `VERSION` 和 `bin/if.ts`，并限制解压总字节（2GB）与文件数（20 万），拒绝符号链接。
+- 更新包暂存在 `.updates/<version>`；点「应用更新」只写 `pending.json`。下次用 `start-if` / `start-desktop` 启动时，`tools/apply-pending.mjs` 把旧 `In_Fate` 移到 `previous`，再把暂存程序切到 `In_Fate`。运行中的进程不替换自己的文件。
+- 设置里可以回滚到 `previous`。
+- 没有更新源时，可以直接选择本地发布包 zip，走同一套校验/暂存/pending；低于当前版本的包会被拒绝，同版本允许用于重装。
+- 允许跨版本更新：程序层是完整包，不依赖中间补丁；数据层由 `DATA_MIGRATIONS` 链决定，跨过多个 schema 版本时必须在链里补齐对应迁移，否则启动拒绝。回滚只保留 `previous` 一代。
+- 开发环境（直接从仓库根运行）不支持应用更新；请用发布包测试。
+- 清单签名还没做；目前依赖 HTTPS 与 sha256。`npm run release` 会把 zip 的 sha256 和 size 写进 `latest.json` 与 `release.json`。
 
 ## 独立环境测试
 
-桌面版：
+安装版测试：运行 `install.cmd` 装到默认目录后，从桌面快捷方式启动；程序在 `%USERPROFILE%\In_First\In_Fate`，数据应出现在 `%USERPROFILE%\In_First\data`。
+
+免安装版：
 
 ```text
-start-desktop.cmd
+start-desktop.cmd      桌面版
+start-if.cmd           浏览器/CLI 版
 ```
 
-浏览器版：
+两者都使用包内 `runtime/` 和 `In_Fate/desktop/node_modules/electron/dist`，不要求系统另装 Node 或 Electron。启动脚本默认设置：
 
 ```text
-start-if.cmd
-```
-
-两者都使用包内 `runtime/` 和 `app/current/desktop/node_modules/electron/dist`，不要求系统另装 Node 或 Electron。启动脚本默认设置：
-
-```text
-IF_HOME=包根目录
+IF_HOME=包根目录/data
 IF_PORTABLE=1
 ```
 
-数据写在 `IF_HOME/data`，不会碰开发目录。安装版以后可以把 `IF_HOME` 指到 `%LOCALAPPDATA%\In_Fate`，程序目录仍可单独替换。
+`IF_HOME` 就是数据根本身，数据直接写在 `data/` 里，不会碰开发目录。安装版把 `IF_HOME` 指到 `%USERPROFILE%\In_First\data`，程序目录（`In_Fate/`）仍可单独替换。
 
 ## 首次配置
 
@@ -86,7 +129,7 @@ IF_PORTABLE=1
 2. 打开右侧状态 → 当前模型，给 `main` agent 选模型并保存。
 3. 新建会话即可开始。
 
-配置写回 `config/if.release.json`；数据根由 `IF_HOME/data` 决定。
+配置写回 `config/if.release.json`；数据根由 `IF_HOME` 决定。
 
 ## 数据版本与升级
 
@@ -95,6 +138,7 @@ IF_PORTABLE=1
 - 旧 schema 需要迁移时，会先把 schema 状态备份到 `data/.state/backups/`，再按 `DATA_MIGRATIONS` 顺序执行。
 - 没有注册迁移时拒绝打开旧数据，不静默改库。
 - 数据 schema 比程序新时拒绝降级打开。
+- 程序更新与数据迁移分开：先切换程序层，启动时再按新程序的迁移链处理数据；迁移失败不会自动降级程序。
 - 当前迁移链为空；这是骨架，后续每个数据变更都要加迁移函数和升级测试。
 
 ## 冒烟测试
@@ -105,7 +149,7 @@ IF_PORTABLE=1
 node smoke.mjs
 ```
 
-它会启动后端、等 `/api/health`、校验 `/api/version` 和 UI `index.html`，然后退出。
+它会启动后端、等 `/api/health`、校验 `/api/version` 和 UI `index.html`，然后退出。默认使用包内 `data/`；设置 `IF_SMOKE_HOME=<临时目录>` 可以把冒烟数据放到别处，避免污染最终发布包。
 
 ## 可选依赖
 
@@ -121,5 +165,8 @@ npm install --omit=dev
 
 - 发布包按当前平台/架构生成；Windows 包不能直接拿到 Linux/macOS 跑。
 - 拷贝的是当前 Node 二进制；如果目标机器缺少系统运行库，可能无法启动，此时改用系统 Node 24 并确保 `runtime/` 为空或改名。
-- Electron 桌面版仍使用当前 `desktop` 壳；多窗口、自动更新、安装包还没做。
+- Electron 桌面版仍使用当前 `desktop` 壳；多窗口还没做。
+- 更新清单没有签名校验；只适合自己的更新源，正式分发前应加 Ed25519 签名。
+- 更新包是整个发布 zip（约 185M），下载/解压会占用磁盘；暂无增量更新。
+- 安装器是 Node 脚本 + cmd/sh 启动器，不是 NSIS 单文件 exe；Windows 快捷方式和卸载注册表已做。
 - 发布包不含测试和 `DSH源码/`。

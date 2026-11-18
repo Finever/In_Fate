@@ -33,9 +33,9 @@ test('IF_HOME 覆盖 dataRoot，并在新家目录初始化数据 schema', async
     baseDir: dir,
   })
   try {
-    assert.equal(app.config.profile.dataRoot, join(home, 'data'))
+    assert.equal(app.config.profile.dataRoot, home)
     assert.equal(
-      existsSync(join(home, 'data', '.state', 'data-schema.json')),
+      existsSync(join(home, '.state', 'data-schema.json')),
       true,
     )
   } finally {

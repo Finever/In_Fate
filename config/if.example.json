@@ -47,6 +47,9 @@
       "systemPrompt": "你是子 agent。只按请求完成任务；先查证据再下结论，不满足验收就明说没完成。"
     }
   ],
+  "update": {
+    "manifestUrl": ""
+  },
   "patch": {
     "tools": { "enabled": [] },
     "agents": {

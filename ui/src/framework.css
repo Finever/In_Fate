@@ -1977,6 +1977,87 @@ body.fw-resizing {
   font-size: 10px;
   line-height: 1.6;
 }
+.fw-update-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.fw-update-paths {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .02);
+}
+.fw-update-paths p {
+  margin: 0;
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--faint);
+  word-break: break-all;
+}
+.fw-update-paths p span {
+  flex: 0 0 32px;
+  color: var(--muted);
+}
+.fw-update-source {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.fw-update-source label {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.fw-update-source input {
+  width: 100%;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, .18);
+  color: var(--text);
+  font-size: 12px;
+}
+.fw-update-result {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .02);
+}
+.fw-update-result b {
+  font-size: 12px;
+}
+.fw-update-result p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+.fw-update-result small {
+  color: var(--faint);
+  font-size: 10px;
+}
+.fw-update-local {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fw-update-local p {
+  margin: 0;
+  color: var(--faint);
+  font-size: 11px;
+}
 .fw-settings-models {
   margin-top: 18px;
 }

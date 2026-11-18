@@ -2,7 +2,7 @@
  * 发布包冒烟测试：独立启动后端，验证 health / version / UI 静态文件。
  *
  * 用法：
- *   node scripts/release-smoke.mjs [release/if-v0.0.1]
+ *   node scripts/release-smoke.mjs [release/In_First]
  *   ./runtime/node smoke.mjs
  */
 
@@ -20,7 +20,8 @@ function latestRelease() {
   const releaseRoot = join(repoRoot, 'release')
   if (!existsSync(releaseRoot)) throw new Error('release/ does not exist; run `npm run release` first')
   const dirs = readdirSync(releaseRoot, { withFileTypes: true })
-    .filter(entry => entry.isDirectory() && /^if-v\d+\.\d+\.\d+/.test(entry.name))
+    .filter(entry => entry.isDirectory()
+      && (entry.name === 'In_First' || /^if-v\d+\.\d+\.\d+/.test(entry.name)))
     .map(entry => ({ path: join(releaseRoot, entry.name), mtime: statSync(join(releaseRoot, entry.name)).mtimeMs }))
     .sort((a, b) => b.mtime - a.mtime)
   if (dirs.length === 0) throw new Error('no release package found')
@@ -29,8 +30,9 @@ function latestRelease() {
 
 const target = process.argv[2] ? resolve(process.argv[2]) : latestRelease()
 const version = readFileSync(join(target, 'VERSION'), 'utf8').trim()
-const appDir = existsSync(join(target, 'app', 'current', 'bin', 'if.ts'))
-  ? join(target, 'app', 'current')
+const smokeHome = process.env.IF_SMOKE_HOME ?? join(target, 'data')
+const appDir = existsSync(join(target, 'In_Fate', 'bin', 'if.ts'))
+  ? join(target, 'In_Fate')
   : target
 const entry = join(appDir, 'bin', 'if.ts')
 const config = join(target, 'config', 'if.release.json')
@@ -52,7 +54,8 @@ const child = spawn(process.execPath, [
   cwd: target,
   env: {
     ...process.env,
-    IF_HOME: target,
+    // 默认用包内 data；设置 IF_SMOKE_HOME 可避免污染最终发布包。
+    IF_HOME: smokeHome,
     IF_PORTABLE: '1',
     IF_RELEASE_SMOKE: '1',
   },

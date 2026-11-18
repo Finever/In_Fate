@@ -84,6 +84,15 @@ import {
 } from '../memory/log-view.ts'
 import { createMemoryTools } from '../memory/tools.ts'
 import { readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { IF_VERSION } from '../version.ts'
+import {
+  resolveUpdateLayout,
+  UpdateService,
+  type PendingUpdate,
+  type UpdateCheckResult,
+  type UpdateJob,
+  type UpdateStatus,
+} from './update.ts'
 import type { ModelRegistry, ResolvedModel } from '../model/registry.ts'
 import { EmbeddingInstallJobs, type EmbeddingInstallJob } from '../model/local/embedding-jobs.ts'
 import { LocalEmbeddingService } from '../model/local/embedding-service.ts'
@@ -380,6 +389,23 @@ export interface App {
   toolViews(agentId?: string): ToolView[]
   /** 全局工具启停/审批；有 configPath 时写回配置文件。 */
   setToolGlobal(name: string, input: ToolGlobalUpdate): Promise<ToolView[]>
+
+  /** 内置更新器：当前安装布局与更新状态。 */
+  updateStatus(): UpdateStatus
+  /** 读更新清单并比较版本。 */
+  checkUpdate(): Promise<UpdateCheckResult>
+  /** 后台下载、校验并暂存；立即返回 job。 */
+  startUpdateDownload(): UpdateJob
+  /** 轮询下载/暂存进度。 */
+  updateJob(): UpdateJob
+  /** 手动暂存本地更新包（zip 路径）。 */
+  stageUpdatePackage(zipPath: string): Promise<{ version: string; program: string }>
+  /** 写 pending，下次启动前切换。 */
+  applyUpdate(): PendingUpdate
+  /** 写回滚 pending，下次启动前回滚。 */
+  rollbackUpdate(): PendingUpdate
+  /** 保存更新源；有 configPath 时写回配置文件。 */
+  saveUpdateConfig(input: { manifestUrl?: string }): Promise<UpdateStatus>
 
   /** 插件列表与扫描错误。 */
   pluginList(): PluginListResult
@@ -1002,6 +1028,16 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       renameSync(temp, configPath)
     }, { timeoutMs: 5_000 })
   }
+
+  const updateService = new UpdateService({
+    layout: resolveUpdateLayout({
+      dataRoot: config.profile.dataRoot,
+      currentVersion: IF_VERSION,
+    }),
+    ...(config.update?.manifestUrl ? { manifestUrl: config.update.manifestUrl } : {}),
+    now,
+  })
+  container.onDispose('update', () => updateService.dispose())
 
   const providerToRaw = (provider: ProviderConfig, apiKey?: string): RawProviderEntry => ({
     id: provider.id,
@@ -2915,6 +2951,48 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         ...(input.approval !== undefined ? { approval: input.approval } : {}),
       })
       return toolViewsOf()
+    },
+
+    updateStatus() {
+      return updateService.status()
+    },
+
+    checkUpdate() {
+      return updateService.check()
+    },
+
+    startUpdateDownload() {
+      return updateService.startDownload()
+    },
+
+    updateJob() {
+      return updateService.job()
+    },
+
+    stageUpdatePackage(zipPath) {
+      return updateService.stagePackage(zipPath)
+    },
+
+    applyUpdate() {
+      return updateService.requestApply()
+    },
+
+    rollbackUpdate() {
+      return updateService.requestRollback()
+    },
+
+    async saveUpdateConfig(input) {
+      const manifestUrl = input.manifestUrl?.trim() ?? ''
+      await writeConfigFile(raw => {
+        const update = typeof raw.update === 'object' && raw.update !== null && !Array.isArray(raw.update)
+          ? raw.update as Record<string, unknown>
+          : {}
+        if (manifestUrl === '') delete update.manifestUrl
+        else update.manifestUrl = manifestUrl
+        raw.update = update
+      })
+      updateService.setManifestUrl(manifestUrl)
+      return updateService.status()
     },
 
     pluginList() {

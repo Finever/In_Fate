@@ -70,8 +70,9 @@ CLI / 本地 HTTP API / React UI / Electron 壳
 | 记忆编辑器 | 可用 | 结构树、文件编辑、移动/重命名、回收站、策略、摘要重建、提交 |
 | 插件 | v0 | tool / ui-panel；builtin 与显式 dev 插件；沙箱 iframe 面板；无第三方安装 |
 | 模型余额 | v0 | DeepSeek / Moonshot / OpenRouter 按 key 查询；其余厂商显示不支持 |
-| UI | 可用 | 会话列表、时间线、审批、agent、状态、设置、模型、记忆、插件 |
-| 桌面壳 | 可用 / 开发 | Electron 拉起 `if serve`，随机端口 + token；无安装包/自动更新 |
+| UI | 可用 | 会话列表、时间线、审批、agent、状态、设置、模型、记忆、插件、关于与更新 |
+| 桌面壳 | 可用 | Electron 拉起 `if serve`，随机端口 + token；安装版走 `install.cmd`，数据外置 |
+| 安装与更新 | 可用 | `In_First/In_Fate` 程序 + `In_First/data` 数据；安装器、快捷方式、卸载项；内置更新器支持 `latest.json`、sha256、pending 切换、回滚、本地 zip |
 | 评测与备份 | 未完成 | 只有 metrics / doctor 和单元测试，没有系统级评测、回放集和备份策略 |
 
 ---
@@ -130,12 +131,14 @@ cd desktop && npm install && npm start
 ## 发布包
 
 ```bash
-npm run release          # 检查 + 测试 + UI build + 生成 release/if-v0.0.1/
+npm run release          # 检查 + 测试 + UI build + 生成 release/In_First/
 npm run release:portable # 不带 Electron，只出后端 + UI
 npm run release:smoke    # 冒烟：独立启动、health、version、UI
 ```
 
-产物分成两层：`app/current/` 是程序（bin/src/ui/dist/desktop），`data/` 是可变数据；另有包内 `runtime/`、`config/if.release.json`、`logs/`、`backups/`。升级时只替换程序层，`data/` 不动。启动脚本默认设置 `IF_HOME=包根目录`、`IF_PORTABLE=1`；安装版以后可指到 `%LOCALAPPDATA%\In_Fate`。版本号唯一来源是根目录 `VERSION`；当前 `V0.0.1`。详见 [`docs/release.md`](docs/release.md)。
+产物分成两层：`In_Fate/` 是程序（bin/src/ui/dist/desktop），`data/` 是可变数据；另有包内 `runtime/`、`config/if.release.json`、`tools/`、`logs/`、`backups/`。升级时整体替换 `In_Fate/`，`data/` 不动。启动脚本默认设置 `IF_HOME=包根/data`、`IF_PORTABLE=1`；安装版由 `install.cmd` 装到 `%USERPROFILE%\In_First`，程序在 `%USERPROFILE%\In_First\In_Fate`，数据在 `%USERPROFILE%\In_First\data`，都不进 AppData。
+
+安装器负责首次部署、升级保留数据、快捷方式和卸载注册表。更新器内置在设置 → 关于与更新：支持 `latest.json` 检查、下载、sha256 校验、应用和回滚，也支持直接选本地发布包 zip；应用只写 pending，下次启动前由 `tools/apply-pending.mjs` 整体切换 `In_Fate/`，运行中的进程不替换自己的文件。版本号唯一来源是根目录 `VERSION`；当前 `V0.0.1`。详见 [`docs/release.md`](docs/release.md)。
 
 ---
 
@@ -267,9 +270,11 @@ tests/          node:test 测试
 
 当前验证基线：
 
-- `npm test`：**228** 个测试全过
+- `npm test`：**240** 个测试全过
 - `npm run check`：`tsc --noEmit` 通过
 - `cd ui && npm run build`：通过
+- 发布包 smoke：通过
+- 安装 → 更新到 V0.0.2 → 启动 → 回滚到 V0.0.1 端到端通过
 
 重点已完成：
 
@@ -280,6 +285,7 @@ tests/          node:test 测试
 - 内置记忆库、结构编辑、策略、摘要 worker、FTS/语义索引、Jev 启发式推送
 - 插件 v0：内置示例、dev 插件、工具/面板、sandbox iframe、私有 KV
 - 模型余额 v0：DeepSeek / Moonshot / OpenRouter，按 key 查询
+- 安装与更新：`In_First/In_Fate` + `In_First/data` 分层、安装器/卸载、`latest.json` + sha256、pending 切换、回滚、本地 zip
 
 ---
 

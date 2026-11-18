@@ -12,7 +12,7 @@ test('IF_HOME 优先，IF_PORTABLE 回退到 cwd', () => {
   )
   assert.equal(
     resolveIfHome({ IF_HOME: '', IF_PORTABLE: '1' } as NodeJS.ProcessEnv),
-    resolve(process.cwd()),
+    resolve(process.cwd(), 'data'),
   )
   assert.equal(resolveIfHome({} as NodeJS.ProcessEnv), undefined)
 })

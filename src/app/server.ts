@@ -8,13 +8,16 @@
  */
 
 import { randomBytes } from 'node:crypto'
-import { createReadStream, existsSync, statSync } from 'node:fs'
+import { createReadStream, createWriteStream, existsSync, rmSync, statSync } from 'node:fs'
+import { once } from 'node:events'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
+import { tmpdir } from 'node:os'
 import { extname, join, resolve, sep } from 'node:path'
 import type { MemoryRole } from '../memory/access.ts'
 import { MemoryValidationError, type MemoryDocument } from '../memory/store.ts'
 import type { App } from './bundle.ts'
+import { UPDATE_MAX_BYTES, UpdateError } from './update.ts'
 import { IF_NAME, IF_VERSION } from '../version.ts'
 
 export interface ServeOptions {
@@ -48,6 +51,42 @@ function errorCodeOf(error: unknown): string | undefined {
   if (typeof error !== 'object' || error === null || !('code' in error)) return undefined
   const code = (error as { code?: unknown }).code
   return typeof code === 'string' ? code : undefined
+}
+
+function updateErrorStatus(error: unknown): number {
+  const code = errorCodeOf(error)
+  if (!code) return 500
+  if (code === 'update_source' || code === 'update_download' || code === 'update_extract') return 502
+  return 400
+}
+
+function updateErrorBody(error: unknown): { error: string; code?: string } {
+  const code = errorCodeOf(error)
+  return {
+    error: error instanceof Error ? error.message : String(error),
+    ...(code ? { code } : {}),
+  }
+}
+
+/** 更新包上传：流式落盘，最多 UPDATE_MAX_BYTES。 */
+async function saveUpload(req: IncomingMessage, dest: string): Promise<void> {
+  const out = createWriteStream(dest)
+  let total = 0
+  try {
+    for await (const chunk of req) {
+      total += (chunk as Buffer).length
+      if (total > UPDATE_MAX_BYTES) {
+        req.destroy()
+        throw new UpdateError('update_size', '更新包超过大小上限')
+      }
+      if (!out.write(chunk)) await once(out, 'drain')
+    }
+  } finally {
+    await new Promise<void>((resolveFinish, reject) => {
+      out.end(() => resolveFinish())
+      out.once('error', reject)
+    })
+  }
 }
 
 function cors(req: IncomingMessage, res: ServerResponse): void {
@@ -240,6 +279,89 @@ async function handle(
 
   if (req.method === 'GET' && parts[1] === 'version' && parts.length === 2) {
     json(res, 200, { name: IF_NAME, version: IF_VERSION })
+    return
+  }
+
+  if (req.method === 'GET' && parts[1] === 'update' && parts.length === 2) {
+    json(res, 200, { update: app.updateStatus() })
+    return
+  }
+
+  if (req.method === 'POST' && parts[1] === 'update' && parts[2] === 'check' && parts.length === 3) {
+    try {
+      json(res, 200, { check: await app.checkUpdate() })
+    } catch (error) {
+      json(res, updateErrorStatus(error), updateErrorBody(error))
+    }
+    return
+  }
+
+  if (req.method === 'POST' && parts[1] === 'update' && parts[2] === 'download' && parts.length === 3) {
+    try {
+      json(res, 202, { job: app.startUpdateDownload() })
+    } catch (error) {
+      json(res, updateErrorStatus(error), updateErrorBody(error))
+    }
+    return
+  }
+
+  if (req.method === 'GET' && parts[1] === 'update' && parts[2] === 'job' && parts.length === 3) {
+    json(res, 200, { job: app.updateJob() })
+    return
+  }
+
+  if (req.method === 'POST' && parts[1] === 'update' && parts[2] === 'apply' && parts.length === 3) {
+    try {
+      json(res, 200, { pending: app.applyUpdate() })
+    } catch (error) {
+      json(res, updateErrorStatus(error), updateErrorBody(error))
+    }
+    return
+  }
+
+  if (req.method === 'POST' && parts[1] === 'update' && parts[2] === 'rollback' && parts.length === 3) {
+    try {
+      json(res, 200, { pending: app.rollbackUpdate() })
+    } catch (error) {
+      json(res, updateErrorStatus(error), updateErrorBody(error))
+    }
+    return
+  }
+
+  if (req.method === 'POST' && parts[1] === 'update' && parts[2] === 'config' && parts.length === 3) {
+    const body = await readOptionalJson(req)
+    if (body.manifestUrl !== undefined && typeof body.manifestUrl !== 'string') {
+      json(res, 400, { error: 'manifestUrl must be a string' })
+      return
+    }
+    try {
+      json(res, 200, {
+        update: await app.saveUpdateConfig({
+          ...(typeof body.manifestUrl === 'string' ? { manifestUrl: body.manifestUrl } : {}),
+        }),
+      })
+    } catch (error) {
+      json(res, updateErrorStatus(error), updateErrorBody(error))
+    }
+    return
+  }
+
+  if (req.method === 'PUT' && parts[1] === 'update' && parts[2] === 'package' && parts.length === 3) {
+    const declared = Number(req.headers['content-length'])
+    if (Number.isFinite(declared) && declared > UPDATE_MAX_BYTES) {
+      json(res, 413, { error: '更新包超过大小上限' })
+      return
+    }
+    const temp = join(tmpdir(), `if-update-${randomBytes(8).toString('hex')}.zip`)
+    try {
+      await saveUpload(req, temp)
+      const staged = await app.stageUpdatePackage(temp)
+      json(res, 200, { staged })
+    } catch (error) {
+      json(res, updateErrorStatus(error), updateErrorBody(error))
+    } finally {
+      rmSync(temp, { force: true })
+    }
     return
   }
 

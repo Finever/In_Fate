@@ -7,7 +7,7 @@
 3. 用 Electron 窗口加载本地 UI；
 4. 退出时杀掉后端。
 
-还没做：原生应用嵌入、`WebContentsView`、终端、code-server、文件管理器、安装包。
+还没做：原生应用嵌入、`WebContentsView`、终端、code-server、文件管理器。安装与更新由发布包的 `install.cmd` 和 IF 设置页负责，不塞进 Electron 壳。
 
 ## 准备
 
@@ -111,10 +111,10 @@ npm run smoke
 
 ## 已知限制
 
-- 需要系统里有 `node`；打包版后面再内置 Node。
+- 开发模式需要系统里有 `node`；发布包内置 `runtime/node.exe`，由 `IF_NODE` 指定。
 - 后端和 Electron 是同一个 dataRoot 的单 host；如果已经手动跑了 `if serve`，桌面壳会因为 host 锁被拒绝。
 - 窗口状态存在 Electron 的 userData 目录，不进仓库。
-- 不做自动更新、托盘、安装包。
+- 不做托盘；自动更新走 IF 设置页，不放进 Electron 壳。
 
 ## 窗口顶栏
 

@@ -105,6 +105,11 @@ export interface PatchConfig {
   readonly runtime?: RuntimePatch
 }
 
+export interface UpdateConfig {
+  /** 更新清单地址；http(s)、file: 或本地路径。留空则只用本地更新包。 */
+  readonly manifestUrl?: string
+}
+
 export interface AppConfig {
   readonly version?: number
   readonly profile: Profile
@@ -113,6 +118,7 @@ export interface AppConfig {
   /** 旧版兼容字段；运行期不再使用，模型由每个 agent 自己配置。 */
   readonly defaultModel?: { readonly provider: string; readonly model: string }
   readonly patch?: PatchConfig
+  readonly update?: UpdateConfig
 }
 
 export class ConfigError extends Error {
@@ -162,6 +168,12 @@ export function validateConfig(raw: unknown): AppConfig {
   }
   if (isRecord(raw.patch) && raw.patch.runtime !== undefined && !isRecord(raw.patch.runtime)) {
     throw new ConfigError('patch.runtime', 'must be an object')
+  }
+  if (raw.update !== undefined) {
+    if (!isRecord(raw.update)) throw new ConfigError('update', 'must be an object')
+    if (raw.update.manifestUrl !== undefined && typeof raw.update.manifestUrl !== 'string') {
+      throw new ConfigError('update.manifestUrl', 'must be a string')
+    }
   }
 
   return raw as unknown as AppConfig

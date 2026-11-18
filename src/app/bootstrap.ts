@@ -9,7 +9,7 @@
  * @module if/app/bootstrap
  */
 
-import { join, resolve } from 'node:path'
+import { resolve } from 'node:path'
 import { ConfigError, type AppConfig } from './config.ts'
 import { buildBundle, type App, type BuildOptions } from './bundle.ts'
 import { Container } from './container.ts'
@@ -55,7 +55,7 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<App> {
       ...normalized,
       profile: {
         ...normalized.profile,
-        dataRoot: join(home, 'data'),
+        dataRoot: home,
       },
     }
     : normalized

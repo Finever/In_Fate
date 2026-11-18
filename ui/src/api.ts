@@ -31,6 +31,7 @@ import type {
   MemorySearchHit,
   MemoryTrashEntry,
   MemoryValidationIssue,
+  PendingUpdate,
   SessionInfo,
   SessionInspection,
   SessionLifecycleRecord,
@@ -38,6 +39,9 @@ import type {
   ToolView,
   TurnResponse,
   UiApproval,
+  UpdateCheckResult,
+  UpdateJob,
+  UpdateStatus,
   UiPayloadSlice,
   UiSessionStats,
   UiTimelineItem,
@@ -455,6 +459,70 @@ export const api = {
       `/api/model-config/providers/${encodeURIComponent(provider)}/api-keys/${encodeURIComponent(keyId)}/balance${suffix}`,
     )
     return body.balance
+  },
+
+  async updateStatus(): Promise<UpdateStatus> {
+    const body = await request<{ update: UpdateStatus }>('/api/update')
+    return body.update
+  },
+
+  async checkUpdate(): Promise<UpdateCheckResult> {
+    const body = await request<{ check: UpdateCheckResult }>('/api/update/check', {
+      method: 'POST',
+    })
+    return body.check
+  },
+
+  async startUpdateDownload(): Promise<UpdateJob> {
+    const body = await request<{ job: UpdateJob }>('/api/update/download', { method: 'POST' })
+    return body.job
+  },
+
+  async updateJob(): Promise<UpdateJob> {
+    const body = await request<{ job: UpdateJob }>('/api/update/job')
+    return body.job
+  },
+
+  async applyUpdate(): Promise<PendingUpdate> {
+    const body = await request<{ pending: PendingUpdate }>('/api/update/apply', { method: 'POST' })
+    return body.pending
+  },
+
+  async rollbackUpdate(): Promise<PendingUpdate> {
+    const body = await request<{ pending: PendingUpdate }>('/api/update/rollback', { method: 'POST' })
+    return body.pending
+  },
+
+  async saveUpdateConfig(manifestUrl: string): Promise<UpdateStatus> {
+    const body = await request<{ update: UpdateStatus }>('/api/update/config', {
+      method: 'POST',
+      body: JSON.stringify({ manifestUrl }),
+    })
+    return body.update
+  },
+
+  async uploadUpdatePackage(file: File): Promise<{ version: string; program: string }> {
+    const token = getToken()
+    const response = await fetch('/api/update/package', {
+      method: 'PUT',
+      headers: {
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+        'content-type': 'application/zip',
+      },
+      body: file,
+    })
+    if (!response.ok) {
+      let detail = `${response.status} ${response.statusText}`
+      try {
+        const body = await response.json() as { error?: string }
+        if (body.error) detail = body.error
+      } catch {
+        // 非 JSON 错误
+      }
+      throw new ApiError(detail, response.status)
+    }
+    const body = await response.json() as { staged: { version: string; program: string } }
+    return body.staged
   },
 
   async mainAgentIdentity(agentId: string): Promise<MainAgentIdentity> {

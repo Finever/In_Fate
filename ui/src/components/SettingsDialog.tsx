@@ -7,6 +7,7 @@ import { LocalEmbeddingPanel } from './LocalEmbeddingPanel'
 import { MemoryBrowser } from './MemoryBrowser'
 import { ModelEditorDialog } from './ModelEditorDialog'
 import { PluginsPanel } from './PluginsPanel'
+import { UpdatePanel } from './UpdatePanel'
 
 interface ProviderDraft {
   baseUrl: string
@@ -65,7 +66,7 @@ function pricingSummary(pricing: ModelPricing | undefined): string {
 
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [config, setConfig] = useState<ModelConfig>()
-  const [view, setView] = useState<'models' | 'memory' | 'local' | 'plugins'>('models')
+  const [view, setView] = useState<'models' | 'memory' | 'local' | 'plugins' | 'update'>('models')
   const [memoryDirty, setMemoryDirty] = useState(false)
   const [providerId, setProviderId] = useState('')
   const [drafts, setDrafts] = useState<Record<string, ProviderDraft>>({})
@@ -611,6 +612,24 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                     <small>工具与面板</small>
                   </span>
                 </button>
+                <button
+                  type="button"
+                  className={`fw-settings-category${view === 'update' ? ' is-active' : ''}`}
+                  onClick={() => {
+                    setView('update')
+                    setError(undefined)
+                    setNotice(undefined)
+                  }}
+                  disabled={saving || Boolean(editing)}
+                >
+                  <span className="fw-settings-category-mark">
+                    <Icon name="info" size={13} />
+                  </span>
+                  <span className="fw-settings-category-text">
+                    <b>关于与更新</b>
+                    <small>版本、安装与回滚</small>
+                  </span>
+                </button>
               </aside>
 
               <div className={`fw-settings-main${view === 'memory' ? ' is-memory' : ''}`}>
@@ -620,6 +639,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                   <LocalEmbeddingPanel />
                 ) : view === 'plugins' ? (
                   <PluginsPanel />
+                ) : view === 'update' ? (
+                  <UpdatePanel />
                 ) : (
                   <>
                     <div className="fw-model-head">
