@@ -154,7 +154,7 @@ policy.json   记忆策略
 边界：
 
 - `log/` 只读，不改写；要修正就写新条目。
-- `SOUL.md` / `USER.md` / `FACT.md` 是当前 agent 的独属文件，不进公用库。
+- 主 agent 的身份文件是 `memory/agents/<id>/agent.json` 和 `identity/principle.md` / `preference.md` / `prompt.md`；没有 manifest 时才回退到旧的 `SOUL.md` / `USER.md` / `memory/FACT.md`。这些是 agent 独属，不进公用库。
 - 一条记忆一件事；三档戳：`确信` / `可信` / `有疑`。
 - 原话必须带 `log-addr`；找不到地址就不算原话。
 
