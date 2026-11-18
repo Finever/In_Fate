@@ -6,10 +6,14 @@ import type {
   EmbeddingModelStatus,
   MainAgentIdentity,
   MainAgentInfo,
+  ModelBalance,
   ModelConfig,
   ModelProviderInput,
   ModelProviderModelInput,
   ModelProviderTemplate,
+  PluginInfo,
+  PluginListResult,
+  PluginPanelContent,
   SaveModelCardInput,
   SaveModelConfigInput,
   LogSearchResult,
@@ -412,6 +416,45 @@ export const api = {
       { method: 'PATCH', body: JSON.stringify(input) },
     )
     return body.tools
+  },
+
+  async plugins(): Promise<PluginListResult> {
+    return request<PluginListResult>('/api/plugins')
+  },
+
+  async enablePlugin(id: string): Promise<PluginInfo> {
+    const body = await request<{ plugin: PluginInfo }>(
+      `/api/plugins/${encodeURIComponent(id)}/enable`,
+      { method: 'POST' },
+    )
+    return body.plugin
+  },
+
+  async disablePlugin(id: string): Promise<PluginInfo> {
+    const body = await request<{ plugin: PluginInfo }>(
+      `/api/plugins/${encodeURIComponent(id)}/disable`,
+      { method: 'POST' },
+    )
+    return body.plugin
+  },
+
+  async pluginPanel(pluginId: string, panelId: string): Promise<PluginPanelContent> {
+    const body = await request<{ panel: PluginPanelContent }>(
+      `/api/plugins/${encodeURIComponent(pluginId)}/panels/${encodeURIComponent(panelId)}`,
+    )
+    return body.panel
+  },
+
+  async modelBalance(
+    provider: string,
+    keyId: string,
+    refresh = false,
+  ): Promise<ModelBalance> {
+    const suffix = refresh ? '?refresh=1' : ''
+    const body = await request<{ balance: ModelBalance }>(
+      `/api/model-config/providers/${encodeURIComponent(provider)}/api-keys/${encodeURIComponent(keyId)}/balance${suffix}`,
+    )
+    return body.balance
   },
 
   async mainAgentIdentity(agentId: string): Promise<MainAgentIdentity> {

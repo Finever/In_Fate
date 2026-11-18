@@ -127,9 +127,14 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
   const agentId = options.profile.principals.agents?.[0]?.id ?? 'agent'
   const cwd = options.cwd ?? process.cwd()
   const maxSteps = options.maxSteps ?? 32
-  const allowedTools = options.toolAllow ? new Set(options.toolAllow) : undefined
-  const toolSpecs = () => options.tools.toModelSpecs().filter(spec =>
-    !allowedTools || allowedTools.has(spec.name))
+  // 没有显式 allow 时，插件工具不进模型；同时把这个集合交给执行器，
+  // 防止模型凭空调用一个未展示的插件工具。
+  const allowedTools = options.toolAllow
+    ? new Set(options.toolAllow)
+    : new Set(options.tools.list()
+      .filter(tool => tool.source !== 'plugin')
+      .map(tool => tool.name))
+  const toolSpecs = () => options.tools.toModelSpecs({ allowed: allowedTools })
   const append = (input: NewEvent): Event =>
     options.writer ? options.writer.append(input) : options.store.append(input)
   const flush = (): void => {

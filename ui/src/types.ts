@@ -270,9 +270,28 @@ export interface ModelConfigProvider {
   }>
   apiKeys: ModelApiKeyView[]
   hasApiKey: boolean
+  /** 上游是否提供可直接用 key 查询的余额接口。 */
+  balanceSupported: boolean
   apiKeyEnv?: string
   enabled: boolean
   removable: boolean
+}
+
+export interface BalanceAmount {
+  currency: string
+  total: number
+  available: number
+  granted?: number
+  toppedUp?: number
+  totalUsage?: number
+}
+
+export interface ModelBalance {
+  provider: string
+  keyId: string
+  checkedAt: string
+  source: 'api'
+  balances: BalanceAmount[]
 }
 
 export interface ModelConfig {
@@ -661,4 +680,47 @@ export interface MemorySummaryWorkerStatus {
   queued: number
   jobs: MemorySummaryJob[]
   lastError?: string
+}
+
+export type PluginKind = 'tool' | 'ui-panel'
+export type PluginCapability = 'tools.register' | 'ui.panel' | 'storage'
+export type PluginTrust = 'builtin' | 'dev'
+export type PluginStatus = 'inactive' | 'activating' | 'active' | 'disabled' | 'error'
+
+export interface PluginPanelInfo {
+  id: string
+  title: string
+  slot?: 'settings'
+  width?: number
+  height?: number
+}
+
+export interface PluginInfo {
+  id: string
+  name: string
+  version: string
+  apiVersion: number
+  description?: string
+  trust: PluginTrust
+  status: PluginStatus
+  provides: PluginKind[]
+  capabilities: PluginCapability[]
+  tools: string[]
+  panels: PluginPanelInfo[]
+  error?: string
+}
+
+export interface PluginLoadError {
+  path: string
+  error: string
+}
+
+export interface PluginListResult {
+  plugins: PluginInfo[]
+  errors: PluginLoadError[]
+}
+
+export interface PluginPanelContent extends PluginPanelInfo {
+  pluginId: string
+  html: string
 }

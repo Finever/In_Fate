@@ -43,6 +43,12 @@ function json(res: ServerResponse, status: number, body: unknown): void {
   res.end(text)
 }
 
+function errorCodeOf(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return undefined
+  const code = (error as { code?: unknown }).code
+  return typeof code === 'string' ? code : undefined
+}
+
 function cors(req: IncomingMessage, res: ServerResponse): void {
   const origin = req.headers.origin
   if (typeof origin === 'string'
@@ -228,6 +234,42 @@ async function handle(
 
   if (req.method === 'GET' && parts[1] === 'health') {
     json(res, 200, { ok: true })
+    return
+  }
+
+  if (req.method === 'GET' && parts[1] === 'plugins' && parts.length === 2) {
+    json(res, 200, app.pluginList())
+    return
+  }
+
+  if (req.method === 'POST' && parts[1] === 'plugins' && parts[2]
+    && parts[3] === 'enable' && parts.length === 4) {
+    try {
+      json(res, 200, { plugin: await app.pluginEnable(parts[2]!) })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  if (req.method === 'POST' && parts[1] === 'plugins' && parts[2]
+    && parts[3] === 'disable' && parts.length === 4) {
+    try {
+      json(res, 200, { plugin: await app.pluginDisable(parts[2]!) })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  if (req.method === 'GET' && parts[1] === 'plugins' && parts[2]
+    && parts[3] === 'panels' && parts[4] && parts.length === 5) {
+    const panel = app.pluginPanel(parts[2]!, parts[4]!)
+    if (!panel) {
+      json(res, 404, { error: 'panel not found' })
+      return
+    }
+    json(res, 200, { panel })
     return
   }
 
@@ -471,6 +513,27 @@ async function handle(
       json(res, 200, { key })
     } catch (error) {
       json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  if (req.method === 'GET' && parts[1] === 'model-config' && parts[2] === 'providers'
+    && parts[3] && parts[4] === 'api-keys' && parts[5]
+    && parts[6] === 'balance' && parts.length === 7) {
+    try {
+      const balance = await app.modelBalance({
+        provider: parts[3]!,
+        keyId: parts[5]!,
+        ...(url.searchParams.get('refresh') === '1' ? { refresh: true } : {}),
+      })
+      json(res, 200, { balance })
+    } catch (error) {
+      const code = errorCodeOf(error)
+      const status = code === 'balance_unsupported' || code === 'balance_input' ? 400 : 502
+      json(res, status, {
+        error: error instanceof Error ? error.message : String(error),
+        ...(code ? { code } : {}),
+      })
     }
     return
   }

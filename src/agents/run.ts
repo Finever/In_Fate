@@ -228,7 +228,7 @@ export async function runSubagent(
       now: new Date(),
     })
 
-    const tools = runtime.tools.toModelSpecs().filter(spec => allowed.has(spec.name))
+    const tools = runtime.tools.toModelSpecs({ allowed })
     let messages = rendered.messages
     if (preset.budget?.maxContextTokens) {
       const trimmed = trimHistoryForContext(

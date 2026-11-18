@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api'
-import type { ModelConfig, ModelConfigProvider, ModelPricing } from '../types'
+import type { ModelBalance, ModelConfig, ModelConfigProvider, ModelPricing } from '../types'
 import { AddProviderDialog } from './AddProviderDialog'
 import { Icon } from './Icon'
 import { LocalEmbeddingPanel } from './LocalEmbeddingPanel'
 import { MemoryBrowser } from './MemoryBrowser'
 import { ModelEditorDialog } from './ModelEditorDialog'
+import { PluginsPanel } from './PluginsPanel'
 
 interface ProviderDraft {
   baseUrl: string
@@ -29,6 +30,14 @@ function providerMark(name: string): string {
 
 function formatTokens(value: number | undefined): string {
   return value === undefined ? '未配置' : Math.round(value).toLocaleString('en-US')
+}
+
+function formatBalance(value: number): string {
+  if (!Number.isFinite(value)) return '—'
+  return value.toLocaleString('zh-CN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
 }
 
 function formatLabel(family: string): string {
@@ -56,7 +65,7 @@ function pricingSummary(pricing: ModelPricing | undefined): string {
 
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [config, setConfig] = useState<ModelConfig>()
-  const [view, setView] = useState<'models' | 'memory' | 'local'>('models')
+  const [view, setView] = useState<'models' | 'memory' | 'local' | 'plugins'>('models')
   const [memoryDirty, setMemoryDirty] = useState(false)
   const [providerId, setProviderId] = useState('')
   const [drafts, setDrafts] = useState<Record<string, ProviderDraft>>({})
@@ -80,6 +89,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [revealedKeys, setRevealedKeys] = useState<Record<string, string>>({})
   const [renamingKeyId, setRenamingKeyId] = useState<string>()
   const [keyNameDraft, setKeyNameDraft] = useState('')
+  const [balances, setBalances] = useState<Record<string, ModelBalance>>({})
+  const [balanceBusy, setBalanceBusy] = useState<string>()
+  const [balanceErrors, setBalanceErrors] = useState<Record<string, string>>({})
 
   useEffect(() => {
     let cancelled = false
@@ -130,6 +142,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     setRevealedKeys({})
     setRenamingKeyId(undefined)
     setKeyNameDraft('')
+    setBalances({})
+    setBalanceBusy(undefined)
+    setBalanceErrors({})
   }, [providerId])
 
   const provider = config?.providers.find(item => item.id === providerId)
@@ -301,6 +316,31 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
       setKeySaving(false)
+    }
+  }
+
+  async function queryBalance(
+    providerId: string,
+    keyId: string,
+    refresh = false,
+  ): Promise<void> {
+    const key = `${providerId}:${keyId}`
+    setBalanceBusy(key)
+    setBalanceErrors(current => {
+      const next = { ...current }
+      delete next[key]
+      return next
+    })
+    try {
+      const balance = await api.modelBalance(providerId, keyId, refresh)
+      setBalances(current => ({ ...current, [key]: balance }))
+    } catch (reason) {
+      setBalanceErrors(current => ({
+        ...current,
+        [key]: reason instanceof Error ? reason.message : String(reason),
+      }))
+    } finally {
+      setBalanceBusy(undefined)
     }
   }
 
@@ -553,6 +593,24 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                     <small>embedding 权重</small>
                   </span>
                 </button>
+                <button
+                  type="button"
+                  className={`fw-settings-category${view === 'plugins' ? ' is-active' : ''}`}
+                  onClick={() => {
+                    setView('plugins')
+                    setError(undefined)
+                    setNotice(undefined)
+                  }}
+                  disabled={saving || Boolean(editing)}
+                >
+                  <span className="fw-settings-category-mark">
+                    <Icon name="layers" size={13} />
+                  </span>
+                  <span className="fw-settings-category-text">
+                    <b>插件</b>
+                    <small>工具与面板</small>
+                  </span>
+                </button>
               </aside>
 
               <div className={`fw-settings-main${view === 'memory' ? ' is-memory' : ''}`}>
@@ -560,6 +618,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                   <MemoryBrowser onDirtyChange={setMemoryDirty} />
                 ) : view === 'local' ? (
                   <LocalEmbeddingPanel />
+                ) : view === 'plugins' ? (
+                  <PluginsPanel />
                 ) : (
                   <>
                     <div className="fw-model-head">
@@ -710,6 +770,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                           {provider.apiKeys.length} 个 · 启用 {enabledKeyCount}
                         </small>
                         <span className="fw-model-head-spacer" />
+                        {!provider.balanceSupported && (
+                          <small className="fw-settings-keys-env">余额接口不支持</small>
+                        )}
                         {provider.apiKeyEnv && (
                           <small className="fw-settings-keys-env">
                             环境变量 {provider.apiKeyEnv}
@@ -795,6 +858,43 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                                     {revealedKeys[entry.id] ? '隐藏' : '显示'}
                                   </button>
                                 </div>
+                                {provider.balanceSupported && (
+                                  <div className="fw-settings-key-balance">
+                                    {balances[`${provider.id}:${entry.id}`] ? (
+                                      <>
+                                        <span className="fw-settings-key-balance-text">
+                                          {balances[`${provider.id}:${entry.id}`]!.balances
+                                            .map(item => `${item.currency} 可用 ${formatBalance(item.available)}`)
+                                            .join(' · ')}
+                                        </span>
+                                        <button
+                                          type="button"
+                                          className="fw-settings-key-link"
+                                          onClick={() => void queryBalance(provider.id, entry.id, true)}
+                                          disabled={!entry.isEnabled || balanceBusy === `${provider.id}:${entry.id}`}
+                                          title={entry.isEnabled ? '跳过缓存重新查询' : 'key 已停用'}
+                                        >
+                                          {balanceBusy === `${provider.id}:${entry.id}` ? '查询中…' : '刷新'}
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        className="fw-settings-key-link"
+                                        onClick={() => void queryBalance(provider.id, entry.id)}
+                                        disabled={!entry.isEnabled || balanceBusy === `${provider.id}:${entry.id}`}
+                                        title={entry.isEnabled ? '查询这个 key 的上游余额' : 'key 已停用'}
+                                      >
+                                        {balanceBusy === `${provider.id}:${entry.id}` ? '查询中…' : '查询余额'}
+                                      </button>
+                                    )}
+                                    {balanceErrors[`${provider.id}:${entry.id}`] && (
+                                      <small className="fw-settings-key-balance-error">
+                                        {balanceErrors[`${provider.id}:${entry.id}`]}
+                                      </small>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                               <label className="fw-settings-key-enabled">
                                 <input

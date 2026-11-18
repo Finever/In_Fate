@@ -1738,6 +1738,22 @@ body.fw-resizing {
 .fw-settings-key-value code.is-revealed {
   color: var(--text);
 }
+.fw-settings-key-balance {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 3px;
+}
+.fw-settings-key-balance-text {
+  color: var(--text);
+  font: 10.5px var(--mono, monospace);
+}
+.fw-settings-key-balance-error {
+  color: var(--danger);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
 .fw-settings-key-rename {
   min-width: 0;
   flex: 1;
@@ -4640,4 +4656,206 @@ body.fw-resizing {
   border-radius: 7px;
   color: var(--danger);
   font-size: 12px;
+}
+
+/* ---------- 插件 v0 ---------- */
+
+.fw-plugins {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+.fw-plugins-head,
+.fw-plugin-detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.fw-plugins-head h3,
+.fw-plugin-detail-head h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.fw-plugins-head small,
+.fw-plugin-detail-head small {
+  display: block;
+  margin-top: 3px;
+  color: var(--faint);
+  font-size: 10.5px;
+}
+.fw-plugins-error {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--line));
+  border-radius: 7px;
+  color: var(--danger);
+  font-size: 11.5px;
+  word-break: break-word;
+}
+.fw-plugins-error b {
+  color: var(--text);
+  font-weight: 500;
+}
+.fw-plugins-layout {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 12px;
+}
+.fw-plugin-list {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.fw-plugin-card {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .015);
+  color: var(--muted);
+  text-align: left;
+}
+.fw-plugin-card:hover {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+.fw-plugin-card.is-active {
+  border-color: var(--line-strong);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.fw-plugin-card.is-error {
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--line));
+}
+.fw-plugin-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.fw-plugin-card-head b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 550;
+}
+.fw-plugin-status {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--faint);
+  font-size: 9px;
+}
+.fw-plugin-status.is-active {
+  border-color: color-mix(in srgb, #6ee7a8 40%, var(--line));
+  color: #6ee7a8;
+}
+.fw-plugin-status.is-activating {
+  border-color: color-mix(in srgb, var(--warn) 40%, var(--line));
+  color: var(--warn);
+}
+.fw-plugin-status.is-error {
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--line));
+  color: var(--danger);
+}
+.fw-plugin-card-meta,
+.fw-plugin-card-kinds {
+  color: var(--faint);
+  font-size: 9.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fw-plugin-detail {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.fw-plugin-description {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.fw-plugin-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.fw-plugin-meta-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+.fw-plugin-meta-grid span {
+  color: var(--faint);
+  font-size: 9.5px;
+}
+.fw-plugin-meta-grid b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+  font-weight: 500;
+}
+.fw-plugin-panel-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.fw-plugin-panel-tabs button {
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: none;
+  color: var(--faint);
+  font-size: 10.5px;
+}
+.fw-plugin-panel-tabs button.is-active {
+  border-color: var(--line-strong);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.fw-plugin-frame-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.fw-plugin-frame {
+  width: 100%;
+  min-height: 160px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: #14161c;
+}
+.fw-plugin-frame-wrap small {
+  color: var(--faint);
+  font-size: 9.5px;
+}
+.fw-plugin-detail-empty {
+  padding: 9px 11px;
+  border: 1px dashed var(--line);
+  border-radius: 7px;
+  color: var(--faint);
+  font-size: 11px;
 }

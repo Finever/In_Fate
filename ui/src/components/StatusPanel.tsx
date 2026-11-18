@@ -144,10 +144,13 @@ export function StatusPanel({
   const selectedModel = modelProvider && modelId
     ? { provider: modelProvider, model: modelId }
     : undefined
-  const allTools = tools.map(tool => tool.name)
   const agentAllow = summary?.tools.allow !== undefined
     ? new Set(summary.tools.allow)
-    : new Set(allTools)
+    : new Set(
+      tools
+        .filter(tool => tool.source !== 'plugin')
+        .map(tool => tool.name),
+    )
 
   async function saveModel(): Promise<void> {
     if (!modelProvider || !modelId) return

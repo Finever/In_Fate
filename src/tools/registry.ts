@@ -116,8 +116,18 @@ export class ToolRegistry {
     }
   }
 
-  toModelSpecs(): ToolSpec[] {
-    return this.list().map(toModelSpec)
+  /**
+   * 模型可见的工具。
+   *
+   * 没有显式 allow 时，plugin 来源默认不可见；插件工具必须由 agent
+   * 明确列入白名单，避免“装一个插件，所有 agent 都能用”。
+   */
+  toModelSpecs(options: { readonly allowed?: ReadonlySet<string> } = {}): ToolSpec[] {
+    return this.list()
+      .filter(entry => options.allowed
+        ? options.allowed.has(entry.name)
+        : entry.source !== 'plugin')
+      .map(toModelSpec)
   }
 
   /** 订阅工具变更。返回取消函数。 */

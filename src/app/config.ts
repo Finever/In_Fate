@@ -94,6 +94,13 @@ export interface PatchConfig {
   readonly offload?: Partial<OffloadConfig>
   /** 按 id 覆盖预设；null 表示删掉这个可选字段 */
   readonly presets?: Readonly<Record<string, Partial<AgentPreset> | null>>
+  /** 插件 v0：默认只加载内置示例，dev 目录要显式开启。 */
+  readonly plugins?: {
+    /** 是否扫描 dataRoot/plugins；默认关，只给开发者。 */
+    readonly dev?: boolean
+    /** 不配就用 dataRoot/plugins。 */
+    readonly dir?: string
+  }
   /** 运行时策略：重试、文件/网络沙箱、指标 */
   readonly runtime?: RuntimePatch
 }

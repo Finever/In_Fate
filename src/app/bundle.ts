@@ -96,6 +96,7 @@ import { BUILTIN_PROVIDERS } from '../model/builtin.ts'
 import { apiUrl } from '../model/urls.ts'
 import { validatePricing } from '../model/pricing.ts'
 import { ModelRegistry as Registry } from '../model/registry.ts'
+import { BalanceInputError, ModelBalanceService, type ModelBalance } from '../model/balance.ts'
 import { normalizeEndpointFamily } from '../model/chat-model.ts'
 import { ModelGate, type ModelPriority } from '../model/gate.ts'
 import { resolveRetryPolicy } from '../model/retry.ts'
@@ -148,6 +149,13 @@ import { writeTool } from '../tools/builtin/write.ts'
 import { OffloadPolicy } from '../tools/offload.ts'
 import { FileSpillStore, SpillPolicy } from '../tools/spill.ts'
 import { ToolRegistry } from '../tools/registry.ts'
+import { PluginRegistry } from '../plugins/registry.ts'
+import { createExamplePlugin } from '../plugins/builtin/example.ts'
+import type {
+  PluginInfo,
+  PluginListResult,
+  PluginPanelContent,
+} from '../plugins/types.ts'
 import {
   slicePayload,
   type UiApproval,
@@ -337,6 +345,8 @@ export interface App {
   updateModelApiKey(input: ModelApiKeyUpdateInput): Promise<ModelConfigView>
   /** 只有用户明确点击「显示」时才取完整 key。 */
   revealModelApiKey(input: ModelApiKeyRemoveInput): string
+  /** 查询单个 key 的上游余额；不支持时抛 balance_unsupported。 */
+  modelBalance(input: ModelBalanceInput): Promise<ModelBalance>
   /** 用 provider 的 key / baseUrl 调模型列表接口，返回模型 id。 */
   probeModelProvider(input: ModelProbeInput): Promise<{ models: readonly string[] }>
   /** 给已有 provider 追加模型；重复 id 跳过。 */
@@ -370,6 +380,15 @@ export interface App {
   toolViews(agentId?: string): ToolView[]
   /** 全局工具启停/审批；有 configPath 时写回配置文件。 */
   setToolGlobal(name: string, input: ToolGlobalUpdate): Promise<ToolView[]>
+
+  /** 插件列表与扫描错误。 */
+  pluginList(): PluginListResult
+  /** 启用插件并等待激活；失败会抛错。 */
+  pluginEnable(id: string): Promise<PluginInfo>
+  /** 停用插件并回滚注册项。 */
+  pluginDisable(id: string): Promise<PluginInfo>
+  /** 取面板 HTML；只给 sandbox iframe。 */
+  pluginPanel(pluginId: string, panelId: string): PluginPanelContent | undefined
 
   /** 内置记忆库根；关闭记忆时 undefined。 */
   memoryRoot(): string | undefined
@@ -466,6 +485,8 @@ export interface ModelConfigProviderView {
   }>
   readonly apiKeys: readonly ModelApiKeyView[]
   readonly hasApiKey: boolean
+  /** 上游是否提供可直接用 key 查询的余额接口。 */
+  readonly balanceSupported: boolean
   readonly apiKeyEnv?: string
   readonly enabled: boolean
   /** 配置里的 provider 都可以删；模板不会进这里。 */
@@ -497,6 +518,13 @@ export interface ModelApiKeyInput {
 export interface ModelApiKeyRemoveInput {
   readonly provider: string
   readonly keyId: string
+}
+
+export interface ModelBalanceInput {
+  readonly provider: string
+  readonly keyId: string
+  /** true = 跳过服务端 60 秒余额缓存。 */
+  readonly refresh?: boolean
 }
 
 export interface ModelApiKeyUpdateInput {
@@ -906,6 +934,14 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     apiKey?: string
     baseUrls?: Record<string, string>
   }>()
+  const balanceService = new ModelBalanceService()
+  const providerBaseUrlOf = (provider: ProviderConfig, family?: string): string => {
+    const target = family ?? provider.defaultChatEndpoint ?? Object.keys(provider.endpoints)[0]
+    if (!target) return ''
+    return providerOverrides.get(provider.id)?.baseUrls?.[target]
+      ?? provider.endpoints[target]?.baseUrl
+      ?? ''
+  }
   const modelOverrides = new Map<string, {
     contextWindow?: number | null
     maxOutputTokens?: number | null
@@ -1099,6 +1135,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         }),
         apiKeys,
         hasApiKey: apiKeys.some(entry => entry.isEnabled) || Boolean(envKey),
+        balanceSupported: balanceService.supports(provider, providerBaseUrlOf(provider)),
         ...(provider.apiKeyEnv ? { apiKeyEnv: provider.apiKeyEnv } : {}),
         enabled: provider.enabled !== false,
         removable: true,
@@ -1411,6 +1448,27 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     return target.key
   }
 
+  const modelBalance = async (input: ModelBalanceInput): Promise<ModelBalance> => {
+    let provider: ProviderConfig
+    try {
+      provider = models.get(input.provider)
+    } catch (error) {
+      throw new BalanceInputError(error instanceof Error ? error.message : String(error))
+    }
+    const target = keyEntriesOf(provider).find(entry => entry.id === input.keyId)
+    if (!target) throw new BalanceInputError(`unknown api key: ${input.keyId}`)
+    if (target.isEnabled === false) throw new BalanceInputError('api key is disabled')
+    const baseUrl = providerBaseUrlOf(provider)
+    if (!baseUrl) throw new BalanceInputError(`provider ${provider.id} has no baseUrl`)
+    return balanceService.query({
+      provider,
+      keyId: target.id,
+      apiKey: target.key,
+      baseUrl,
+      ...(input.refresh ? { force: true } : {}),
+    })
+  }
+
   const addProviderModels = async (
     input: ModelProviderModelsInput,
   ): Promise<ModelConfigView> => {
@@ -1709,7 +1767,8 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         approval: descriptor.approval,
         dangerous: Boolean(tool?.meta?.dangerous),
         readOnly: Boolean(tool?.meta?.readOnly),
-        agentAllowed: !allow || allow.has(descriptor.name),
+        // 插件工具没有显式 allow 时默认不给 agent；其它工具沿用旧行为。
+        agentAllowed: allow ? allow.has(descriptor.name) : descriptor.source !== 'plugin',
         ...(agentApproval ? { agentApproval } : {}),
         effectiveApproval: agentApproval ?? descriptor.approval,
       }
@@ -1891,6 +1950,23 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     })
   }
   container.register('tools', tools)
+
+  // 插件 v0：内置示例 + 显式开启的 dev 目录。全部进程内，权限只是宿主 API 准入。
+  const pluginRegistry = new PluginRegistry({
+    dataRoot: config.profile.dataRoot,
+    tools,
+    builtins: [createExamplePlugin()],
+    dev: config.patch?.plugins?.dev === true || process.env.IF_DEV_PLUGINS === '1',
+    enabledTools: new Set(config.patch?.tools?.enabled ?? []),
+    disabledTools: new Set(config.patch?.tools?.disabled ?? []),
+    ...(config.patch?.tools?.approval ? { toolApproval: config.patch.tools.approval } : {}),
+    ...(config.patch?.plugins?.dir ? { devDir: config.patch.plugins.dir } : {}),
+  })
+  container.register('plugins', pluginRegistry)
+  container.onDispose('plugins', () => pluginRegistry.stop())
+  void pluginRegistry.start().catch(error => {
+    console.error('[plugin] start failed:', error)
+  })
 
   // 预设：只从配置来，代码不写死模型名。
   const presets = new PresetRegistry()
@@ -2496,7 +2572,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       const settings = agentSettingsOf(agentId)
       const allowed = settings?.tools?.allow !== undefined
         ? new Set(settings.tools.allow)
-        : undefined
+        : new Set(tools.list().filter(tool => tool.source !== 'plugin').map(tool => tool.name))
       const history = projectHistory(store.read())
       const rendered = renderContext({
         sections,
@@ -2520,7 +2596,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
           ? { maxOutputTokens: model.model.maxOutputTokens }
           : {}),
         system: rendered.system,
-        tools: tools.toModelSpecs().filter(spec => !allowed || allowed.has(spec.name)),
+        tools: tools.toModelSpecs({ allowed }),
         messages: rendered.messages,
         currentTurn,
         projectMessages: () => projectHistory(store.read()),
@@ -2811,6 +2887,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     async setToolGlobal(name, input) {
       if (!tools.get(name)) throw new Error(`unknown tool: ${name}`)
       const dangerous = Boolean(tools.get(name)?.meta?.dangerous)
+      const plugin = tools.policy(name)?.source === 'plugin'
       await writeConfigFile(raw => {
         if (!raw.patch) raw.patch = {}
         if (!raw.patch.tools) raw.patch.tools = {}
@@ -2822,7 +2899,9 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
           target.enabled = target.enabled.filter(item => item !== name)
           target.disabled = target.disabled.filter(item => item !== name)
           if (input.enabled) {
-            if (dangerous) target.enabled.push(name)
+            // 安全工具过去默认开、不需要写名单；插件工具默认关，
+            // 必须把启用状态写回去，否则重启后又变回停用。
+            if (dangerous || plugin) target.enabled.push(name)
           } else {
             target.disabled.push(name)
           }
@@ -2836,6 +2915,22 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         ...(input.approval !== undefined ? { approval: input.approval } : {}),
       })
       return toolViewsOf()
+    },
+
+    pluginList() {
+      return { plugins: pluginRegistry.list(), errors: pluginRegistry.errors() }
+    },
+
+    async pluginEnable(id) {
+      return pluginRegistry.enable(id)
+    },
+
+    async pluginDisable(id) {
+      return pluginRegistry.disable(id)
+    },
+
+    pluginPanel(pluginId, panelId) {
+      return pluginRegistry.panel(pluginId, panelId)
     },
 
     async createMainAgent(input) {
@@ -2925,6 +3020,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     removeModelApiKey,
     updateModelApiKey,
     revealModelApiKey,
+    modelBalance,
     addProviderModels,
     removeModelProvider,
     probeModelProvider,
