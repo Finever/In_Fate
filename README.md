@@ -120,7 +120,7 @@ sources → filter → budget → render
 - stable / dynamic / ephemeral 分段，避免每轮重排稳定内容。
 - 记忆推送是 dynamic section，由 `MemoryPushService` 选择后注入；它不是用户发言。
 - 压缩后可以重新分析记忆推送；默认开启。
-- 预算裁切先保最近内容和工具结果，再考虑旧历史。
+- dynamic 按优先级填，超预算就丢低优先级项；历史压缩由压缩器单独处理，不在管线里逐条裁旧消息。
 
 ### 3. 工具契约
 
@@ -135,7 +135,7 @@ sources → filter → budget → render
 ```
 
 - 模型只看到 `name` / `description` / `inputSchema`；输出 schema、审批、展示投影留在宿主。
-- 执行前有 workspace 写租约；大输出走 spill / offload。
+- 声明 `meta.writeScope` 的工具执行前会取 workspace 写租约；大输出走 spill / offload。
 - 插件工具同样是这个契约，不能另造一套。
 
 ### 4. 记忆
@@ -147,7 +147,7 @@ detail/       一条一事的事实条目
 summaries/    生成式摘要（由主 agent 模型生成）
 proposals/    agent 提议，等待用户接受
 agents/       主 agent manifest
-log/          hook 原样落盘，只读，不进 git
+log/          IF 内部 MemoryLogService 从事件流生成 hook 兼容行，只读，不进 git
 policy.json   记忆策略
 ```
 
@@ -226,24 +226,24 @@ tests/          node:test 测试
 
 ---
 
-## 与之前设计的偏差
+## 与之前设计的偏差 / 未覆盖范围
 
 这部分是给你“看偏没偏”的，不藏。
 
-| 之前的设计 | 当前实现 | 影响 |
+| 之前的设计 / 预期 | 当前实现 | 影响 |
 |---|---|---|
 | 完整插件平台、第三方安装、插件市场 | v0 只允许 builtin / dev；进程内；无第三方安装 | 先验证契约，第三方要等沙箱宿主；现在的 `capabilities` 不是安全隔离 |
 | 插件可注册模型 provider、事件、memory source、channel、job | v0 只有 tool / ui-panel | provider 插件会看到全部 prompt，风险高；先不做 |
 | 通用插件事件总线 | v0 没有；只有面板 postMessage | 避免插件监听全部会话、伪造核心事件 |
 | 真正的 Jev 4B / Jev API 选择 | 本地启发式选择；API 后端未接 | 现在能按正文/摘要打分，但不是 Jev 模型；语义能力有限 |
-| 摘要由独立小模型生成 | 主 agent 模型生成，无抽取式回退 | 质量取决于主模型；真实模型端到端测试还没做 |
+| 摘要单独生成、不退回抽取式 | 主 agent 模型按文件批量生成，无抽取式回退 | 质量取决于主模型；真实模型端到端测试还没做 |
 | 本地 RAG 兜底 | FTS5 + 可选本地 embedding；未做系统评测 | 不是自主检索；召回质量没有基准 |
 | 压缩能精确映射原文 | 压缩锚点、工具结果修剪、摘要保留；精确原文映射未做 | 旧内容只能按锚点/摘要取回，不能保证逐字还原 |
-| DSH 插件桥 / ACP / SDK 互通 | 未实现；DSH 只做参考 | 不绑 DSH 运行时，也不假装能直接装 DSH 插件 |
+| DSH 互操作（插件桥 / ACP / SDK） | 未实现；DSH 只做参考 | 不绑 DSH 运行时，也不假装能直接装 DSH 插件 |
 | 多窗口 UI、远程接入、computer-use、便携沙箱 | 只有默认 UI + Electron 壳 | 这些还在路线图，不在当前可用范围 |
-| 记忆按 agent 隔离、旧记忆库导入 | 未实现；当前是共享库 + 私域标记 | 多 agent 共用一个库；旧库导入按你的要求先不做 |
-| 所有厂商都能查余额 | 只支持 DeepSeek / Moonshot / OpenRouter | OpenAI / Anthropic / Gemini 没有普通 key 余额接口；不抓控制台 |
-| 插件面板可放右侧栏、任意 slot | v0 只有设置页 slot | 先保证 sandbox 和契约；右侧栏等多窗口阶段再做 |
+| 多 agent 记忆隔离、旧记忆库导入 | 未实现；当前是共享库 + 私域标记 | 多 agent 共用一个库；旧库导入按你的要求先不做 |
+| 余额覆盖所有内置厂商 | 只支持 DeepSeek / Moonshot / OpenRouter | OpenAI / Anthropic / Gemini 没有普通 key 余额接口；不抓控制台 |
+| 插件面板多 slot / 右侧栏 | v0 只有设置页 slot | 先保证 sandbox 和契约；右侧栏等多窗口阶段再做 |
 
 ---
 
