@@ -2,7 +2,7 @@
  * IF Desktop —— Electron 壳的第一版。
  *
  * 它只做四件事：
- *   1. 拉起 `if serve`（系统 Node），随机端口 + 随机 token；
+ *   1. 拉起 `if serve`（IF_NODE，缺省系统 Node），随机端口 + 随机 token；
  *   2. 等 /api/health 通过；
  *   3. 用全屏窗口加载本地 UI；
  *   4. 退出时杀掉后端。

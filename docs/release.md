@@ -40,18 +40,20 @@ npm run release:portable
 
 ```text
 if-v0.0.1/
+  app/current/      程序：bin/src/ui/dist/desktop/package
   runtime/          当前平台 Node（拷贝失败则回退系统 node）
-  bin/ src/         后端源码；Node 24 直接跑 TypeScript
-  ui/dist/          构建后的 UI
-  config/           发布配置模板
-  data/             独立数据根，空
-  desktop/          Electron 壳 + 自带 Electron dist（默认包含）
+  config/           可变配置
+  data/             可变数据：会话、记忆、插件数据
+  logs/             运行日志（预留）
+  backups/          完整数据备份（预留）
   smoke.mjs         独立冒烟测试
   start-if.cmd/.sh  浏览器/CLI 启动
   start-desktop     桌面启动（包含 desktop 时）
   VERSION
   release.json      构建清单
 ```
+
+`app/current` 是程序层，`data/` 是数据层。升级时只替换程序层；数据层不动。
 
 ## 独立环境测试
 
@@ -67,7 +69,14 @@ start-desktop.cmd
 start-if.cmd
 ```
 
-两者都使用包内 `runtime/` 和 `desktop/node_modules/electron/dist`，不要求系统另装 Node 或 Electron。数据写在包内 `data/`，不会碰开发目录。
+两者都使用包内 `runtime/` 和 `app/current/desktop/node_modules/electron/dist`，不要求系统另装 Node 或 Electron。启动脚本默认设置：
+
+```text
+IF_HOME=包根目录
+IF_PORTABLE=1
+```
+
+数据写在 `IF_HOME/data`，不会碰开发目录。安装版以后可以把 `IF_HOME` 指到 `%LOCALAPPDATA%\In_Fate`，程序目录仍可单独替换。
 
 ## 首次配置
 
@@ -77,7 +86,16 @@ start-if.cmd
 2. 打开右侧状态 → 当前模型，给 `main` agent 选模型并保存。
 3. 新建会话即可开始。
 
-配置写回 `config/if.release.json`；数据根仍是 `data/`。
+配置写回 `config/if.release.json`；数据根由 `IF_HOME/data` 决定。
+
+## 数据版本与升级
+
+- 程序版本在 `VERSION`；数据 schema 版本在 `data/.state/data-schema.json`。
+- 第一次启动写入当前 schema；同版本升级只更新 `appVersion`。
+- 旧 schema 需要迁移时，会先把 schema 状态备份到 `data/.state/backups/`，再按 `DATA_MIGRATIONS` 顺序执行。
+- 没有注册迁移时拒绝打开旧数据，不静默改库。
+- 数据 schema 比程序新时拒绝降级打开。
+- 当前迁移链为空；这是骨架，后续每个数据变更都要加迁移函数和升级测试。
 
 ## 冒烟测试
 

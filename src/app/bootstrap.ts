@@ -9,11 +9,14 @@
  * @module if/app/bootstrap
  */
 
-import { resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import { ConfigError, type AppConfig } from './config.ts'
 import { buildBundle, type App, type BuildOptions } from './bundle.ts'
 import { Container } from './container.ts'
+import { ensureDataSchema } from './data-schema.ts'
+import { resolveIfHome } from './home.ts'
 import { loadConfig, normalizePaths } from './load.ts'
+import { IF_VERSION } from '../version.ts'
 
 export type ErrorKind = 'config' | 'dependency' | 'environment'
 
@@ -46,10 +49,21 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<App> {
   const config = options.config ?? loadConfig(configPath!)
   // loadConfig 已按配置文件目录解析；这里再解析一次只影响直接传入的相对路径。
   const normalized = normalizePaths(config, options.baseDir ?? process.cwd())
+  const home = resolveIfHome()
+  const homed = home
+    ? {
+      ...normalized,
+      profile: {
+        ...normalized.profile,
+        dataRoot: join(home, 'data'),
+      },
+    }
+    : normalized
+  await ensureDataSchema(homed.profile.dataRoot, IF_VERSION)
 
   const container = new Container()
   try {
-    return buildBundle(normalized, container, {
+    return buildBundle(homed, container, {
       ...(options.cwd ? { cwd: options.cwd } : {}),
       ...(options.now ? { now: options.now } : {}),
       ...(configPath ? { configPath: resolve(configPath) } : {}),

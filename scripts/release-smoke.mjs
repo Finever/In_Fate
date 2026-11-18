@@ -29,9 +29,12 @@ function latestRelease() {
 
 const target = process.argv[2] ? resolve(process.argv[2]) : latestRelease()
 const version = readFileSync(join(target, 'VERSION'), 'utf8').trim()
-const entry = join(target, 'bin', 'if.ts')
+const appDir = existsSync(join(target, 'app', 'current', 'bin', 'if.ts'))
+  ? join(target, 'app', 'current')
+  : target
+const entry = join(appDir, 'bin', 'if.ts')
 const config = join(target, 'config', 'if.release.json')
-const uiDir = join(target, 'ui', 'dist')
+const uiDir = join(appDir, 'ui', 'dist')
 for (const path of [entry, config, join(uiDir, 'index.html')]) {
   if (!existsSync(path)) throw new Error(`release is incomplete: ${path}`)
 }
@@ -47,7 +50,12 @@ const child = spawn(process.execPath, [
   uiDir,
 ], {
   cwd: target,
-  env: { ...process.env, IF_RELEASE_SMOKE: '1' },
+  env: {
+    ...process.env,
+    IF_HOME: target,
+    IF_PORTABLE: '1',
+    IF_RELEASE_SMOKE: '1',
+  },
   stdio: ['ignore', 'pipe', 'pipe'],
   windowsHide: true,
 })

@@ -135,7 +135,7 @@ npm run release:portable # 不带 Electron，只出后端 + UI
 npm run release:smoke    # 冒烟：独立启动、health、version、UI
 ```
 
-产物包含包内 `runtime/`、`bin/`、`src/`、`ui/dist/`、`config/if.release.json`、空的 `data/`，默认还带 Electron 桌面壳。版本号唯一来源是根目录 `VERSION`；当前 `V0.0.1`。详见 [`docs/release.md`](docs/release.md)。
+产物分成两层：`app/current/` 是程序（bin/src/ui/dist/desktop），`data/` 是可变数据；另有包内 `runtime/`、`config/if.release.json`、`logs/`、`backups/`。升级时只替换程序层，`data/` 不动。启动脚本默认设置 `IF_HOME=包根目录`、`IF_PORTABLE=1`；安装版以后可指到 `%LOCALAPPDATA%\In_Fate`。版本号唯一来源是根目录 `VERSION`；当前 `V0.0.1`。详见 [`docs/release.md`](docs/release.md)。
 
 ---
 
