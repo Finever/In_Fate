@@ -154,7 +154,7 @@ policy.json   记忆策略
 边界：
 
 - `log/` 只读，不改写；要修正就写新条目。
-- 主 agent 的身份文件是 `memory/agents/<id>/agent.json` 和 `identity/principle.md` / `preference.md` / `prompt.md`；没有 manifest 时才回退到旧的 `SOUL.md` / `USER.md` / `memory/FACT.md`。这些是 agent 独属，不进公用库。
+- 主 agent 的身份文件是 `memory/agents/<id>/agent.json` 和 `identity/principle.md` / `preference.md` / `prompt.md`。这是设计上的入口；旧 `SOUL.md` / `USER.md` / `memory/FACT.md` 只是迁移来源，不是运行时约定。当前代码还保留“无 manifest 时读旧文件”的 legacy 兼容分支，迁移完成后应删除。
 - 一条记忆一件事；三档戳：`确信` / `可信` / `有疑`。
 - 原话必须带 `log-addr`；找不到地址就不算原话。
 
@@ -242,6 +242,7 @@ tests/          node:test 测试
 | DSH 互操作（插件桥 / ACP / SDK） | 未实现；DSH 只做参考 | 不绑 DSH 运行时，也不假装能直接装 DSH 插件 |
 | 多窗口 UI、远程接入、computer-use、便携沙箱 | 只有默认 UI + Electron 壳 | 这些还在路线图，不在当前可用范围 |
 | 多 agent 记忆隔离、旧记忆库导入 | 未实现；当前是共享库 + 私域标记 | 多 agent 共用一个库；旧库导入按你的要求先不做 |
+| 身份只认 manifest + identity 槽位 | 代码仍保留无 manifest 时读取旧 SOUL/USER/FACT 的兼容分支 | 迁移期兼容，不是设计；迁移完成后应删除，否则身份入口有两套 |
 | 余额覆盖所有内置厂商 | 只支持 DeepSeek / Moonshot / OpenRouter | OpenAI / Anthropic / Gemini 没有普通 key 余额接口；不抓控制台 |
 | 插件面板多 slot / 右侧栏 | v0 只有设置页 slot | 先保证 sandbox 和契约；右侧栏等多窗口阶段再做 |
 
