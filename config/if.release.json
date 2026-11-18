@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "profile": {
+    "dataRoot": "../data",
+    "timeZone": "Asia/Shanghai",
+    "header": "你是这个对话世界里的助手。按对话历史与记忆文件行动；不确定就查，不编。",
+    "principals": {
+      "user": {
+        "id": "user",
+        "name": "本地用户"
+      },
+      "agents": [
+        {
+          "id": "main",
+          "role": "main"
+        }
+      ]
+    }
+  },
+  "providers": [],
+  "presets": [],
+  "patch": {
+    "tools": {
+      "enabled": []
+    }
+  }
+}

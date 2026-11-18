@@ -20,6 +20,7 @@ import type { MemoryRole } from '../memory/access.ts'
 import { bootstrap, classifyError } from './bootstrap.ts'
 import type { App } from './bundle.ts'
 import { startServer } from './server.ts'
+import { IF_VERSION } from '../version.ts'
 
 const HELP = `IF — In_Fate
 
@@ -57,6 +58,7 @@ const HELP = `IF — In_Fate
   if sessions [--all]               列出会话（--all 含归档/软删除）
   if config                         打印生效配置（密钥打码）
   if doctor                         自检
+  if --version                      打印版本
 
 REPL 命令：
   /new            新建会话
@@ -167,12 +169,18 @@ export async function runCli(argv: string[]): Promise<void> {
       'reply-to': { type: 'string' },
       mode: { type: 'string' },
       timeout: { type: 'string' },
+      version: { type: 'boolean', short: 'v' },
       help: { type: 'boolean', short: 'h' },
     },
   })
 
   if (values.help) {
     stdout.write(HELP)
+    return
+  }
+
+  if (values.version) {
+    stdout.write(`In_Fate V${IF_VERSION}\n`)
     return
   }
 

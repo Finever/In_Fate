@@ -1,14 +1,14 @@
 # In_Fate（IF）
 
-> 本地优先、事件溯源的 agent 框架与桌面工作台。
+> 本地优先、事件溯源的 agent 框架与桌面集成工作台。
 >
-> 当前快照：**2026-11-18**。这份 README 是活的：实现变了就改，不把“设计过”写成“已经做完”。
+> 当前版本：**V0.0.1**；快照：**2026-11-18**。这份 README 随时更新
 
 ---
 
 ## 这是什么
 
-IF 是一套自己维护的 agent 系统，不是 DSH 的二次封装。
+IF 是一套自己维护的 agent 系统。
 
 - **DSH 只做参考实现和原语来源**，不引入 Cordis、不绑定 DSH 运行时。
 - 行为层自己维护：会话事件、上下文管线、工具契约、记忆入口、插件契约、UI。
@@ -48,7 +48,7 @@ CLI / 本地 HTTP API / React UI / Electron 壳
 7. **2026-11-06：记忆架构**
    记忆根默认 `<dataRoot>/memory`，布局 `detail + log + proposals + summaries + agents + indexlist`；不依赖外部 hook/Python。两档记忆：`rag-tool` 与 `jev-push`，另有 `off`。Jev 只做选择，不做推理、不做摘要、不写库；触发 `off | once | always`，`once` 是每段上下文第一次 + 压缩后，`always` 是常驻而不是每轮重推。选择范围默认不是全库，可选 session/agent/domain/target/all。摘要单独生成，存 `summaries/`，不塞进 detail 正文。本地 Jev 由 IF 管运行时；API 模式必须显式确认并提示记忆外发。
 8. **2026-11-13：产品方向**
-   IF 是多样化聚合平台，默认 UI 只是起点：UI 拓展、多窗口互连/传输/动效；内置 ComfyUI；内置 RAG、翻译、格式转换；微信与远程接入；computer-use 与设备调试；两层便携沙箱（agent 自身沙箱 + 给 agent 用的沙箱）；可选角色稳定插件（可自定义，不是绕过安全）；便携 agent 聊天接口；多文档编辑；实时操作可视化与 VS Code 内嵌。
+   IF 是多样化聚合平台，默认 UI 只是起点：UI 拓展、多窗口互连/传输/动效；内置 ComfyUI；内置 RAG、翻译、格式转换；微信与远程接入；computer-use 与设备调试；两层便携沙箱（agent 自身沙箱 + 给 agent 用的沙箱）；可选角色稳定插件（可自定义）；便携 agent 聊天接口；多文档编辑；实时操作可视化与 VS Code 内嵌。
 9. **2026-11-14：插件 v0**
    不引 Cordis；`PluginManifest / PluginContext / PluginRegistry` 三件套；只做 tool + ui-panel，builtin/dev 进程内；第三方安装、沙箱宿主、provider、事件总线、市场留 v1。详见 `docs/plugins.md`。
 
@@ -124,6 +124,18 @@ cd desktop && npm install && npm start
 ```
 
 桌面壳的细节在 [`desktop/README.md`](desktop/README.md)，UI 细节在 [`ui/README.md`](ui/README.md)。
+
+---
+
+## 发布包
+
+```bash
+npm run release          # 检查 + 测试 + UI build + 生成 release/if-v0.0.1/
+npm run release:portable # 不带 Electron，只出后端 + UI
+npm run release:smoke    # 冒烟：独立启动、health、version、UI
+```
+
+产物包含包内 `runtime/`、`bin/`、`src/`、`ui/dist/`、`config/if.release.json`、空的 `data/`，默认还带 Electron 桌面壳。版本号唯一来源是根目录 `VERSION`；当前 `V0.0.1`。详见 [`docs/release.md`](docs/release.md)。
 
 ---
 
@@ -272,8 +284,6 @@ tests/          node:test 测试
 ---
 
 ## 与之前设计的偏差 / 未覆盖范围
-
-这部分是给你“看偏没偏”的，不藏。
 
 | 之前的设计 / 预期 | 当前实现 | 影响 |
 |---|---|---|

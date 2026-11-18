@@ -15,6 +15,7 @@ import { extname, join, resolve, sep } from 'node:path'
 import type { MemoryRole } from '../memory/access.ts'
 import { MemoryValidationError, type MemoryDocument } from '../memory/store.ts'
 import type { App } from './bundle.ts'
+import { IF_NAME, IF_VERSION } from '../version.ts'
 
 export interface ServeOptions {
   readonly host?: string
@@ -234,6 +235,11 @@ async function handle(
 
   if (req.method === 'GET' && parts[1] === 'health') {
     json(res, 200, { ok: true })
+    return
+  }
+
+  if (req.method === 'GET' && parts[1] === 'version' && parts.length === 2) {
+    json(res, 200, { name: IF_NAME, version: IF_VERSION })
     return
   }
 
