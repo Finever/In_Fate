@@ -202,6 +202,13 @@ export function ApprovalDialog({
             )}
           </div>
 
+          {current.kind === 'tool' && current.approval.reason && (
+            <div className="fw-approval-risk">
+              <b>风险守卫</b>
+              <span>{current.approval.reason}</span>
+            </div>
+          )}
+
           {current.kind === 'tool' ? (
             <>
               <div className="fw-approval-label">调用参数</div>

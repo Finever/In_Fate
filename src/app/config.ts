@@ -9,6 +9,7 @@
 import type { AgentPoolConfig, AgentPreset } from '../agents/types.ts'
 import type { CompactionConfig } from '../compaction/types.ts'
 import type { Profile } from '../config/profile.ts'
+import type { RiskLevel, RiskMode } from '../core/risk-guard.ts'
 import type { ModelRetryPolicy } from '../model/retry.ts'
 import type { ProviderConfig } from '../model/types.ts'
 import type { OffloadConfig } from '../tools/offload.ts'
@@ -44,6 +45,13 @@ export interface RuntimePatch {
     readonly allowHosts?: readonly string[]
     readonly denyHosts?: readonly string[]
     readonly maxRedirects?: number
+  }
+  /** 风险操作守卫：按命令/路径分级，默认只对 high 以上发问、critical 拒绝。 */
+  readonly riskGuard?: {
+    readonly enabled?: boolean
+    readonly mode?: RiskMode
+    readonly askLevel?: RiskLevel
+    readonly denyLevel?: RiskLevel
   }
   /** false = 不记录进程内指标（默认 true） */
   readonly metrics?: boolean
@@ -168,6 +176,23 @@ export function validateConfig(raw: unknown): AppConfig {
   }
   if (isRecord(raw.patch) && raw.patch.runtime !== undefined && !isRecord(raw.patch.runtime)) {
     throw new ConfigError('patch.runtime', 'must be an object')
+  }
+  if (isRecord(raw.patch) && isRecord(raw.patch.runtime)
+    && raw.patch.runtime.riskGuard !== undefined) {
+    const guard = raw.patch.runtime.riskGuard
+    if (!isRecord(guard)) throw new ConfigError('patch.runtime.riskGuard', 'must be an object')
+    if (guard.enabled !== undefined && typeof guard.enabled !== 'boolean') {
+      throw new ConfigError('patch.runtime.riskGuard.enabled', 'must be a boolean')
+    }
+    if (guard.mode !== undefined && guard.mode !== 'ask' && guard.mode !== 'deny') {
+      throw new ConfigError('patch.runtime.riskGuard.mode', 'must be "ask" or "deny"')
+    }
+    for (const key of ['askLevel', 'denyLevel'] as const) {
+      const value = guard[key]
+      if (value !== undefined && !['low', 'medium', 'high', 'critical'].includes(String(value))) {
+        throw new ConfigError(`patch.runtime.riskGuard.${key}`, 'must be low/medium/high/critical')
+      }
+    }
   }
   if (raw.update !== undefined) {
     if (!isRecord(raw.update)) throw new ConfigError('update', 'must be an object')

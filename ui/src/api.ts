@@ -402,7 +402,17 @@ export const api = {
       subagentModels: [],
       availablePresets: [],
       tools: {},
+      sessionCount: 0,
+      deletable: true,
     }
+  },
+
+  async deleteMainAgent(agentId: string): Promise<{ id: string; trash: string[] }> {
+    const body = await request<{ deleted: { id: string; trash: string[] } }>(
+      `/api/main-agents/${encodeURIComponent(agentId)}`,
+      { method: 'DELETE' },
+    )
+    return body.deleted
   },
 
   async tools(agentId?: string): Promise<ToolView[]> {

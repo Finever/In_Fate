@@ -45,6 +45,8 @@ export interface UiApproval {
   readonly toolCallId: string
   readonly toolName: string
   readonly input: Readonly<Record<string, unknown>>
+  /** 风险守卫给出的具体原因；普通工具审批可省略。 */
+  readonly reason?: string
 }
 
 export function slicePayload(

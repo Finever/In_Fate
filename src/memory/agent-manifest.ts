@@ -14,6 +14,7 @@ import {
   readFileSync,
   readdirSync,
   renameSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -55,6 +56,7 @@ function assertSegment(value: string, label: string): string {
     value.length === 0
     || value === '.'
     || value === '..'
+    || value === '.trash'
     || BAD_SEGMENT.test(value)
     || /[. ]$/.test(value)
   )) {
@@ -267,6 +269,23 @@ export class AgentManifestStore {
     }, { timeoutMs: 5_000 })
   }
 
+  /**
+   * 把 agent 目录挪到 `agents/.trash/<id>-<stamp>`。
+   *
+   * 不做物理删除：记忆库可能有 git，但 data 下的设置没有；留一份可人工找回。
+   */
+  removeToTrash(agentId: string, stamp: string): { from: string; to: string } {
+    const from = this.dir(agentId)
+    if (!existsSync(from)) throw new Error(`agent not found: ${agentId}`)
+    const trashRoot = join(this.agentsRoot, '.trash')
+    mkdirSync(trashRoot, { recursive: true })
+    let to = join(trashRoot, `${agentId}-${stamp}`)
+    let suffix = 1
+    while (existsSync(to)) to = join(trashRoot, `${agentId}-${stamp}-${suffix++}`)
+    renameSync(from, to)
+    return { from, to }
+  }
+
   async ensureDefault(
     agentId: string,
     name = agentId,
@@ -287,11 +306,20 @@ export class AgentManifestStore {
   ): Promise<AgentManifest> {
     if (this.read(agentId)) throw new Error(`agent already exists: ${agentId}`)
     const manifest = defaultAgentManifest(agentId, name, labels)
-    await this.write(manifest)
-    for (const slot of manifest.identity) {
-      const path = this.slotPath(agentId, slot)
-      mkdirSync(dirname(path), { recursive: true })
-      if (!existsSync(path)) writeFileSync(path, defaultIdentityText(slot), 'utf8')
+    const dirExisted = existsSync(this.dir(agentId))
+    const manifestExisted = existsSync(this.path(agentId))
+    try {
+      await this.write(manifest)
+      for (const slot of manifest.identity) {
+        const path = this.slotPath(agentId, slot)
+        mkdirSync(dirname(path), { recursive: true })
+        if (!existsSync(path)) writeFileSync(path, defaultIdentityText(slot), 'utf8')
+      }
+    } catch (error) {
+      // 半成品 agent 比“不存在”更难排查；本次新建的目录/清单写失败就回滚。
+      if (!dirExisted) rmSync(this.dir(agentId), { recursive: true, force: true })
+      else if (!manifestExisted) rmSync(this.path(agentId), { force: true })
+      throw error
     }
     return manifest
   }

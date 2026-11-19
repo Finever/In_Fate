@@ -111,8 +111,12 @@ export function previewEvent(event: Event): string {
     }
     case 'session.link.closed':
       return `closed ${String(event.payload.linkId ?? event.refs?.link ?? '?')}`
-    case 'approval.asked':
-      return `ask ${String(event.payload.toolName ?? '?')}`
+    case 'approval.asked': {
+      const reason = typeof event.payload.reason === 'string' && event.payload.reason
+        ? ` · ${event.payload.reason}`
+        : ''
+      return `ask ${String(event.payload.toolName ?? '?')}${reason}`
+    }
     case 'approval.decided':
       return `decided ${event.payload.approved ? 'approved' : 'denied'}`
     default:

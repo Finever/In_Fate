@@ -276,6 +276,12 @@ function Desktop() {
     void workspace.refresh(true)
   }, [workspace])
 
+  const agentDeleted = useCallback((): void => {
+    setAgentFilter('all')
+    setActionError(undefined)
+    void workspace.refresh(true)
+  }, [workspace])
+
   if (workspace.loading && workspace.sessions.length === 0) return <FrameBoot />
 
   const shellStyle = {
@@ -339,6 +345,7 @@ function Desktop() {
           }}
           onOpenSettings={() => setSettingsOpen(true)}
           onChanged={() => void workspace.refresh(true)}
+          onDeleted={agentDeleted}
           onClose={() => setRightOpen(false)}
         />
       </FrameRight>

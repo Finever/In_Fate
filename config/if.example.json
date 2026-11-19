@@ -97,6 +97,12 @@
         "allowPrivateNetwork": false,
         "maxRedirects": 5
       },
+      "riskGuard": {
+        "enabled": true,
+        "mode": "ask",
+        "askLevel": "high",
+        "denyLevel": "critical"
+      },
       "workspace": {
         "lease": {
           "enabled": true,

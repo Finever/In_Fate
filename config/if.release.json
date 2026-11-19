@@ -22,6 +22,14 @@
   "patch": {
     "tools": {
       "enabled": []
+    },
+    "runtime": {
+      "riskGuard": {
+        "enabled": true,
+        "mode": "ask",
+        "askLevel": "high",
+        "denyLevel": "critical"
+      }
     }
   },
   "update": {

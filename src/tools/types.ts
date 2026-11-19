@@ -131,6 +131,8 @@ export interface PendingApproval {
   readonly toolCallId: string
   readonly toolName: string
   readonly originalInput: Record<string, unknown>
+  /** 为什么需要审批；风险守卫命中时带具体规则，普通危险工具可省略。 */
+  readonly reason?: string
   readonly presentation?: 'stream' | 'message'
   readonly signal?: AbortSignal
   readonly resolve: (decision: DispatchDecision) => void

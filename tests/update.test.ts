@@ -44,6 +44,9 @@ test('版本比较按语义化版本，预发布版小于正式版', () => {
   assert.equal(compareVersions('v1.0.0', '1.0.0'), 0)
   assert.equal(compareVersions('1.0.0-beta', '1.0.0') < 0, true)
   assert.equal(compareVersions('1.0.0-beta.2', '1.0.0-beta.10') < 0, true)
+  assert.equal(compareVersions('0.0.1', '0.0.1.1') < 0, true)
+  assert.equal(compareVersions('0.0.1.1', '0.0.1.2') < 0, true)
+  assert.equal(compareVersions('0.0.1.1', '0.0.2') < 0, true)
   assert.throws(() => compareVersions('1.0', '1.0.0'))
 })
 
@@ -142,6 +145,32 @@ test('apply-pending 切换 In_Fate 并保留 previous', () => {
     assert.equal(readFileSync(join(root, 'In_Fate', 'VERSION'), 'utf8').trim(), '0.0.2')
     assert.equal(readFileSync(join(root, 'previous', 'VERSION'), 'utf8').trim(), '0.0.1')
     assert.equal(existsSync(join(root, '.updates', 'pending.json')), false)
+  } finally {
+    cleanup(root)
+  }
+})
+
+test('apply-pending 拒绝安装根下的伪暂存目录，不误删数据', () => {
+  const root = tempDir('if-update-pending-traversal-')
+  try {
+    write(join(root, 'In_Fate', 'VERSION'), '0.0.1\n')
+    write(join(root, 'In_Fate', 'bin', 'if.ts'), '// old\n')
+    write(join(root, 'data', 'keep.txt'), 'important\n')
+    write(join(root, 'evil', 'VERSION'), '0.0.2\n')
+    write(join(root, 'evil', 'bin', 'if.ts'), '// evil\n')
+    write(join(root, '.updates', 'pending.json'), JSON.stringify({
+      action: 'apply',
+      version: '0.0.2',
+      fromVersion: '0.0.1',
+      program: 'evil',
+      requestedAt: '2026-11-18T00:00:00.000Z',
+    }))
+
+    const result = spawnSync(process.execPath, [applyScript, root], { encoding: 'utf8' })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /越界|暂存子目录|目录名不合法/)
+    assert.equal(readFileSync(join(root, 'In_Fate', 'VERSION'), 'utf8').trim(), '0.0.1')
+    assert.equal(readFileSync(join(root, 'data', 'keep.txt'), 'utf8'), 'important\n')
   } finally {
     cleanup(root)
   }

@@ -8,6 +8,7 @@
  */
 
 import type { Metrics } from '../core/metrics.ts'
+import type { RiskGuard } from '../core/risk-guard.ts'
 import type {
   WorkspaceLeaseHandle,
   WorkspaceLeaseManager,
@@ -44,6 +45,7 @@ export interface ExecuteOptions {
   readonly approvalTimeoutMs?: number
   readonly sandbox?: PathSandbox
   readonly network?: NetworkGuard
+  readonly riskGuard?: RiskGuard
   readonly leases?: WorkspaceLeaseManager
   readonly workspaceId?: string
   readonly metrics?: Metrics
@@ -73,6 +75,7 @@ function requestApproval(
   args: unknown,
   options: ExecuteOptions,
   context: ToolContext,
+  reason?: string,
 ): Promise<DispatchDecision> {
   const approvalId = `${options.sessionId}:${options.callId}:${name}`
   return new Promise(resolve => {
@@ -86,6 +89,7 @@ function requestApproval(
       toolCallId: options.callId,
       toolName: name,
       originalInput: (typeof args === 'object' && args !== null ? args : {}) as Record<string, unknown>,
+      ...(reason ? { reason } : {}),
       signal: context.signal,
       resolve: decision => {
         clearTimeout(timer)
@@ -145,13 +149,24 @@ async function executeToolInner(
       if (output !== undefined) args = output
     }
 
-    // guard：策略优先，其次 agent 覆盖，最后注册表的 approval
+    // guard：策略优先，其次 agent 覆盖，最后注册表的 approval；
+    // 风险守卫只加不减——hook 放行时它仍可以要求审批或拒绝。
     const guard = options.hooks?.guard?.(name, args, context)
+    const risk = options.riskGuard?.check(name, args, options.cwd)
     const approval = options.approvalOverrides?.[name] ?? descriptor.approval
-    const mode = guard ?? (approval === 'required' ? 'ask' : 'allow')
-    if (mode === 'deny') return errorResult('denied by policy')
+    const baseline = guard ?? (approval === 'required' ? 'ask' : 'allow')
+    const mode = risk?.decision === 'deny' || baseline === 'deny'
+      ? 'deny'
+      : risk?.decision === 'ask' || baseline === 'ask'
+        ? 'ask'
+        : 'allow'
+    if (mode === 'deny') {
+      return errorResult(risk?.decision === 'deny'
+        ? `denied by risk guard: ${risk.reason}`
+        : 'denied by policy')
+    }
     if (mode === 'ask') {
-      const decision = await requestApproval(name, args, options, context)
+      const decision = await requestApproval(name, args, options, context, risk?.reason)
       if (!decision.approved) return errorResult(decision.reason ?? 'denied')
       if (decision.updatedInput) args = decision.updatedInput
     }

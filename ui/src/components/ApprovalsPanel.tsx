@@ -29,6 +29,7 @@ export function ApprovalsPanel({
             <span className="approval-tool">{item.toolName}</span>
             <span className="approval-session" title={item.sessionId}>{shortId(item.sessionId, 18)}</span>
           </header>
+          {item.reason && <div className="approval-risk">{item.reason}</div>}
           <pre className="code-block">{JSON.stringify(item.input, null, 2)}</pre>
           <div className="approval-actions">
             <Button

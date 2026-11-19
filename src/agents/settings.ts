@@ -63,6 +63,7 @@ function assertAgentId(agentId: string): string {
     || agentId.length === 0
     || agentId === '.'
     || agentId === '..'
+    || agentId === '.trash'
     || BAD_SEGMENT.test(agentId)
     || /[. ]$/.test(agentId)
   ) {
@@ -225,6 +226,19 @@ export class AgentSettingsStore {
       renameSync(temp, path)
     }, { timeoutMs: 5_000 })
     return next
+  }
+
+  /** 把设置目录挪到 `agents/.trash/<id>-<stamp>`；没有目录视为不存在。 */
+  removeToTrash(agentId: string, stamp: string): { from: string; to: string } | undefined {
+    const from = this.dir(agentId)
+    if (!existsSync(from)) return undefined
+    const trashRoot = join(this.agentsRoot, '.trash')
+    mkdirSync(trashRoot, { recursive: true })
+    let to = join(trashRoot, `${agentId}-${stamp}`)
+    let suffix = 1
+    while (existsSync(to)) to = join(trashRoot, `${agentId}-${stamp}-${suffix++}`)
+    renameSync(from, to)
+    return { from, to }
   }
 
   async update(

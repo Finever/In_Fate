@@ -1310,6 +1310,16 @@ async function handle(
     return
   }
 
+  if (req.method === 'DELETE' && parts[1] === 'main-agents' && parts[2] && parts.length === 3) {
+    try {
+      const deleted = await app.deleteMainAgent(parts[2])
+      json(res, 200, { deleted })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
   if (req.method === 'PATCH' && parts[1] === 'main-agents' && parts[2] && parts.length === 3) {
     const body = await readOptionalJson(req)
     const model = body.model

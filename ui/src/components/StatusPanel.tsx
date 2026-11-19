@@ -41,6 +41,7 @@ export function StatusPanel({
   onSelectSession,
   onOpenSettings,
   onChanged,
+  onDeleted,
 }: {
   agentId: string
   agent: AgentSummary | undefined
@@ -48,6 +49,7 @@ export function StatusPanel({
   onSelectSession: (sessionId: string) => void
   onOpenSettings: () => void
   onChanged: () => void
+  onDeleted: () => void
 }) {
   const [config, setConfig] = useState<ModelConfig>()
   const [summary, setSummary] = useState<AgentSummary | undefined>(agent)
@@ -78,6 +80,9 @@ export function StatusPanel({
     agent?.model?.provider,
     agent?.model?.model,
     agent?.modelConfigured,
+    agent?.sessionCount,
+    agent?.deletable,
+    agent?.deleteBlockedReason,
   ])
 
   useEffect(() => {
@@ -271,6 +276,25 @@ export function StatusPanel({
       setSummary(updated)
       setTools(await api.tools(agentId))
       onChanged()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusy(undefined)
+    }
+  }
+
+  async function deleteAgent(): Promise<void> {
+    if (!summary?.deletable || busy) return
+    const label = summary.name || agentId
+    if (!window.confirm(
+      `删除 agent「${label}」？\n\n人格文件与设置目录会移到各自的 .trash，不会立即物理删除；可以在磁盘上找回。`,
+    )) return
+    setBusy('delete')
+    setError(undefined)
+    setNotice(undefined)
+    try {
+      await api.deleteMainAgent(agentId)
+      onDeleted()
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
@@ -504,6 +528,27 @@ export function StatusPanel({
           <span>MCP 服务器</span>
           <small>下一阶段接入；这一轮先做工具启停与审批。</small>
         </div>
+      </section>
+
+      <section className="fw-status-section fw-status-danger">
+        <div className="fw-status-section-head">
+          <span>删除 agent</span>
+          <small>{summary?.sessionCount ?? sessions.length} 个未删除会话</small>
+        </div>
+        <p className="fw-status-danger-note">
+          删除只把人格文件与设置移到 .trash，不删会话。默认主 agent 和还有会话的 agent 不能删。
+        </p>
+        <button
+          type="button"
+          className="fw-status-delete"
+          onClick={() => void deleteAgent()}
+          disabled={!summary?.deletable || busy === 'delete'}
+        >
+          {busy === 'delete' ? '删除中…' : '删除这个 agent'}
+        </button>
+        {summary?.deleteBlockedReason && (
+          <div className="fw-status-empty">{summary.deleteBlockedReason}</div>
+        )}
       </section>
     </div>
   )

@@ -13,6 +13,7 @@ import { staticSection, timeSection } from '../context/sections.ts'
 import { TokenEstimator } from '../compaction/estimate.ts'
 import type { Event, NewEvent } from '../core/events.ts'
 import type { Metrics } from '../core/metrics.ts'
+import type { RiskGuard } from '../core/risk-guard.ts'
 import type { SessionWriter } from '../core/session-writer.ts'
 import type { EventStore } from '../core/store.ts'
 import type { WorkspaceLeaseManager } from '../core/workspace-lease.ts'
@@ -55,6 +56,7 @@ export interface SubagentRuntime {
   readonly modelRetry?: ModelRetryPolicy
   readonly sandbox?: PathSandbox
   readonly network?: NetworkGuard
+  readonly riskGuard?: RiskGuard
   readonly leases?: WorkspaceLeaseManager
   readonly workspaceId?: string
   readonly modelGate?: ModelGate
@@ -374,6 +376,7 @@ export async function runSubagent(
           signal,
           ...(runtime.sandbox ? { sandbox: runtime.sandbox } : {}),
           ...(runtime.network ? { network: runtime.network } : {}),
+          ...(runtime.riskGuard ? { riskGuard: runtime.riskGuard } : {}),
           ...(runtime.leases ? { leases: runtime.leases } : {}),
           ...(runtime.workspaceId ? { workspaceId: runtime.workspaceId } : {}),
           ...(runtime.metrics ? { metrics: runtime.metrics } : {}),

@@ -11,7 +11,7 @@
  */
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from 'node:fs'
-import { dirname, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -71,7 +71,15 @@ function applyPending(pending) {
     fail('pending 缺少 program')
   }
   const program = resolve(installRoot, pending.program)
-  if (!inside(installRoot, program)) fail('pending 的 program 越界')
+  if (!inside(installRoot, program) || !inside(updatesDir, program)) {
+    fail('pending 的 program 越界')
+  }
+  // 切换成功后要删暂存目录；program 必须是 .updates/<staging>/program，
+  // 否则 dirname(program) 可能指到安装根甚至数据目录。
+  if (program === updatesDir || dirname(program) === updatesDir || !inside(updatesDir, dirname(program))) {
+    fail('pending 的 program 不在暂存子目录里')
+  }
+  if (basename(program) !== 'program') fail('pending 的 program 目录名不合法')
   if (!isProgram(program)) fail(`暂存程序不完整：${program}`)
   const version = versionOf(program)
   if (version !== pending.version) {

@@ -16,6 +16,7 @@ import type { CompactionConfig, Summarizer } from '../compaction/types.ts'
 import type { SpillPolicy } from '../tools/spill.ts'
 import type { Event, NewEvent } from '../core/events.ts'
 import type { Metrics } from '../core/metrics.ts'
+import type { RiskGuard } from '../core/risk-guard.ts'
 import type { SessionWriter } from '../core/session-writer.ts'
 import type { EventStore } from '../core/store.ts'
 import type { WorkspaceLeaseManager } from '../core/workspace-lease.ts'
@@ -63,6 +64,7 @@ export interface RunLoopOptions {
   readonly priority?: ModelPriority
   readonly sandbox?: PathSandbox
   readonly network?: NetworkGuard
+  readonly riskGuard?: RiskGuard
   readonly leases?: WorkspaceLeaseManager
   readonly workspaceId?: string
   readonly metrics?: Metrics
@@ -393,6 +395,7 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
             ...(options.signal ? { signal: options.signal } : {}),
             ...(options.sandbox ? { sandbox: options.sandbox } : {}),
             ...(options.network ? { network: options.network } : {}),
+            ...(options.riskGuard ? { riskGuard: options.riskGuard } : {}),
             ...(options.leases ? { leases: options.leases } : {}),
             ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
             ...(options.metrics ? { metrics: options.metrics } : {}),

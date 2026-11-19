@@ -12,6 +12,7 @@ export function AgentPanel({
   onSelectSession,
   onOpenSettings,
   onChanged,
+  onDeleted,
   onClose,
 }: {
   agentId: string | undefined
@@ -20,6 +21,7 @@ export function AgentPanel({
   onSelectSession: (sessionId: string) => void
   onOpenSettings: () => void
   onChanged: () => void
+  onDeleted: () => void
   onClose: () => void
 }) {
   const [tab, setTab] = useState<PanelTab>('status')
@@ -62,6 +64,7 @@ export function AgentPanel({
                 onSelectSession={onSelectSession}
                 onOpenSettings={onOpenSettings}
                 onChanged={onChanged}
+                onDeleted={onDeleted}
               />
             )
             : <div className="fw-panel-empty">先添加或选择一个主 agent。</div>)

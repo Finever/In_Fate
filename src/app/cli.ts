@@ -136,7 +136,9 @@ function statsText(result: { steps: number; usage: { input: number; output: numb
 async function askApproval(entry: PendingApproval, question: (text: string) => Promise<string>): Promise<{ approved: boolean; reason?: string }> {
   if (!stdin.isTTY) return { approved: false, reason: 'non-interactive: denied' }
   const answer = await question(
-    `\n[审批] ${entry.toolName} ${JSON.stringify(entry.originalInput)}\n允许执行吗？(y/N) `,
+    `\n[审批] ${entry.toolName} ${JSON.stringify(entry.originalInput)}${
+      entry.reason ? `\n风险：${entry.reason}` : ''
+    }\n允许执行吗？(y/N) `,
   )
   return /^y(es)?$/i.test(answer.trim())
     ? { approved: true }

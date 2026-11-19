@@ -3010,6 +3010,31 @@ body.fw-resizing {
   color: var(--faint);
   font-size: 9px;
 }
+.fw-status-danger {
+  border-color: rgba(226, 96, 96, .24);
+}
+.fw-status-danger-note {
+  margin: 0 0 8px;
+  color: var(--faint);
+  font-size: 9.5px;
+  line-height: 1.6;
+}
+.fw-status-delete {
+  padding: 5px 10px;
+  border: 1px solid rgba(226, 96, 96, .4);
+  border-radius: 6px;
+  background: rgba(226, 96, 96, .08);
+  color: #e26060;
+  font-size: 10px;
+  cursor: pointer;
+}
+.fw-status-delete:hover:not(:disabled) {
+  background: rgba(226, 96, 96, .16);
+}
+.fw-status-delete:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
 .fw-model-chip {
   max-width: 180px;
   overflow: hidden;
@@ -3145,6 +3170,25 @@ body.fw-resizing {
   color: var(--warn);
   font-size: 9.5px;
   line-height: 1.5;
+}
+.fw-approval-risk {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: -4px 0 12px;
+  padding: 8px 10px;
+  border: 1px solid rgba(226, 96, 96, .4);
+  border-radius: 8px;
+  background: rgba(226, 96, 96, .08);
+  color: var(--danger, #e26060);
+  font-size: 10.5px;
+  line-height: 1.6;
+}
+.fw-approval-risk b {
+  flex: none;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: .04em;
 }
 .fw-approval-label {
   margin-bottom: 6px;

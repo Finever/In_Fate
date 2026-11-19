@@ -398,7 +398,20 @@ function install(options) {
       }
       rmSync(targetProgram, { recursive: true, force: true })
     }
-    copyDir(sourceProgram, targetProgram)
+    try {
+      copyDir(sourceProgram, targetProgram)
+    } catch (error) {
+      // 复制失败时把上一版挪回去，避免安装根只剩一个空程序目录。
+      try {
+        if (existsSync(targetPrevious)) {
+          rmSync(targetProgram, { recursive: true, force: true })
+          renameSync(targetPrevious, targetProgram)
+        }
+      } catch {
+        // 回滚失败保留 previous/，仍可手动恢复。
+      }
+      throw error
+    }
 
     if (existsSync(sourceRuntime)) {
       try {

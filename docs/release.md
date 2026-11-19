@@ -5,10 +5,12 @@
 版本号唯一来源是仓库根目录的 `VERSION` 文件。当前：
 
 ```text
-V0.0.1
+V0.0.1.1
 ```
 
-改版本时只改 `VERSION`，发布脚本、CLI `--version`、`/api/version` 都读它。`package.json` 的 `version` 保持同步即可。
+改版本时只改 `VERSION`，发布脚本、CLI `--version`、`/api/version` 都读它。`package.json` 的 `version` 保持同步即可。版本号支持 `x.y.z` 和 `x.y.z.w`；第四段是补丁修订号。
+
+> V0.0.1 内置的更新器只认三段版本号，读到 `0.0.1.1` 会报 `update_version`。从 V0.0.1 升到 V0.0.1.1 要用新包的 `install.cmd` 覆盖安装，或便携包替换 `In_Fate/`；从 V0.0.1.1 起后续四段版本可正常走内置更新。
 
 ## 构建
 
@@ -27,7 +29,7 @@ npm run release
 
 ```text
 release/In_First/                        独立目录
-release/In_First-v0.0.1-win32-x64.zip     Windows 当前平台压缩包
+release/In_First-v0.0.1.1-win32-x64.zip   Windows 当前平台压缩包
 ```
 
 如果只想出后端 + UI 的便携包，不带 Electron：

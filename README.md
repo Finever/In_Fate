@@ -2,7 +2,7 @@
 
 > 本地优先、事件溯源的 agent 框架与桌面工作台。
 >
-> 当前版本：**V0.0.1**；文档快照：**2026-11-19**。
+> 当前版本：**V0.0.1.1**；文档快照：**2026-11-19**。
 > 仓库：Gitee <https://gitee.com/findnevery/in_fate> · GitHub <https://github.com/Finever/In_Fate>
 
 ---
@@ -50,7 +50,9 @@ IF 不是“聊天框 + 插件”的壳。下面这些是当前代码里真的�
 | **工具结果有契约** | 统一 `ToolResult` envelope：`text / structured / bytes / encoding / mime / ref / contentRef / structuredRef / presentation`；spill / offload；`meta.writeScope` 取路径 / 工作区租约；审批后再执行 | 可用；跨进程 workspace 锁、`presentation` 富渲染还没做 |
 | **多会话是一张图，不是父子树** | 会话都归用户；`workspace.jsonl` 里 `peer / handoff / reference` 连接；同一会话单 active turn、不同会话并行；`send / wake / join`；记忆权限按 `MemoryGrant` 能力位 | 后端可用；会话图 UI 后置 |
 | **插件先钉边界** | `PluginManifest / PluginContext / PluginRegistry`；只支持 tool / ui-panel；工具命名空间 `<plugin>__<tool>`、默认停用、审批 required；面板 `iframe sandbox + srcDoc + CSP`；5MB 私有 KV | v0；进程内、无第三方安装 / provider / 事件总线 / 市场 |
-| **装得上、更新得了、数据不丢** | 发布结构 `In_First/In_Fate` + `In_First/data`；`install.cmd` 安装/卸载，卸载默认保留 `data/`；`latest.json` + sha256；`.updates` 暂存、pending 启动前切换、`previous` 回滚；zip 路径穿越 / 解压上限检查 | 可用；清单签名、增量更新、NSIS 单文件包和托盘还没做 |
+| **装得上、更新得了、数据不丢** | 发布结构 `In_First/In_Fate` + `In_First/data`；`install.cmd` 安装/卸载，卸载默认保留 `data/`；`latest.json` + sha256；`.updates` 暂存、pending 启动前切换、`previous` 回滚；zip 路径穿越 / 解压上限检查；版本号支持 `x.y.z` 与 `x.y.z.w` | 可用；清单签名、增量更新、NSIS 单文件包和托盘还没做 |
+| **危险动作先分级** | 工具审批前再过一道 `RiskGuard`：bash 识别递归删除、强推/重写 git、提权、改服务/注册表、管道执行下载脚本、格式化/关机等；write/edit/read 识别 `.ssh`、`.aws`、`.env`、本机配置和系统目录；默认 high 发问、critical 拒绝，审批卡显示命中原因 | V0.0.1.1 可用；基于命令/路径模式，不是完整 shell 解析器，也不替代 FS/Network 沙箱 |
+| **agent 可收起来** | 主 agent 可新建、改人格、配模型；删除时把 `memory/agents/<id>` 与 `data/agents/<id>` 移到各自 `.trash`，不物理删除；默认主 agent 和还有未删除会话的 agent 拒绝删除 | V0.0.1.1 可用；回收站恢复还没有 UI，需手动从 `.trash` 挪回 |
 
 
 
@@ -69,7 +71,9 @@ IF 不是“聊天框 + 插件”的壳。下面这些是当前代码里真的�
 | 上下文管线 | 可用 | stable / dynamic / ephemeral 分段；记忆推送段；dynamic 按优先级预算丢弃 |
 | 模型 | 可用 | OpenAI Chat / Responses、Anthropic Messages、Google Generate Content；多 key、重试、并发闸门、按模型计价；无全局默认模型 |
 | 工具 | 可用 | read / write / edit / bash / fetch / websearch / recall；结果 envelope、spill/offload、writeScope lease、审批 |
+| 风险守卫 | 可用 | `RiskGuard` 在审批前按命令/路径分级；high 发问、critical 拒绝；原因写入审批卡和审批事件 |
 | 会话协作 | 可用 | 子 agent、session link、send/wake、join、归档/软删除 |
+| 主 agent | 可用 | 新建、人格文件编辑、模型/工具设置；删除移到 `.trash`，默认主 agent 与有会话的 agent 受保护 |
 | 记忆 | 可用 / 部分 | 内置记忆库、detail/summaries/proposals/agents、FTS5 检索、可选语义索引、Jev 启发式选择、摘要后台队列 |
 | 记忆编辑器 | 可用 | 结构树、文件编辑、移动/重命名、回收站、策略、摘要重建、提交 |
 | 插件 | v0 | tool / ui-panel；builtin 与显式 dev 插件；沙箱 iframe 面板；无第三方安装 |
@@ -137,7 +141,8 @@ cd desktop && npm install && npm start
 ### 版本号规则
 
 - 程序的唯一版本来源是仓库根目录 `VERSION`；`/api/version`、`if --version` 和发布脚本都读它；`package.json` 的 `version` 需要同步。
-- 版本由项目所有者每次发布时手定；当前是 `0.0.1`。
+- 版本由项目所有者每次发布时手定；当前是 `0.0.1.1`。
+- 版本号支持 `x.y.z` 和 `x.y.z.w`；第四段是补丁修订号，比较时依次比较 `major.minor.patch.revision`。
 - 数据 schema 是独立版本：`DATA_SCHEMA_VERSION = 1`，状态在 `<dataRoot>/.state/data-schema.json`。
 - 程序跨版本更新不等于数据结构一定变；但数据结构一旦变，必须在 `DATA_MIGRATIONS` 里登记迁移。
 
@@ -145,7 +150,40 @@ cd desktop && npm install && npm start
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
-| V0.0.1 | 2026-11-18 | 首个可独立拷贝、安装、启动、更新和回滚的骨架版本；当前版本 |
+| V0.0.1 | 2026-11-18 | 首个可独立拷贝、安装、启动、更新和回滚的骨架版本 |
+| V0.0.1.1 | 2026-11-19 | 风险操作守卫、agent 删除、稳定版审计修复；当前版本 |
+
+### V0.0.1.1（2026-11-19）
+
+**定位**：V0.0.1 的补丁修订版，不改数据 schema，不改发布结构。
+
+**这一版包含**：
+
+- **AI 风险操作守卫**：新增 `src/core/risk-guard.ts`，在工具审批前按命令/路径分级。bash 覆盖递归/强制删除、`git reset --hard` / `git clean -fdx` / `git push --force`、提权、注册表/服务/账号修改、强制杀进程、全局安装、编码 PowerShell、下载管道执行等；write/edit/read 覆盖 `.ssh`、`.aws`、`.env`、`.npmrc` / `.git-credentials`、`config/if.local.json` 和系统目录。默认 `high` 发问、`critical` 拒绝，`patch.runtime.riskGuard` 可调；命中原因显示在审批卡并写入 `approval.asked` 事件。
+- **agent 删除**：新增 `DELETE /api/main-agents/:id`。删除把 `memory/agents/<id>` 与 `data/agents/<id>` 移到各自的 `.trash/<id>-<时间戳>`，不物理删除；默认主 agent 和还有未删除会话（含归档）的 agent 拒绝删除；状态面板显示被阻止的原因。
+- **稳定版审计修复**：`AgentManifestStore.createDefault` 在人格文件写入失败时回滚本次新建的目录/清单，避免留下半成品 agent；`.trash` 被保留为内部目录，不能再作为 agent id；风险守卫的命令匹配按命令起始位置识别 `shutdown` / `reboot` 等，避免把 `echo shutdown` 误判成关机；更新下载改为逐块 `await` 写盘并清理半包，zip 目录列不出来就拒绝解压，`apply-pending` 只接受 `.updates/<staging>/program`，安装器复制失败会尝试把 `previous/` 挪回程序位。
+- **版本兼容**：解析器和发布脚本支持四段版本号 `0.0.1.1`。
+
+**兼容与升级**：
+
+- 数据 schema 不变，`data/` 可以直接沿用。
+- 程序层是完整包，允许任意跨版本更新；不依赖中间补丁。
+- **从 V0.0.1 升到 V0.0.1.1 需要手动装一次**：V0.0.1 内置的更新器只认三段版本号，读到 `0.0.1.1` 会报 `update_version`。用新包的 `install.cmd` 覆盖安装，或便携包替换 `In_Fate/`，保留 `data/` 与 `config/`。从 V0.0.1.1 起，后续四段版本可以正常走内置更新。
+- 回滚只保留 `previous/` 一代；不做任意历史版本。
+- 更新清单签名、增量更新、NSIS 单文件安装器和托盘不在这一版。
+
+**怎么升级**：
+
+- 安装版：V0.0.1 → V0.0.1.1 手动运行新包 `install.cmd`；之后的版本走设置 → 关于与更新。
+- 便携包：解压新包，替换 `In_Fate/`，保留 `data/` 和 `config/`。
+- 升级前先备份 `data/`；回滚用设置里的“回滚到上一版本”，或保留 `previous/`。
+
+**验证基线（2026-11-19）**：
+
+- `npm run check`：`tsc --noEmit` 通过
+- `npm test`：全部测试通过（含风险守卫与 agent 删除）
+- UI build：通过
+- 发布包 smoke：通过
 
 ### V0.0.1（2026-11-18）
 
@@ -164,20 +202,6 @@ cd desktop && npm install && npm start
 - 回滚只保留 `previous/` 一代；不做任意历史版本。
 - 更新清单签名、增量更新、NSIS 单文件安装器和托盘不在这一版。
 
-**怎么升级**：
-
-- 安装版：设置 → 关于与更新 → 检查 / 下载 / 应用，完全退出后重新启动；也可以直接运行新包的 `install.cmd` 覆盖安装。
-- 便携包：解压新包，替换 `In_Fate/`，保留 `data/` 和 `config/`。
-- 升级前先备份 `data/`；回滚用设置里的“回滚到上一版本”，或保留 `previous/`。
-
-**验证基线（2026-11-19）**：
-
-- `npm test`：244 个测试全过
-- `npm run check`：`tsc --noEmit` 通过
-- UI build：通过
-- 发布包 smoke：通过
-- 安装 → 临时构造的更新包 0.0.2 → 启动 → 回滚 0.0.1 端到端通过
-
 ---
 
 ## 发布包
@@ -190,7 +214,7 @@ npm run release:smoke    # 冒烟：独立启动、health、version、UI
 
 产物分成两层：`In_Fate/` 是程序（bin/src/ui/dist/desktop），`data/` 是可变数据；另有包内 `runtime/`、`config/if.release.json`、`tools/`、`logs/`、`backups/`。升级时整体替换 `In_Fate/`，`data/` 不动。启动脚本默认设置 `IF_HOME=包根/data`、`IF_PORTABLE=1`；安装版由 `install.cmd` 装到 `%USERPROFILE%\In_First`，程序在 `%USERPROFILE%\In_First\In_Fate`，数据在 `%USERPROFILE%\In_First\data`，都不进 AppData。
 
-安装器负责首次部署、升级保留数据、快捷方式和卸载注册表。双击 `install.cmd` 安装完成会自动启动 In_Fate；以后从桌面/开始菜单的「In_Fate」快捷方式打开，或运行安装根下的 `start-desktop.cmd`。更新器内置在设置 → 关于与更新：支持 `latest.json` 检查、下载、sha256 校验、应用和回滚，也支持直接选本地发布包 zip；应用只写 pending，下次启动前由 `tools/apply-pending.mjs` 整体切换 `In_Fate/`，运行中的进程不替换自己的文件。版本号唯一来源是根目录 `VERSION`；当前 `V0.0.1`。详见 [`docs/release.md`](docs/release.md)。
+安装器负责首次部署、升级保留数据、快捷方式和卸载注册表。双击 `install.cmd` 安装完成会自动启动 In_Fate；以后从桌面/开始菜单的「In_Fate」快捷方式打开，或运行安装根下的 `start-desktop.cmd`。更新器内置在设置 → 关于与更新：支持 `latest.json` 检查、下载、sha256 校验、应用和回滚，也支持直接选本地发布包 zip；应用只写 pending，下次启动前由 `tools/apply-pending.mjs` 整体切换 `In_Fate/`，运行中的进程不替换自己的文件。版本号唯一来源是根目录 `VERSION`；当前 `V0.0.1.1`。详见 [`docs/release.md`](docs/release.md)。
 
 ---
 
@@ -263,6 +287,7 @@ sources → filter → budget → render
 
 - 模型只看到 `name` / `description` / `inputSchema`；输出 schema、审批、展示投影留在宿主。
 - 声明 `meta.writeScope` 的工具执行前会取 workspace 写租约；大输出走 spill / offload。
+- 审批前先过 `RiskGuard`：它只加不减，hook/agent 放行的动作仍可能被要求审批或拒绝；默认 `askLevel=high`、`denyLevel=critical`，`patch.runtime.riskGuard` 可改 `enabled` / `mode` / 两档阈值。
 - 插件工具同样是这个契约，不能另造一套。
 
 ### 4. 记忆
@@ -349,11 +374,11 @@ tests/          node:test 测试
 
 当前验证基线：
 
-- `npm test`：**244** 个测试全过
+- `npm test`：**248** 个测试全过
 - `npm run check`：`tsc --noEmit` 通过
 - `cd ui && npm run build`：通过
 - 发布包 smoke：通过
-- 安装 → 临时构造的更新包 0.0.2 → 启动 → 回滚到 0.0.1 端到端通过
+- 安装 → 临时构造的更新包 0.0.2 → 启动 → 回滚到 0.0.1 端到端通过（V0.0.1 基线）
 
 重点已完成：
 

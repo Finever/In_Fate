@@ -11,7 +11,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, renameSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AgentManager as AgentManagerType } from '../agents/manager.ts'
 import { AgentManager } from '../agents/manager.ts'
@@ -37,6 +37,7 @@ import { FsPolicy } from '../core/fs-policy.ts'
 import { HostLease } from '../core/host-lease.ts'
 import { Metrics, type MetricsSnapshot } from '../core/metrics.ts'
 import { NetworkPolicy } from '../core/network-policy.ts'
+import { RiskGuard } from '../core/risk-guard.ts'
 import { registerCoreEvents } from '../core/registry.ts'
 import { WorkspaceLeaseManager } from '../core/workspace-lease.ts'
 import { SessionWriter } from '../core/session-writer.ts'
@@ -83,7 +84,7 @@ import {
   type LogViewPage,
 } from '../memory/log-view.ts'
 import { createMemoryTools } from '../memory/tools.ts'
-import { readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { IF_VERSION } from '../version.ts'
 import {
   resolveUpdateLayout,
@@ -373,6 +374,8 @@ export interface App {
   updateAgentSettings(agentId: string, input: AgentSettingsUpdate): Promise<AgentSummary>
   /** 新建主 agent：manifest + 三份空白 人格文件 文件。 */
   createMainAgent(input: { id: string; name: string }): Promise<AgentManifest>
+  /** 删除主 agent：目录挪进 .trash；默认主 agent 和还有会话的 agent 不可删。 */
+  deleteMainAgent(agentId: string): Promise<DeletedAgentSummary>
   /** 读主 agent 的 人格文件 槽位全文。 */
   mainAgentIdentity(agentId: string): {
     manifest: AgentManifest
@@ -627,6 +630,15 @@ export interface AgentSummary {
     readonly allow?: readonly string[]
     readonly approval?: Readonly<Record<string, 'auto' | 'required'>>
   }
+  /** 未删除的会话数（含归档）；还有会话就不允许删 agent。 */
+  readonly sessionCount: number
+  readonly deletable: boolean
+  readonly deleteBlockedReason?: string
+}
+
+export interface DeletedAgentSummary {
+  readonly id: string
+  readonly trash: readonly string[]
 }
 
 export interface AgentSettingsUpdate {
@@ -821,6 +833,16 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         ? { maxRedirects: networkPatch.maxRedirects }
         : {}),
     })
+
+  // 风险守卫独立于 FS/Network 策略；关掉只表示不额外发问，危险工具本身仍要审批。
+  const riskGuardConfig = config.patch?.runtime?.riskGuard
+  const riskGuard = new RiskGuard({
+    enabled: riskGuardConfig?.enabled !== false,
+    ...(riskGuardConfig?.mode ? { mode: riskGuardConfig.mode } : {}),
+    ...(riskGuardConfig?.askLevel ? { askLevel: riskGuardConfig.askLevel } : {}),
+    ...(riskGuardConfig?.denyLevel ? { denyLevel: riskGuardConfig.denyLevel } : {}),
+  })
+  container.register('riskGuard', riskGuard)
 
   const workspaceConfig = config.patch?.runtime?.workspace
   const leaseConfig = workspaceConfig?.lease
@@ -1736,7 +1758,31 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     }
   }
 
-  const agentSummaryOf = (agentId: string): AgentSummary => {
+  const sessionsOfAgent = (agentId: string): SessionInfo[] =>
+    listSessions(config.profile.dataRoot, {
+      lifecycle: id => sessionLifecycle.stateOf(id),
+      includeArchived: true,
+      includeDeleted: false,
+    }).filter(session => (session.agentId ?? mainAgentId) === agentId)
+
+  /** 一次扫描算全部 agent 的会话数；列表页不要按 agent 重扫。 */
+  const sessionCounts = (): Map<string, number> => {
+    const counts = new Map<string, number>()
+    for (const session of listSessions(config.profile.dataRoot, {
+      lifecycle: id => sessionLifecycle.stateOf(id),
+      includeArchived: true,
+      includeDeleted: false,
+    })) {
+      const agentId = session.agentId ?? mainAgentId
+      counts.set(agentId, (counts.get(agentId) ?? 0) + 1)
+    }
+    return counts
+  }
+
+  const agentSummaryOf = (
+    agentId: string,
+    counts?: ReadonlyMap<string, number>,
+  ): AgentSummary => {
     const manifest = manifestOf(agentId)
     const settings = settingsOfQuietly(agentId)
     const model = settings?.models?.main
@@ -1749,6 +1795,12 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         modelConfigured = false
       }
     }
+    const sessionCount = counts?.get(agentId) ?? sessionsOfAgent(agentId).length
+    const blockedReason = agentId === mainAgentId
+      ? '默认主 agent 不能删除；要换身份请新建 agent 并改默认配置。'
+      : sessionCount > 0
+        ? `还有 ${sessionCount} 个未删除的会话（含归档），先删除或彻底删除这些会话。`
+        : undefined
     return {
       id: agentId,
       name: manifest?.name ?? agentId,
@@ -1767,6 +1819,9 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         ...(settings?.tools?.allow !== undefined ? { allow: settings.tools.allow } : {}),
         ...(settings?.tools?.approval ? { approval: settings.tools.approval } : {}),
       },
+      sessionCount,
+      deletable: blockedReason === undefined,
+      ...(blockedReason ? { deleteBlockedReason: blockedReason } : {}),
     }
   }
 
@@ -2022,6 +2077,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
           toolCallId: entry.toolCallId,
           toolName: entry.toolName,
           input: entry.originalInput,
+          ...(entry.reason ? { reason: entry.reason } : {}),
           createdAt: new Date().toISOString(),
         },
       })
@@ -2068,6 +2124,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       modelRetry,
       ...(fsPolicy ? { sandbox: fsPolicy } : {}),
       ...(networkPolicy ? { network: networkPolicy } : {}),
+      riskGuard,
       ...(leases ? { leases } : {}),
       workspaceId,
       ...(modelGate ? { modelGate } : {}),
@@ -2181,6 +2238,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         : {}),
       ...(fsPolicy ? { sandbox: fsPolicy } : {}),
       ...(networkPolicy ? { network: networkPolicy } : {}),
+      riskGuard,
       ...(leases ? { leases } : {}),
       workspaceId,
       ...(metrics ? { metrics } : {}),
@@ -2597,6 +2655,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
           toolCallId: entry.toolCallId,
           toolName: entry.toolName,
           input: entry.originalInput,
+          ...(entry.reason ? { reason: entry.reason } : {}),
         }))
     },
 
@@ -2854,7 +2913,8 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       const ids = new Set<string>([mainAgentId])
       for (const manifest of manifestStore?.list() ?? []) ids.add(manifest.id)
       for (const settings of agentSettings.list()) ids.add(settings.agentId)
-      return [...ids].sort().map(agentSummaryOf)
+      const counts = sessionCounts()
+      return [...ids].sort().map(id => agentSummaryOf(id, counts))
     },
 
     agentSummary(agentId) {
@@ -3014,6 +3074,42 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     async createMainAgent(input) {
       if (!manifestStore) throw new Error('memory is not configured')
       return manifestStore.createDefault(input.id, input.name)
+    },
+
+    async deleteMainAgent(agentId) {
+      if (!manifestStore) throw new Error('memory is not configured')
+      if (agentId === mainAgentId) {
+        throw new Error('默认主 agent 不能删除；要换身份请新建 agent 并改默认配置。')
+      }
+      const hasMemoryAgent = existsSync(manifestStore.dir(agentId))
+      const hasSettings = existsSync(agentSettings.dir(agentId))
+      if (!hasMemoryAgent && !hasSettings) throw new Error(`agent not found: ${agentId}`)
+
+      const sessionCount = sessionsOfAgent(agentId).length
+      if (sessionCount > 0) {
+        throw new Error(
+          `agent ${agentId} 还有 ${sessionCount} 个未删除的会话（含归档），先删除或彻底删除这些会话。`,
+        )
+      }
+
+      // 记忆库和数据目录各有一份；两边同名挪到 .trash，失败时把已挪的挪回去。
+      const stamp = now().toISOString().replace(/[:.]/g, '-')
+      const moves: Array<{ from: string; to: string }> = []
+      try {
+        if (hasMemoryAgent) moves.push(manifestStore.removeToTrash(agentId, stamp))
+        const settingsMove = hasSettings ? agentSettings.removeToTrash(agentId, stamp) : undefined
+        if (settingsMove) moves.push(settingsMove)
+      } catch (error) {
+        for (const move of [...moves].reverse()) {
+          try {
+            renameSync(move.to, move.from)
+          } catch {
+            // 回滚失败不掩盖原始错误；目录仍在 .trash，可人工找回。
+          }
+        }
+        throw error
+      }
+      return { id: agentId, trash: moves.map(move => move.to) }
     },
 
     mainAgentIdentity(agentId) {

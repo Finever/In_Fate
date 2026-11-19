@@ -468,6 +468,9 @@ export interface AgentSummary {
     allow?: string[]
     approval?: Record<string, 'auto' | 'required'>
   }
+  sessionCount: number
+  deletable: boolean
+  deleteBlockedReason?: string
 }
 
 export interface AgentSettingsUpdate {
@@ -593,6 +596,7 @@ export interface UiApproval {
   toolCallId: string
   toolName: string
   input: Record<string, unknown>
+  reason?: string
 }
 
 export interface UiContent {

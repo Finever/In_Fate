@@ -12,7 +12,8 @@
  */
 
 import { createHash } from 'node:crypto'
-import { cpSync, createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync, type Dirent } from 'node:fs'
+import { cpSync, createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync, type Dirent } from 'node:fs'
+import { open } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { spawn } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -103,17 +104,20 @@ interface ParsedVersion {
   readonly major: number
   readonly minor: number
   readonly patch: number
+  /** 第四段；V0.0.1.1 这种项目版本用 */
+  readonly revision: number
   readonly prerelease?: string
 }
 
 function parseVersion(raw: string): ParsedVersion {
-  const match = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(raw.trim())
+  const match = /^v?(\d+)\.(\d+)\.(\d+)(?:\.(\d+))?(?:-([0-9A-Za-z.-]+))?$/.exec(raw.trim())
   if (!match) throw new UpdateError('update_version', `版本号不合法：${raw}`)
   return {
     major: Number(match[1]),
     minor: Number(match[2]),
     patch: Number(match[3]),
-    ...(match[4] ? { prerelease: match[4] } : {}),
+    revision: Number(match[4] ?? 0),
+    ...(match[5] ? { prerelease: match[5] } : {}),
   }
 }
 
@@ -143,7 +147,7 @@ function comparePrerelease(a: string, b: string): number {
 export function compareVersions(a: string, b: string): number {
   const left = parseVersion(a)
   const right = parseVersion(b)
-  for (const key of ['major', 'minor', 'patch'] as const) {
+  for (const key of ['major', 'minor', 'patch', 'revision'] as const) {
     if (left[key] !== right[key]) return left[key] - right[key]
   }
   if (left.prerelease === right.prerelease) return 0
@@ -331,9 +335,10 @@ async function downloadToFile(
   }
 
   mkdirSync(dirname(dest), { recursive: true })
-  const writer = createWriteStream(dest)
+  const handle = await open(dest, 'w')
   const reader = response.body.getReader()
   let received = 0
+  let complete = false
   try {
     while (true) {
       const { done, value } = await reader.read()
@@ -342,22 +347,26 @@ async function downloadToFile(
       if (received > options.maxBytes) {
         throw new UpdateError('update_size', '更新包超过大小上限')
       }
-      if (!writer.write(value)) {
-        await new Promise<void>((resolveDrain, rejectDrain) => {
-          writer.once('drain', resolveDrain)
-          writer.once('error', rejectDrain)
-        })
+      // 直接 await 写盘：不依赖流的 drain/error 竞态，磁盘错误会当场抛。
+      let offset = 0
+      while (offset < value.byteLength) {
+        const { bytesWritten } = await handle.write(
+          value,
+          offset,
+          value.byteLength - offset,
+        )
+        if (bytesWritten <= 0) throw new UpdateError('update_download', '写入更新包失败')
+        offset += bytesWritten
       }
       options.onProgress(received, total)
     }
+    complete = true
   } catch (error) {
     await reader.cancel().catch(() => undefined)
     throw error
   } finally {
-    await new Promise<void>((resolveDone, reject) => {
-      writer.end(() => resolveDone())
-      writer.once('error', reject)
-    })
+    await handle.close()
+    if (!complete) rmSync(dest, { force: true })
   }
 }
 
@@ -452,9 +461,11 @@ function checkExtractedTree(dir: string): void {
 /** 解压 zip。Git Bash 的 GNU tar 不认 zip，所以 Windows 固定用 System32 的 bsdtar。 */
 async function extractZip(zipPath: string, dest: string): Promise<void> {
   const entries = await listZipEntries(zipPath)
-  if (entries) {
-    for (const entry of entries) assertZipEntrySafe(entry)
+  // 列不出目录就拒绝解压：不能把路径穿越检查交给解压工具本身。
+  if (!entries) {
+    throw new UpdateError('update_package', '无法读取更新包目录，拒绝解压')
   }
+  for (const entry of entries) assertZipEntrySafe(entry)
   mkdirSync(dest, { recursive: true })
   const attempts: Array<{ command: string; args: readonly string[] }> = process.platform === 'win32'
     ? [

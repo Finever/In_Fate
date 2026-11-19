@@ -103,6 +103,32 @@ test('main agent 创建、PPP 读写、会话 agentId 与全局记忆 API', asyn
     }
     assert.match(readBody.identity.slots.find(slot => slot.id === 'principle')!.content, /新的。/)
 
+    const other = await fetch(`${handle.url}/api/main-agents`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ id: 'other', name: '其他 agent' }),
+    })
+    assert.equal(other.status, 200)
+    const deleteMain = await fetch(`${handle.url}/api/main-agents/main`, {
+      method: 'DELETE',
+      headers,
+    })
+    assert.equal(deleteMain.status, 400)
+    const deleteOther = await fetch(`${handle.url}/api/main-agents/other`, {
+      method: 'DELETE',
+      headers,
+    })
+    assert.equal(deleteOther.status, 200)
+    const deleted = await deleteOther.json() as { deleted: { id: string; trash: string[] } }
+    assert.equal(deleted.deleted.id, 'other')
+    assert.equal(deleted.deleted.trash.length, 1)
+    const afterDelete = await fetch(`${handle.url}/api/main-agents`, { headers })
+    const afterAgents = (await afterDelete.json() as {
+      agents: Array<{ id: string; sessionCount: number; deletable: boolean }>
+    }).agents
+    assert.equal(afterAgents.some(agent => agent.id === 'other'), false)
+    assert.equal(afterAgents[0]!.deletable, false)
+
     const session = await fetch(`${handle.url}/api/sessions`, {
       method: 'POST',
       headers,

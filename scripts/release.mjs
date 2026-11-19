@@ -28,8 +28,8 @@ import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const version = readFileSync(join(root, 'VERSION'), 'utf8').trim()
-if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
-  throw new Error(`VERSION is not semver: ${version}`)
+if (!/^\d+\.\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
+  throw new Error(`VERSION is not a supported version: ${version}`)
 }
 const includeDesktop = !process.argv.includes('--no-desktop')
 const outRoot = join(root, 'release')
