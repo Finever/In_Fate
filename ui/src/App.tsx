@@ -6,6 +6,7 @@ import { AgentPanel } from './components/AgentPanel'
 import { ApprovalDialog } from './components/ApprovalDialog'
 import { FrameBoot, FrameCenter, FrameGate, FrameRight, FrameSidebar } from './components/Framework'
 import type { MainAgentListItem } from './components/Framework'
+import { PromptDialog } from './components/PromptDialog'
 import { SessionView } from './components/SessionView'
 import { SettingsDialog } from './components/SettingsDialog'
 import { TitleBar } from './components/TitleBar'
@@ -68,6 +69,7 @@ function Desktop() {
   const [rightWidth, setRightWidth] = useState(() =>
     storedWidth(RIGHT_KEY, RIGHT_DEFAULT, RIGHT_MIN, RIGHT_MAX))
   const [creating, setCreating] = useState(false)
+  const [newSessionOpen, setNewSessionOpen] = useState(false)
   const [addAgentOpen, setAddAgentOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [pendingAgentId, setPendingAgentId] = useState<string>()
@@ -239,29 +241,30 @@ function Desktop() {
     })
   }, [leftWidth, rightWidth])
 
-  const create = useCallback(async (): Promise<void> => {
+  const create = useCallback((): void => {
     if (creating) return
+    setNewSessionOpen(true)
+  }, [creating])
+
+  const submitNewSession = useCallback(async (desired: string): Promise<void> => {
+    const targetAgent = agentFilter !== 'all'
+      ? agentFilter
+      : selectedSession?.agentId
+        ?? workspace.mainAgents.find(agent => agent.id === FALLBACK_AGENT)?.id
     setCreating(true)
     setActionError(undefined)
     try {
-      const targetAgent = agentFilter !== 'all'
-        ? agentFilter
-        : selectedSession?.agentId
-          ?? workspace.mainAgents.find(agent => agent.id === FALLBACK_AGENT)?.id
-      const desired = window.prompt(
-        '会话 ID（留空自动生成；可用字母、数字、点、下划线、连字符）',
-        '',
-      )
-      if (desired === null) return
-      const id = await api.createSession(targetAgent, desired.trim() || undefined)
+      const id = await api.createSession(targetAgent, desired || undefined)
       await workspace.refresh(true)
       setSelectedId(id)
+      setNewSessionOpen(false)
     } catch (reason) {
       setActionError(reason instanceof Error ? reason.message : String(reason))
+      throw reason
     } finally {
       setCreating(false)
     }
-  }, [agentFilter, creating, selectedSession, workspace])
+  }, [agentFilter, selectedSession, workspace])
 
   const addMainAgent = useCallback(async (
     input: { id: string; name: string },
@@ -339,6 +342,18 @@ function Desktop() {
           onClose={() => setRightOpen(false)}
         />
       </FrameRight>
+
+      {newSessionOpen && (
+        <PromptDialog
+          title="新建会话"
+          label="会话 ID"
+          placeholder="留空自动生成；可用字母、数字、点、下划线、连字符"
+          allowEmpty
+          confirmLabel="创建"
+          onClose={() => setNewSessionOpen(false)}
+          onSubmit={submitNewSession}
+        />
+      )}
 
       {addAgentOpen && (
         <AddMainAgentDialog

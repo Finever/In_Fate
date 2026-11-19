@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { api, ApiError } from '../api'
+import { PromptDialog } from './PromptDialog'
 import type {
   MemoryCommitStatus,
   MemoryLibraryFile,
@@ -47,6 +48,10 @@ export function MemoryLibraryPanel({
   const [showTrash, setShowTrash] = useState(false)
   const [commitStatus, setCommitStatus] = useState<MemoryCommitStatus>()
   const [summaryStatus, setSummaryStatus] = useState<MemorySummaryWorkerStatus>()
+  const [pathPrompt, setPathPrompt] = useState<{
+    kind: 'folder' | 'file' | 'move'
+    defaultValue?: string
+  }>()
 
   const tree = useMemo(() => {
     const children = new Map<string, MemoryLibraryNode[]>()
@@ -158,65 +163,59 @@ export function MemoryLibraryPanel({
     }
   }
 
-  async function createFolder(): Promise<void> {
-    const path = window.prompt('新目录路径（例如 detail/新域）')
-    if (!path?.trim()) return
-    setBusy('op')
-    setError(undefined)
-    try {
-      await api.mkdirMemoryLibrary(path.trim())
-      await refresh()
-      await refreshCommit()
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason))
-    } finally {
-      setBusy(undefined)
-    }
+  function createFolder(): void {
+    setPathPrompt({ kind: 'folder' })
   }
 
-  async function createFile(): Promise<void> {
-    const path = window.prompt('新文件路径（例如 detail/新域/新文件.json）')
-    if (!path?.trim()) return
-    const target = path.trim()
-    const content = target.startsWith('detail/') && target.endsWith('.json')
-      ? defaultDetailText(target)
-      : target.endsWith('.json')
-        ? '{}\n'
-        : ''
-    setBusy('op')
-    setError(undefined)
-    try {
-      await api.writeMemoryLibrary(target, content)
-      await refresh()
-      await refreshCommit()
-      await openFile(target)
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason))
-    } finally {
-      setBusy(undefined)
-    }
+  function createFile(): void {
+    setPathPrompt({ kind: 'file' })
   }
 
-  async function moveSelected(): Promise<void> {
+  function moveSelected(): void {
     if (!selected) return
     if (dirty && !window.confirm('当前文件有未保存的改动，移动/重命名会丢失。继续？')) return
-    const target = window.prompt('新路径', selected)
-    if (!target?.trim() || target.trim() === selected) return
+    setPathPrompt({ kind: 'move', defaultValue: selected })
+  }
+
+  async function submitPath(value: string): Promise<void> {
+    const prompt = pathPrompt
+    if (!prompt) return
+    if (prompt.kind === 'move' && value === selected) {
+      setPathPrompt(undefined)
+      return
+    }
     setBusy('op')
     setError(undefined)
     try {
-      const moved = nodes.find(node => node.path === selected)
-      await api.moveMemoryLibrary(selected, target.trim())
-      const next = target.trim()
-      await refresh()
-      await refreshCommit()
-      if (moved?.kind === 'file' && !moved.readOnly) {
-        await openFile(next)
-      } else {
-        setSelected(next)
+      if (prompt.kind === 'folder') {
+        await api.mkdirMemoryLibrary(value)
+        await refresh()
+        await refreshCommit()
+      } else if (prompt.kind === 'file') {
+        const content = value.startsWith('detail/') && value.endsWith('.json')
+          ? defaultDetailText(value)
+          : value.endsWith('.json')
+            ? '{}\n'
+            : ''
+        await api.writeMemoryLibrary(value, content)
+        await refresh()
+        await refreshCommit()
+        await openFile(value)
+      } else if (prompt.kind === 'move' && selected) {
+        const moved = nodes.find(node => node.path === selected)
+        await api.moveMemoryLibrary(selected, value)
+        await refresh()
+        await refreshCommit()
+        if (moved?.kind === 'file' && !moved.readOnly) {
+          await openFile(value)
+        } else {
+          setSelected(value)
+        }
       }
+      setPathPrompt(undefined)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
+      throw reason
     } finally {
       setBusy(undefined)
     }
@@ -471,6 +470,30 @@ export function MemoryLibraryPanel({
           )}
         </div>
       </div>
+
+      {pathPrompt && (
+        <PromptDialog
+          title={pathPrompt.kind === 'folder'
+            ? '新建目录'
+            : pathPrompt.kind === 'file'
+              ? '新建文件'
+              : '移动 / 重命名'}
+          label={pathPrompt.kind === 'folder'
+            ? '目录路径'
+            : pathPrompt.kind === 'file'
+              ? '文件路径'
+              : '新路径'}
+          placeholder={pathPrompt.kind === 'folder'
+            ? '例如 detail/新域'
+            : pathPrompt.kind === 'file'
+              ? '例如 detail/新域/新文件.json'
+              : undefined}
+          defaultValue={pathPrompt.defaultValue}
+          confirmLabel="确定"
+          onClose={() => setPathPrompt(undefined)}
+          onSubmit={submitPath}
+        />
+      )}
     </div>
   )
 }
