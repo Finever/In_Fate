@@ -1,19 +1,27 @@
 # In_Fate（IF）
 
-> 本地优先、事件溯源的 agent 框架与桌面集成工作台。
+> 本地优先、事件溯源的 agent 框架与桌面工作台。
 >
-> 当前版本：**V0.0.1**；快照：**2026-11-18**。这份 README 随时更新
+> 当前版本：**V0.0.1**；文档快照：**2026-11-19**。
+> 仓库：<https://gitee.com/findnevery/in_fate>
 
 ---
 
 ## 这是什么
 
-IF 是一套自己维护的 agent 系统。
+IF 是一套自己维护的 agent 运行时和工作台。它不把对话当聊天记录，而是把会话落成事件流，再从事件投影出模型上下文、UI 时间线、记忆和计量；模型、工具、记忆、插件都能换，数据和记忆默认留在本机。
 
 - **DSH 只做参考实现和原语来源**，不引入 Cordis、不绑定 DSH 运行时。
 - 行为层自己维护：会话事件、上下文管线、工具契约、记忆入口、插件契约、UI。
 - 机制层能借就借：进程、锁、流式、token 估算、存储原语；借不到就自己写，但先写不变量和失败模式。
 - 目标不是“复刻谁”，是把你自己的使用习惯、记忆和多种模型/工具收进一个本地工作台。
+
+它**不是**：
+
+- 不是 DSH 的桌面壳，也不假装能直接装 DSH/Cordis 插件。
+- 不是只换一个 baseURL 的多模型聊天框，模型格式、key、计量、准入都要能分开管。
+- 不是云同步产品；当前没有账号、云存储、插件市场，记忆和会话默认只在本机。
+
 
 默认形态：
 
@@ -29,34 +37,30 @@ CLI / 本地 HTTP API / React UI / Electron 壳
 
 ---
 
-## 设计管线（按讨论顺序）
+## 项目特色（已落地）
 
-这不是功能清单，是已经定过的形状。README 只摘结论，专项细节在 `docs/` 和记忆库里。
+IF 不是“聊天框 + 插件”的壳。下面这些是当前代码里真的在跑、能被测试或命令验证的东西；每条都带边界，没做的直接写没做。
 
-1. **2026-10-18：五条线**
-   上下文（记忆/工作流、每轮推送、外接数据、RAG、翻译/PDF/解析）、事件与展示（对话、token 占比、多模态、实时进程推送）、驱动（任务驱动与对话驱动兼容）、执行（高自由度工具、终端绕开 GBK）、模型与协同（多 agent、内置本地 LLM、ComfyUI）。
-2. **2026-10-18：三样地基**
-   事件模型（追加、带类型、可投影）、上下文管线形状（`sources → filter → budget → render`）、工具结果 envelope（`bytes` / `encoding` / `mime` / `structured`）。这三样先定，内容后定。
-3. **2026-10-21：借用边界**
-   DSH 只借装配/生命周期、loop 调度骨架、进程/存储原语、接入协议、服务 seam；工具管线、事件语义、压缩、沙箱、模型适配、驱动、记忆入口、UI 全部自定。`AGENTS.md` / `CLAUDE.md` 不是可蹭协议。
-4. **2026-10-21：UI 卸载 ≠ 模型上下文**
-   会话窗把历史从 UI 卸下、滚动/跳转再取回，和模型上下文压缩/工具结果外置是两条线，必须分开命名、分开阈值。UI 叫“会话窗历史卸载/分页驻留”，模型叫“上下文压缩/结果外置”，存储叫“段归档/fork”。
-5. **2026-10-24：会话图 v3**
-   所有会话归用户；`createdBy` / `createdFrom` 只做溯源，不产生父子/权限层级。连接走独立 `workspace.jsonl`，`peer | handoff | reference`；消息只进目标收件箱，不合并历史。`SessionHost` 保证同一会话单 active turn、不同会话并行；`join` 登记 all/any + timeout，等待不占模型；写隔离用 `WorkspaceLeaseManager`；模型准入用 `ModelGate`；记忆权限按 `MemoryGrant` 能力位，不按主/子。
-6. **2026-11-01：模型归属与计量**
-   模型目录/单价是全局配置；agent 的主模型、子 agent 模型、预设、工具白名单/审批放 `<dataRoot>/agents/<agentId>/settings.json`，不进记忆库 git，也不写进身份槽位。没有全局默认模型；没有 `models.main` 的 agent 直接阻止运行。`turn.completed` 记录 usage/model/耗时/成本；缓存命中是输入子集；峰谷价按模型自定义时段，历史成本不因改价重算。
-7. **2026-11-06：记忆架构**
-   记忆根默认 `<dataRoot>/memory`，布局 `detail + log + proposals + summaries + agents + indexlist`；不依赖外部 hook/Python。两档记忆：`rag-tool` 与 `jev-push`，另有 `off`。Jev 只做选择，不做推理、不做摘要、不写库；触发 `off | once | always`，`once` 是每段上下文第一次 + 压缩后，`always` 是常驻而不是每轮重推。选择范围默认不是全库，可选 session/agent/domain/target/all。摘要单独生成，存 `summaries/`，不塞进 detail 正文。本地 Jev 由 IF 管运行时；API 模式必须显式确认并提示记忆外发。
-8. **2026-11-13：产品方向**
-   IF 是多样化聚合平台，默认 UI 只是起点：UI 拓展、多窗口互连/传输/动效；内置 ComfyUI；内置 RAG、翻译、格式转换；微信与远程接入；computer-use 与设备调试；两层便携沙箱（agent 自身沙箱 + 给 agent 用的沙箱）；可选角色稳定插件（可自定义）；便携 agent 聊天接口；多文档编辑；实时操作可视化与 VS Code 内嵌。
-9. **2026-11-14：插件 v0**
-   不引 Cordis；`PluginManifest / PluginContext / PluginRegistry` 三件套；只做 tool + ui-panel，builtin/dev 进程内；第三方安装、沙箱宿主、provider、事件总线、市场留 v1。详见 `docs/plugins.md`。
+| 特色 | 具体做法 | 现在到哪 |
+|---|---|---|
+| **事件是真相，聊天只是投影** | 会话是 append-only JSONL，事件带 type / actor / seq / time；历史、时间线、统计都从事件投影；压缩只写锚点，归档/软删除不删盘；支持自定义 session ID | 可用；UI 分页驻留还没做到按页释放 |
+| **上下文是管线，不是拼字符串** | `sources → filter → budget → render`；stable / dynamic / ephemeral 分段；记忆推送是 dynamic section；压缩、工具结果外置与 UI 卸载分开命名 | 可用；55% / 78% / 92% 三段水位还没接成完整管线 |
+| **记忆是本地库，不是向量垃圾桶** | `<dataRoot>/memory` 下 `detail / summaries / proposals / agents / log / policy`；一条一事、三档戳、原话带 `log-addr`；FTS5 + 可选本地 embedding；`rag-tool / jev-push / off` 与 `once / always` | 可用 / 部分；Jev 仍是启发式选择，不是 4B 模型；`always` 目前每轮重选，和设计的“常驻”有偏差 |
+| **多模型接入** | OpenAI Chat Completions、OpenAI Responses、Anthropic Messages、Google Generate Content 四种格式；provider 多端点 / 多 key；重试、ModelGate 并发、按模型计价与峰谷价；无全局默认模型 | 可用；余额只覆盖 DeepSeek / Moonshot / OpenRouter |
+| **工具结果有契约** | 统一 `ToolResult` envelope：`text / structured / bytes / encoding / mime / ref / contentRef / structuredRef / presentation`；spill / offload；`meta.writeScope` 取路径 / 工作区租约；审批后再执行 | 可用；跨进程 workspace 锁、`presentation` 富渲染还没做 |
+| **多会话是一张图，不是父子树** | 会话都归用户；`workspace.jsonl` 里 `peer / handoff / reference` 连接；同一会话单 active turn、不同会话并行；`send / wake / join`；记忆权限按 `MemoryGrant` 能力位 | 后端可用；会话图 UI 后置 |
+| **插件先钉边界** | `PluginManifest / PluginContext / PluginRegistry`；只支持 tool / ui-panel；工具命名空间 `<plugin>__<tool>`、默认停用、审批 required；面板 `iframe sandbox + srcDoc + CSP`；5MB 私有 KV | v0；进程内、无第三方安装 / provider / 事件总线 / 市场 |
+| **装得上、更新得了、数据不丢** | 发布结构 `In_First/In_Fate` + `In_First/data`；`install.cmd` 安装/卸载，卸载默认保留 `data/`；`latest.json` + sha256；`.updates` 暂存、pending 启动前切换、`previous` 回滚；zip 路径穿越 / 解压上限检查 | 可用；清单签名、增量更新、NSIS 单文件包和托盘还没做 |
 
-**当前优先级**（2026-11-14 定）：扩展契约/插件 SDK → Workspace + 任务引擎 → 产物仓库 + 统一摄入/RAG。理由：不先做这三样，ComfyUI、翻译、格式转换、多窗口、远程接入会各自长成孤岛。
+
+
+**方向（还没落地，不列进上面的“已落地”）**：IF 要做的是多样化聚合平台，不只是默认聊天窗——UI 拓展 / 多窗口互连与动效、内置 ComfyUI、内置 RAG / 翻译 / 格式转换、微信与远程接入、computer-use 与设备调试、两层便携沙箱、可自定义的角色稳定插件、多文档编辑、实时操作可视化与 VS Code 内嵌。顺序和状态见下面的“路线图”。
 
 ---
 
-## 现在能做什么
+## 模块状态
+
+只列模块和可用程度；具体机制和边界见上面的“项目特色”。
 
 | 模块 | 状态 | 说明 |
 |---|---|---|
@@ -128,6 +132,54 @@ cd desktop && npm install && npm start
 
 ---
 
+## 版本说明
+
+### 版本号规则
+
+- 程序的唯一版本来源是仓库根目录 `VERSION`；`/api/version`、`if --version` 和发布脚本都读它；`package.json` 的 `version` 需要同步。
+- 版本由项目所有者每次发布时手定；当前是 `0.0.1`。
+- 数据 schema 是独立版本：`DATA_SCHEMA_VERSION = 1`，状态在 `<dataRoot>/.state/data-schema.json`。
+- 程序跨版本更新不等于数据结构一定变；但数据结构一旦变，必须在 `DATA_MIGRATIONS` 里登记迁移。
+
+### 版本历史
+
+| 版本 | 日期 | 说明 |
+|---|---|---|
+| V0.0.1 | 2026-11-18 | 首个可独立拷贝、安装、启动、更新和回滚的骨架版本；当前版本 |
+
+### V0.0.1（2026-11-18）
+
+**定位**：第一个可以独立拷走、安装、启动、更新和回滚的骨架版本，不是功能完整版。
+
+**这一版包含**：
+
+- 事件溯源会话、上下文管线、工具契约、多模型适配、会话协作、记忆库 / 摘要 / Jev 启发式推送、插件 v0、模型余额、React UI、Electron 壳。
+- `In_First/In_Fate` 程序 + `In_First/data` 数据；`install.cmd` / `install.sh`；桌面 / 开始菜单快捷方式；卸载项。
+- 内置更新器：`latest.json`、sha256、暂存、pending、回滚、本地 zip；zip 路径穿越 / 解压上限 / 符号链接检查。
+
+**兼容与升级**：
+
+- 程序层是完整包，允许任意跨版本更新；不依赖中间补丁。
+- 数据层由 schema 迁移链决定：当前 `DATA_SCHEMA_VERSION = 1`、迁移链为空；跨过未来 schema 版本时必须补齐迁移，否则启动拒绝，不会静默改库。
+- 回滚只保留 `previous/` 一代；不做任意历史版本。
+- 更新清单签名、增量更新、NSIS 单文件安装器和托盘不在这一版。
+
+**怎么升级**：
+
+- 安装版：设置 → 关于与更新 → 检查 / 下载 / 应用，完全退出后重新启动；也可以直接运行新包的 `install.cmd` 覆盖安装。
+- 便携包：解压新包，替换 `In_Fate/`，保留 `data/` 和 `config/`。
+- 升级前先备份 `data/`；回滚用设置里的“回滚到上一版本”，或保留 `previous/`。
+
+**验证基线（2026-11-19）**：
+
+- `npm test`：244 个测试全过
+- `npm run check`：`tsc --noEmit` 通过
+- UI build：通过
+- 发布包 smoke：通过
+- 安装 → 临时构造的更新包 0.0.2 → 启动 → 回滚 0.0.1 端到端通过
+
+---
+
 ## 发布包
 
 ```bash
@@ -139,6 +191,33 @@ npm run release:smoke    # 冒烟：独立启动、health、version、UI
 产物分成两层：`In_Fate/` 是程序（bin/src/ui/dist/desktop），`data/` 是可变数据；另有包内 `runtime/`、`config/if.release.json`、`tools/`、`logs/`、`backups/`。升级时整体替换 `In_Fate/`，`data/` 不动。启动脚本默认设置 `IF_HOME=包根/data`、`IF_PORTABLE=1`；安装版由 `install.cmd` 装到 `%USERPROFILE%\In_First`，程序在 `%USERPROFILE%\In_First\In_Fate`，数据在 `%USERPROFILE%\In_First\data`，都不进 AppData。
 
 安装器负责首次部署、升级保留数据、快捷方式和卸载注册表。更新器内置在设置 → 关于与更新：支持 `latest.json` 检查、下载、sha256 校验、应用和回滚，也支持直接选本地发布包 zip；应用只写 pending，下次启动前由 `tools/apply-pending.mjs` 整体切换 `In_Fate/`，运行中的进程不替换自己的文件。版本号唯一来源是根目录 `VERSION`；当前 `V0.0.1`。详见 [`docs/release.md`](docs/release.md)。
+
+---
+
+## 设计管线（按讨论顺序）
+
+这不是功能清单，是已经定过的形状。README 只摘结论，专项细节在 `docs/` 和记忆库里。
+
+1. **2026-10-18：五条线**
+   上下文（记忆/工作流、每轮推送、外接数据、RAG、翻译/PDF/解析）、事件与展示（对话、token 占比、多模态、实时进程推送）、驱动（任务驱动与对话驱动兼容）、执行（高自由度工具、终端绕开 GBK）、模型与协同（多 agent、内置本地 LLM、ComfyUI）。
+2. **2026-10-18：三样地基**
+   事件模型（追加、带类型、可投影）、上下文管线形状（`sources → filter → budget → render`）、工具结果 envelope（`bytes` / `encoding` / `mime` / `structured`）。这三样先定，内容后定。
+3. **2026-10-21：借用边界**
+   DSH 只借装配/生命周期、loop 调度骨架、进程/存储原语、接入协议、服务 seam；工具管线、事件语义、压缩、沙箱、模型适配、驱动、记忆入口、UI 全部自定。`AGENTS.md` / `CLAUDE.md` 不是可蹭协议。
+4. **2026-10-21：UI 卸载 ≠ 模型上下文**
+   会话窗把历史从 UI 卸下、滚动/跳转再取回，和模型上下文压缩/工具结果外置是两条线，必须分开命名、分开阈值。UI 叫“会话窗历史卸载/分页驻留”，模型叫“上下文压缩/结果外置”，存储叫“段归档/fork”。
+5. **2026-10-24：会话图 v3**
+   所有会话归用户；`createdBy` / `createdFrom` 只做溯源，不产生父子/权限层级。连接走独立 `workspace.jsonl`，`peer | handoff | reference`；消息只进目标收件箱，不合并历史。`SessionHost` 保证同一会话单 active turn、不同会话并行；`join` 登记 all/any + timeout，等待不占模型；写隔离用 `WorkspaceLeaseManager`；模型准入用 `ModelGate`；记忆权限按 `MemoryGrant` 能力位，不按主/子。
+6. **2026-11-01：模型归属与计量**
+   模型目录/单价是全局配置；agent 的主模型、子 agent 模型、预设、工具白名单/审批放 `<dataRoot>/agents/<agentId>/settings.json`，不进记忆库 git，也不写进身份槽位。没有全局默认模型；没有 `models.main` 的 agent 直接阻止运行。`turn.completed` 记录 usage/model/耗时/成本；缓存命中是输入子集；峰谷价按模型自定义时段，历史成本不因改价重算。
+7. **2026-11-06：记忆架构**
+   记忆根默认 `<dataRoot>/memory`，布局 `detail + log + proposals + summaries + agents + indexlist`；不依赖外部 hook/Python。两档记忆：`rag-tool` 与 `jev-push`，另有 `off`。Jev 只做选择，不做推理、不做摘要、不写库；触发 `off | once | always`，`once` 是每段上下文第一次 + 压缩后，`always` 是常驻而不是每轮重推。选择范围默认不是全库，可选 session/agent/domain/target/all。摘要单独生成，存 `summaries/`，不塞进 detail 正文。本地 Jev 由 IF 管运行时；API 模式必须显式确认并提示记忆外发。
+8. **2026-11-13：产品方向**
+   IF 是多样化聚合平台，默认 UI 只是起点：UI 拓展、多窗口互连/传输/动效；内置 ComfyUI；内置 RAG、翻译、格式转换；微信与远程接入；computer-use 与设备调试；两层便携沙箱（agent 自身沙箱 + 给 agent 用的沙箱）；可选角色稳定插件（可自定义）；便携 agent 聊天接口；多文档编辑；实时操作可视化与 VS Code 内嵌。
+9. **2026-11-14：插件 v0**
+   不引 Cordis；`PluginManifest / PluginContext / PluginRegistry` 三件套；只做 tool + ui-panel，builtin/dev 进程内；第三方安装、沙箱宿主、provider、事件总线、市场留 v1。详见 `docs/plugins.md`。
+
+**当前优先级**（2026-11-14 定）：扩展契约/插件 SDK → Workspace + 任务引擎 → 产物仓库 + 统一摄入/RAG。理由：不先做这三样，ComfyUI、翻译、格式转换、多窗口、远程接入会各自长成孤岛。
 
 ---
 
@@ -270,11 +349,11 @@ tests/          node:test 测试
 
 当前验证基线：
 
-- `npm test`：**240** 个测试全过
+- `npm test`：**244** 个测试全过
 - `npm run check`：`tsc --noEmit` 通过
 - `cd ui && npm run build`：通过
 - 发布包 smoke：通过
-- 安装 → 更新到 V0.0.2 → 启动 → 回滚到 V0.0.1 端到端通过
+- 安装 → 临时构造的更新包 0.0.2 → 启动 → 回滚到 0.0.1 端到端通过
 
 重点已完成：
 
@@ -382,11 +461,12 @@ tests/          node:test 测试
 
 ## 维护约定
 
-这份 README 随代码更新，规则只有三条：
+这份 README 随代码更新，规则只有四条：
 
 1. **状态只写实际能跑的**。设计过但没实现的，放“偏差”或“路线图”。
-2. **每次改动更新顶部日期**，并同步“进度 / 偏差 / 验证基线”。
-3. **文档和代码一起提交**。专项细节放 `docs/`，README 只留总览和索引。
+2. **每次改动更新顶部日期**，并同步“版本说明 / 进度 / 偏差 / 验证基线”。
+3. **版本变更先改 `VERSION`，再补版本历史**；版本号不靠 README 记。
+4. **文档和代码一起提交**。专项细节放 `docs/`，README 只留总览和索引。
 
 验证命令：
 
