@@ -3,7 +3,7 @@
 > 本地优先、事件溯源的 agent 框架与桌面工作台。
 >
 > 当前版本：**V0.0.1**；文档快照：**2026-11-19**。
-> 仓库：<https://gitee.com/findnevery/in_fate>
+> 仓库：Gitee <https://gitee.com/findnevery/in_fate> · GitHub <https://github.com/Finever/In_Fate>
 
 ---
 
