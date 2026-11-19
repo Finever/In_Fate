@@ -48,7 +48,9 @@ function copy(relative, target = relative) {
 function write(relative, text) {
   const target = join(out, relative)
   mkdirSync(dirname(target), { recursive: true })
-  writeFileSync(target, text, 'utf8')
+  // Windows 批处理用 CRLF；.cmd 里不要放中文，避免 CMD 代码页把行拆坏。
+  const content = relative.endsWith('.cmd') ? text.replace(/\r?\n/g, '\r\n') : text
+  writeFileSync(target, content, 'utf8')
 }
 
 function fileSize(path) {
@@ -263,7 +265,7 @@ if exist "%~dp0runtime\\node.exe" (
 "%NODE%" "%~dp0tools\\install.mjs" %*
 if errorlevel 1 (
   echo.
-  echo 安装失败，按任意键关闭。
+  echo Install failed. Press any key to close.
   pause
 )
 `)

@@ -98,7 +98,9 @@ function copyDir(from, to) {
 
 function write(path, text) {
   mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(path, text, 'utf8')
+  // Windows 批处理/脚本用 CRLF，避免 CMD/WSH 的换行解析问题。
+  const content = /\.(cmd|vbs)$/i.test(path) ? text.replace(/\r?\n/g, '\r\n') : text
+  writeFileSync(path, content, 'utf8')
 }
 
 function startIfCmd() {
