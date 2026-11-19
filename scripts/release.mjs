@@ -261,7 +261,11 @@ if exist "%~dp0runtime\\node.exe" (
   set "NODE=node"
 )
 "%NODE%" "%~dp0tools\\install.mjs" %*
-pause
+if errorlevel 1 (
+  echo.
+  echo 安装失败，按任意键关闭。
+  pause
+)
 `)
 
 write('install.sh', `#!/usr/bin/env sh

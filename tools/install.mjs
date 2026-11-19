@@ -14,7 +14,7 @@
  * 它下载到 app/.updates，由启动脚本应用。
  */
 
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import {
   cpSync,
   existsSync,
@@ -45,6 +45,7 @@ function parseArgs(argv) {
     purge: false,
     force: false,
     quiet: false,
+    launch: process.stdout.isTTY === true,
     help: false,
   }
   for (let index = 0; index < argv.length; index += 1) {
@@ -57,6 +58,8 @@ function parseArgs(argv) {
     else if (arg === '--uninstall') options.uninstall = true
     else if (arg === '--purge') options.purge = true
     else if (arg === '--force') options.force = true
+    else if (arg === '--launch') options.launch = true
+    else if (arg === '--no-launch') options.launch = false
     else if (arg === '--quiet') options.quiet = true
     else if (arg === '--help' || arg === '-h') options.help = true
     else throw new Error(`未知参数：${arg}`)
@@ -292,6 +295,48 @@ function unregisterInstall() {
   spawnSync('reg.exe', ['delete', registryKey(), '/f'], { stdio: 'ignore', windowsHide: true })
 }
 
+function launchInstalled(installDir, options) {
+  if (!options.launch) return
+  if (isWindows) {
+    const systemRoot = process.env.SystemRoot ?? process.env.windir ?? 'C:\\Windows'
+    const wscript = join(systemRoot, 'System32', 'wscript.exe')
+    const vbs = join(installDir, 'start-desktop.vbs')
+    try {
+      if (existsSync(vbs)) {
+        spawn(wscript, [vbs], {
+          cwd: installDir,
+          detached: true,
+          stdio: 'ignore',
+          windowsHide: true,
+        }).unref()
+      } else {
+        spawn('cmd.exe', ['/c', 'start', '', 'start-desktop.cmd'], {
+          cwd: installDir,
+          detached: true,
+          stdio: 'ignore',
+          windowsHide: true,
+        }).unref()
+      }
+      say('[install] 已启动 In_Fate。', options.quiet)
+    } catch (error) {
+      say(`[install] 自动启动失败：${error instanceof Error ? error.message : String(error)}`, options.quiet)
+    }
+    return
+  }
+  const shell = join(installDir, 'start-desktop.sh')
+  if (!existsSync(shell)) return
+  try {
+    spawn(shell, [], {
+      cwd: installDir,
+      detached: true,
+      stdio: 'ignore',
+    }).unref()
+    say('[install] 已启动 In_Fate。', options.quiet)
+  } catch {
+    // 非 Windows 桌面自启失败不影响安装
+  }
+}
+
 function install(options) {
   const portable = options.portable
   const installDir = resolve(options.dir ?? (portable ? sourceRoot : defaultInstallDir()))
@@ -404,10 +449,14 @@ function install(options) {
 
   say('', options.quiet)
   say('[install] 完成。', options.quiet)
-  say(`  桌面版：${join(installDir, isWindows ? 'start-desktop.cmd' : 'start-desktop.sh')}`, options.quiet)
+  if (options.shortcuts) {
+    say('  打开方式：桌面 / 开始菜单的「In_Fate」快捷方式', options.quiet)
+  }
+  say(`  也可以运行：${join(installDir, isWindows ? 'start-desktop.cmd' : 'start-desktop.sh')}`, options.quiet)
   say(`  浏览器版：${join(installDir, isWindows ? 'start-if.cmd' : 'start-if.sh')}`, options.quiet)
   say(`  卸载：${join(installDir, isWindows ? 'uninstall.cmd' : 'tools/install.mjs --uninstall')}`, options.quiet)
   say(`  数据：${dataDir}（更新时不会动）`, options.quiet)
+  launchInstalled(installDir, options)
 }
 
 function inside(base, target) {
@@ -525,6 +574,8 @@ function main() {
   --data-dir <目录>   数据目录（默认 <安装根>/data）
   --portable          就地注册当前发布包，不复制到默认安装根
   --force             目标目录非空且不像 In_First 安装根时仍然写入
+  --launch            安装完成后启动 In_Fate（终端里默认开启）
+  --no-launch         安装完成后不启动
   --no-shortcuts      不创建桌面/开始菜单快捷方式
   --no-registry       不写卸载注册表
   --uninstall         卸载

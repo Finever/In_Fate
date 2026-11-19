@@ -72,7 +72,7 @@ Windows 双击 `install.cmd`，Linux/macOS 运行 `./install.sh`。
 
 都是用户目录下的可见文件夹，不写 AppData，也不请求管理员权限。`--dir` 和 `--data-dir` 可以改成任意位置。
 
-安装器复制 `In_Fate`、`runtime`、`tools` 和配置模板，写 `install.json` 与 `if-home.txt`，创建桌面/开始菜单快捷方式和卸载注册表项。`--no-shortcuts`、`--no-registry`、`--portable`、`--data-dir`、`--uninstall`、`--purge`、`--force` 可用。`--portable` 表示就地注册当前发布包，不复制到默认安装根；目标目录非空且不像 In_First 安装根时安装器会拒绝，`--force` 可跳过。升级安装保留数据与配置，旧程序层留在 `previous/`。
+安装器复制 `In_Fate`、`runtime`、`tools` 和配置模板，写 `install.json` 与 `if-home.txt`，创建桌面/开始菜单快捷方式和卸载注册表项。双击 `install.cmd` 安装完成后会直接启动 In_Fate；以后从桌面/开始菜单的「In_Fate」快捷方式打开，或运行安装根下的 `start-desktop.cmd`。`--no-launch` 可关闭自动启动。`--no-shortcuts`、`--no-registry`、`--portable`、`--data-dir`、`--uninstall`、`--purge`、`--force` 可用。`--portable` 表示就地注册当前发布包，不复制到默认安装根；目标目录非空且不像 In_First 安装根时安装器会拒绝，`--force` 可跳过。升级安装保留数据与配置，旧程序层留在 `previous/`。
 
 ## 内置更新
 
