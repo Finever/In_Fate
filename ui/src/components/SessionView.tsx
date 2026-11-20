@@ -30,6 +30,10 @@ export function SessionView({
   const activeTurn = inspection?.state === 'running' || inspection?.state === 'waiting'
     ? turns.at(-1)?.turn
     : undefined
+  const modelLabel = agent?.model
+    ? `${agent.model.provider}/${agent.model.model}`
+    : undefined
+  const agentName = agent?.name ?? agent?.id
 
   const send = useCallback(async (text: string): Promise<void> => {
     setSending(true)
@@ -76,6 +80,8 @@ export function SessionView({
           cache={cache}
           refreshKey={revision}
           activeTurn={activeTurn}
+          {...(agentName ? { agentName } : {})}
+          {...(modelLabel ? { modelLabel } : {})}
         />
       )}
 

@@ -15,6 +15,15 @@ function event(id: string, type: string, payload: Record<string, unknown> = {}):
   }
 }
 
+test('默认不在消息前注入时间戳，避免模型模仿', () => {
+  const messages = projectHistory([
+    event('u', 'message.user', { text: '你好' }),
+  ])
+  const first = messages[0]
+  assert.ok(first && first.role !== 'tool')
+  assert.deepEqual(first.content, [{ type: 'text', text: '你好' }])
+})
+
 test('system 注入排到未完成工具结果之后', () => {
   const messages = projectHistory([
     event('u', 'message.user', { text: '查一下' }),

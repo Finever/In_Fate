@@ -1407,6 +1407,33 @@ async function handle(
     return
   }
 
+  if (req.method === 'GET' && parts[1] === 'main-agents' && parts[2]
+    && parts[3] === 'identity' && parts[4] === 'backups' && parts.length === 5) {
+    try {
+      json(res, 200, { backups: app.mainAgentIdentityBackups(parts[2]) })
+    } catch (error) {
+      json(res, 404, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
+  if (req.method === 'POST' && parts[1] === 'main-agents' && parts[2]
+    && parts[3] === 'identity' && parts[4] === 'backups'
+    && parts[5] === 'restore' && parts.length === 6) {
+    const body = await readOptionalJson(req)
+    if (typeof body.file !== 'string' || body.file.trim() === '') {
+      json(res, 400, { error: 'file is required' })
+      return
+    }
+    try {
+      const result = await app.restoreMainAgentIdentity(parts[2], body.file.trim())
+      json(res, 200, { result })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
   if (req.method === 'GET' && parts[1] === 'agents' && parts.length === 2) {
     const includeArchived = url.searchParams.get('includeArchived') === '1'
       || url.searchParams.get('includeArchived') === 'true'

@@ -73,6 +73,8 @@ function Desktop() {
   const [addAgentOpen, setAddAgentOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [pendingAgentId, setPendingAgentId] = useState<string>()
+  const [sessionBusy, setSessionBusy] = useState(false)
+  const [showDeleted, setShowDeleted] = useState(false)
   const [actionError, setActionError] = useState<string>()
   const dragRef = useRef<{
     side: 'left' | 'right'
@@ -81,10 +83,16 @@ function Desktop() {
     otherWidth: number
   } | null>(null)
 
-  const homeSessions = useMemo(
-    () => workspace.sessions.filter(item =>
-      item.lifecycle !== 'deleted' && item.kind !== 'agent'),
+  const allHomeSessions = useMemo(
+    () => workspace.sessions.filter(item => item.kind !== 'agent'),
     [workspace.sessions],
+  )
+
+  const homeSessions = useMemo(
+    () => showDeleted
+      ? allHomeSessions
+      : allHomeSessions.filter(item => item.lifecycle !== 'deleted'),
+    [allHomeSessions, showDeleted],
   )
 
   const agentItems = useMemo<MainAgentListItem[]>(() => workspace.mainAgents
@@ -282,6 +290,41 @@ function Desktop() {
     void workspace.refresh(true)
   }, [workspace])
 
+  const runSessionAction = useCallback(async (
+    action: () => Promise<unknown>,
+    confirmText?: string,
+  ): Promise<void> => {
+    if (confirmText && !window.confirm(confirmText)) return
+    setSessionBusy(true)
+    setActionError(undefined)
+    try {
+      await action()
+      await workspace.refresh(true)
+    } catch (reason) {
+      setActionError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setSessionBusy(false)
+    }
+  }, [workspace])
+
+  const archiveSession = useCallback((id: string): void => {
+    void runSessionAction(
+      () => api.archiveSession(id, 'ui'),
+      '归档这个会话？归档后仍可在左侧“归档”分组里恢复。',
+    )
+  }, [runSessionAction])
+
+  const unarchiveSession = useCallback((id: string): void => {
+    void runSessionAction(() => api.unarchiveSession(id, 'ui'))
+  }, [runSessionAction])
+
+  const deleteSession = useCallback((id: string): void => {
+    void runSessionAction(
+      () => api.deleteSession(id, { reason: 'ui' }),
+      '删除这个会话？这是软删除，事件文件仍保留在磁盘上。',
+    )
+  }, [runSessionAction])
+
   if (workspace.loading && workspace.sessions.length === 0) return <FrameBoot />
 
   const shellStyle = {
@@ -301,6 +344,8 @@ function Desktop() {
         agents={agentItems}
         selectedAgentId={agentFilter}
         selectedId={selectedId}
+        busy={sessionBusy}
+        showDeleted={showDeleted}
         onSelect={id => {
           setSelectedId(id)
           setActionError(undefined)
@@ -310,7 +355,12 @@ function Desktop() {
           setAgentFilter(id)
           setActionError(undefined)
         }}
+        onCreate={() => void create()}
         onAddAgent={() => setAddAgentOpen(true)}
+        onArchive={archiveSession}
+        onUnarchive={unarchiveSession}
+        onDelete={deleteSession}
+        onToggleDeleted={() => setShowDeleted(value => !value)}
         onResizeStart={event => startResize('left', event)}
       />
 
@@ -318,8 +368,12 @@ function Desktop() {
         session={selectedSession}
         rightOpen={rightOpen}
         error={actionError ?? workspace.error}
+        busy={sessionBusy}
         onToggleRight={toggleRight}
         onCreate={() => void create()}
+        onArchive={archiveSession}
+        onUnarchive={unarchiveSession}
+        onDelete={deleteSession}
       >
         {selectedSession && (
           <SessionView

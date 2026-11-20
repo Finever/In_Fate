@@ -57,7 +57,7 @@ export type HistoryMessage = ChatMessage | ToolMessage
 export interface HistoryOptions {
   /** 是否把 thoughts.segment 并进 assistant.reasoning。默认 false。 */
   readonly includeReasoning?: boolean
-  /** 是否在消息前加时间标签。默认 true。 */
+  /** 是否在消息前加时间标签。默认 false：模型会模仿，时间改由 ephemeral 段提供。 */
   readonly timeTag?: boolean
   /** 渲染时间用的时区 */
   readonly timeZone?: string
@@ -164,7 +164,8 @@ export function projectHistory(
   const deferredSystem: ChatMessage[] = []
 
   const includeReasoning = options.includeReasoning ?? false
-  const addTime = options.timeTag ?? true
+  // 消息前缀时间戳会被模型模仿，默认不再注入；当前时间由 ephemeral 段单独给。
+  const addTime = options.timeTag ?? false
   const timeZone = options.timeZone ?? 'Asia/Shanghai'
 
   let currentAssistant: ChatMessage | undefined

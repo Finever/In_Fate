@@ -2,7 +2,7 @@
 
 > 本地优先、事件溯源的 agent 框架与桌面工作台。
 >
-> 当前版本：**V0.0.1.1**；文档快照：**2026-11-19**。
+> 当前版本：**V0.0.1.2**；文档快照：**2026-11-20**。
 > 仓库：Gitee <https://gitee.com/findnevery/in_fate> · GitHub <https://github.com/Finever/In_Fate>
 
 ---
@@ -141,7 +141,7 @@ cd desktop && npm install && npm start
 ### 版本号规则
 
 - 程序的唯一版本来源是仓库根目录 `VERSION`；`/api/version`、`if --version` 和发布脚本都读它；`package.json` 的 `version` 需要同步。
-- 版本由项目所有者每次发布时手定；当前是 `0.0.1.1`。
+- 版本由项目所有者每次发布时手定；当前是 `0.0.1.2`。
 - 版本号支持 `x.y.z` 和 `x.y.z.w`；第四段是补丁修订号，比较时依次比较 `major.minor.patch.revision`。
 - 数据 schema 是独立版本：`DATA_SCHEMA_VERSION = 1`，状态在 `<dataRoot>/.state/data-schema.json`。
 - 程序跨版本更新不等于数据结构一定变；但数据结构一旦变，必须在 `DATA_MIGRATIONS` 里登记迁移。
@@ -151,7 +151,33 @@ cd desktop && npm install && npm start
 | 版本 | 日期 | 说明 |
 |---|---|---|
 | V0.0.1 | 2026-11-18 | 首个可独立拷贝、安装、启动、更新和回滚的骨架版本 |
-| V0.0.1.1 | 2026-11-19 | 风险操作守卫、agent 删除、稳定版审计修复；当前版本 |
+| V0.0.1.1 | 2026-11-19 | 风险操作守卫、agent 删除、稳定版审计修复 |
+| V0.0.1.2 | 2026-11-20 | 会话搜索/删除入口、人格备份恢复、时间戳根因修复；当前版本 |
+
+### V0.0.1.2（2026-11-20）
+
+**定位**：V0.0.1.1 的可用性补丁，不改数据 schema。
+
+**这一版包含**：
+
+- **会话操作**：左侧会话栏常驻“新建”，支持搜索、显示/隐藏已删除；每个会话行和中间标题栏都有归档、恢复、删除入口。
+- **人格备份**：人格面板可以列出 `_archive` 里的备份并恢复；恢复前会自动备份当前版本，恢复结果下一轮生效。
+- **时间戳根因修复**：模型历史默认不再给每条消息加 `[YYYY-MM-DD HH:mm]` 前缀，时间只从 ephemeral 段提供；UI 仅清洗 assistant 正文开头的时间戳，不改落盘原文。
+- **人格更新感知**：保存人格文件后，给该 agent 名下的会话追加一次性的 `message.system` 更新通知；人格源文件本身仍每轮重新读取。
+- **思考过程**：UI 已能显示模型返回的 `reasoning`；是否显示取决于当前模型/网关是否返回思考内容，`normal` 这类不返回 reasoning 的模型不会凭空产生。
+
+**兼容与升级**：
+
+- 数据 schema 不变，`data/` 可以直接沿用。
+- V0.0.1.1 → V0.0.1.2 可以走内置更新；V0.0.1 → V0.0.1.2 仍需先手动装一次四段版本。
+- 回滚仍只保留 `previous/` 一代。
+
+**验证基线（2026-11-20）**：
+
+- `npm run check`：`tsc --noEmit` 通过
+- `npm test`：250 个测试全过
+- UI build：通过
+- 发布包 smoke：通过
 
 ### V0.0.1.1（2026-11-19）
 
@@ -214,7 +240,7 @@ npm run release:smoke    # 冒烟：独立启动、health、version、UI
 
 产物分成两层：`In_Fate/` 是程序（bin/src/ui/dist/desktop），`data/` 是可变数据；另有包内 `runtime/`、`config/if.release.json`、`tools/`、`logs/`、`backups/`。升级时整体替换 `In_Fate/`，`data/` 不动。启动脚本默认设置 `IF_HOME=包根/data`、`IF_PORTABLE=1`；安装版由 `install.cmd` 装到 `%USERPROFILE%\In_First`，程序在 `%USERPROFILE%\In_First\In_Fate`，数据在 `%USERPROFILE%\In_First\data`，都不进 AppData。
 
-安装器负责首次部署、升级保留数据、快捷方式和卸载注册表。双击 `install.cmd` 安装完成会自动启动 In_Fate；以后从桌面/开始菜单的「In_Fate」快捷方式打开，或运行安装根下的 `start-desktop.cmd`。更新器内置在设置 → 关于与更新：支持 `latest.json` 检查、下载、sha256 校验、应用和回滚，也支持直接选本地发布包 zip；应用只写 pending，下次启动前由 `tools/apply-pending.mjs` 整体切换 `In_Fate/`，运行中的进程不替换自己的文件。版本号唯一来源是根目录 `VERSION`；当前 `V0.0.1.1`。详见 [`docs/release.md`](docs/release.md)。
+安装器负责首次部署、升级保留数据、快捷方式和卸载注册表。双击 `install.cmd` 安装完成会自动启动 In_Fate；以后从桌面/开始菜单的「In_Fate」快捷方式打开，或运行安装根下的 `start-desktop.cmd`。更新器内置在设置 → 关于与更新：支持 `latest.json` 检查、下载、sha256 校验、应用和回滚，也支持直接选本地发布包 zip；应用只写 pending，下次启动前由 `tools/apply-pending.mjs` 整体切换 `In_Fate/`，运行中的进程不替换自己的文件。版本号唯一来源是根目录 `VERSION`；当前 `V0.0.1.2`。详见 [`docs/release.md`](docs/release.md)。
 
 ---
 
@@ -374,7 +400,7 @@ tests/          node:test 测试
 
 当前验证基线：
 
-- `npm test`：**248** 个测试全过
+- `npm test`：**250** 个测试全过
 - `npm run check`：`tsc --noEmit` 通过
 - `cd ui && npm run build`：通过
 - 发布包 smoke：通过

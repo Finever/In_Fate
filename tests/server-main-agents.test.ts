@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -141,6 +141,35 @@ test('main agent 创建、PPP 读写、会话 agentId 与全局记忆 API', asyn
       sessions: Array<{ id: string; agentId?: string }>
     }).sessions
     assert.equal(sessions.find(item => item.id === sessionId)?.agentId, 'main')
+
+    const putAfterSession = await fetch(`${handle.url}/api/main-agents/main/identity/principle`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ content: '# 原则\n\n更新后的人格。\n' }),
+    })
+    assert.equal(putAfterSession.status, 200)
+    const sessionEvents = readFileSync(join(dataRoot, 'sessions', `${sessionId}.jsonl`), 'utf8')
+    assert.match(sessionEvents, /人格文件已更新：原则/)
+
+    const backups = await fetch(`${handle.url}/api/main-agents/main/identity/backups`, { headers })
+    assert.equal(backups.status, 200)
+    const backupList = (await backups.json() as {
+      backups: Array<{ file: string; slot: string; bytes: number; updatedAt: string }>
+    }).backups
+    assert.ok(backupList.length > 0)
+    assert.equal(backupList[0]!.slot, 'principle')
+    const restore = await fetch(`${handle.url}/api/main-agents/main/identity/backups/restore`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ file: backupList[0]!.file }),
+    })
+    assert.equal(restore.status, 200)
+    const badRestore = await fetch(`${handle.url}/api/main-agents/main/identity/backups/restore`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ file: '../escape.md' }),
+    })
+    assert.equal(badRestore.status, 400)
 
     const search = await fetch(`${handle.url}/api/memory/search?q=${encodeURIComponent('测试')}`, { headers })
     assert.equal(search.status, 200)

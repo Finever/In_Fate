@@ -6,8 +6,18 @@
  * @module if/memory/identity-slots
  */
 
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { dirname, join } from 'node:path'
+import { assertWithin } from '../core/safe-path.ts'
 import { withFileLock } from '../core/lock.ts'
 import {
   AgentManifestStore,
@@ -41,6 +51,15 @@ export interface SlotIdentityApplyResult {
   readonly path: string
   readonly backup: string
 }
+
+export interface IdentityBackup {
+  readonly file: string
+  readonly slot: string
+  readonly bytes: number
+  readonly updatedAt: string
+}
+
+const BACKUP_FILE = /^([a-z][a-z0-9_-]*)-identity-[A-Za-z0-9-]+\.md$/
 
 function stamp(now: Date): string {
   const iso = now.toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15)
@@ -117,6 +136,45 @@ export class AgentIdentityStore {
       renameSync(temp, path)
       return { path, backup }
     }, { timeoutMs: 5_000 })
+  }
+
+  /** 列出 `_archive` 里可恢复的人格备份；不读正文。 */
+  listBackups(slotId?: string): IdentityBackup[] {
+    if (!existsSync(this.archiveDir)) return []
+    const knownSlots = new Set(this.manifest().identity.map(slot => slot.id))
+    const out: IdentityBackup[] = []
+    for (const entry of readdirSync(this.archiveDir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith('.md')) continue
+      const match = BACKUP_FILE.exec(entry.name)
+      if (!match) continue
+      const slot = match[1]!
+      if (!knownSlots.has(slot) || (slotId && slot !== slotId)) continue
+      const path = join(this.archiveDir, entry.name)
+      try {
+        const stat = statSync(path)
+        out.push({
+          file: entry.name,
+          slot,
+          bytes: stat.size,
+          updatedAt: new Date(stat.mtimeMs).toISOString(),
+        })
+      } catch {
+        // 备份可能在扫描和 stat 之间被移走
+      }
+    }
+    return out.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+  }
+
+  /** 恢复一份备份；恢复动作本身也会先把当前版本备份一遍。 */
+  async restoreBackup(file: string): Promise<{ slot: string; path: string; backup: string }> {
+    const match = BACKUP_FILE.exec(file)
+    if (!match) throw new Error(`invalid identity backup: ${file}`)
+    const slot = match[1]!
+    const slotPath = assertWithin(this.archiveDir, join(this.archiveDir, file), 'identity backup')
+    if (!existsSync(slotPath)) throw new Error(`identity backup not found: ${file}`)
+    const content = readFileSync(slotPath, 'utf8')
+    const result = await this.writeSlot(slot, content)
+    return { slot, ...result }
   }
 
   preview(patch: SlotIdentityPatch): SlotIdentityPreview {

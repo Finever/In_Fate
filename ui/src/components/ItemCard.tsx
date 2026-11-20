@@ -11,6 +11,16 @@ interface Props {
   item: UiTimelineItem
   bare?: boolean
   inProcess?: boolean
+  /** 这一轮实际使用的模型；用到时替代软件名。 */
+  modelLabel?: string
+}
+
+/** 只清掉 assistant 正文开头的时间戳，正文中间的日期不碰。 */
+function stripLeadingTimestamp(text: string): string {
+  return text.replace(
+    /^\s*[\[【]\d{4}-\d{1,2}-\d{1,2}[ T]\d{1,2}:\d{2}(?::\d{2})?[\]】]\s*/,
+    '',
+  )
 }
 
 type ContentTarget = { ref: string } | { eventId: string } | undefined
@@ -51,7 +61,7 @@ function ToolStatus({ status }: { status: 'running' | 'ok' | 'error' | undefined
   )
 }
 
-export function ItemCard({ sessionId, item, bare = false, inProcess = false }: Props) {
+export function ItemCard({ sessionId, item, bare = false, inProcess = false, modelLabel }: Props) {
   const [expanded, setExpanded] = useState(false)
   const [full, setFull] = useState<string | undefined>()
   const [loading, setLoading] = useState(false)
@@ -84,6 +94,7 @@ export function ItemCard({ sessionId, item, bare = false, inProcess = false }: P
   }
 
   const text = expanded && full !== undefined ? full : content?.preview ?? ''
+  const displayText = item.kind === 'assistant' ? stripLeadingTimestamp(text) : text
 
   if (item.kind === 'user') {
     return (
@@ -109,7 +120,7 @@ export function ItemCard({ sessionId, item, bare = false, inProcess = false }: P
       return (
         <div className="turn-output">
           <div className="msg-content">
-            <Markdown text={text} />
+            <Markdown text={displayText} />
             <ExpandButton
               canExpand={canExpand}
               expanded={expanded}
@@ -127,11 +138,11 @@ export function ItemCard({ sessionId, item, bare = false, inProcess = false }: P
         <img className="msg-avatar" src="/icon.png" alt="" />
         <div className="msg-main">
           <div className="msg-head">
-            <span>In_Fate</span>
+            <span>{modelLabel ?? '模型'}</span>
             <span className="msg-time">{formatClock(item.ts)}</span>
           </div>
           <div className="msg-content">
-            <Markdown text={text} />
+            <Markdown text={displayText} />
             <ExpandButton
               canExpand={canExpand}
               expanded={expanded}

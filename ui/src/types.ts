@@ -59,6 +59,13 @@ export interface MainAgentIdentity {
   slots: MainAgentSlotContent[]
 }
 
+export interface MainAgentIdentityBackup {
+  file: string
+  slot: string
+  bytes: number
+  updatedAt: string
+}
+
 export interface MemoryQuote {
   say: string
   at?: string | null

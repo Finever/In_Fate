@@ -5,6 +5,7 @@ import type {
   EmbeddingInstallJob,
   EmbeddingModelStatus,
   MainAgentIdentity,
+  MainAgentIdentityBackup,
   MainAgentInfo,
   ModelBalance,
   ModelConfig,
@@ -550,6 +551,24 @@ export const api = {
     const body = await request<{ result: { path: string; backup: string } }>(
       `/api/main-agents/${encodeURIComponent(agentId)}/identity/${encodeURIComponent(slotId)}`,
       { method: 'PUT', body: JSON.stringify({ content }) },
+    )
+    return body.result
+  },
+
+  async mainAgentIdentityBackups(agentId: string): Promise<MainAgentIdentityBackup[]> {
+    const body = await request<{ backups: MainAgentIdentityBackup[] }>(
+      `/api/main-agents/${encodeURIComponent(agentId)}/identity/backups`,
+    )
+    return body.backups
+  },
+
+  async restoreMainAgentIdentity(
+    agentId: string,
+    file: string,
+  ): Promise<{ slot: string; path: string; backup: string }> {
+    const body = await request<{ result: { slot: string; path: string; backup: string } }>(
+      `/api/main-agents/${encodeURIComponent(agentId)}/identity/backups/restore`,
+      { method: 'POST', body: JSON.stringify({ file }) },
     )
     return body.result
   },

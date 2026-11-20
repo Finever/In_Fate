@@ -46,7 +46,7 @@ import { agentStream, sessionStream } from '../core/streams.ts'
 import { withFileLock } from '../core/lock.ts'
 import { loadIdentitySources } from '../memory/sources.ts'
 import { AgentManifestStore, type AgentManifest, type IdentitySlot } from '../memory/agent-manifest.ts'
-import { AgentIdentityStore } from '../memory/identity-slots.ts'
+import { AgentIdentityStore, type IdentityBackup } from '../memory/identity-slots.ts'
 import { ManifestIdentityStore } from '../memory/identity-adapter.ts'
 import { MemoryAccess, type MemoryRole } from '../memory/access.ts'
 import { MemoryCommitter } from '../memory/committer.ts'
@@ -387,6 +387,13 @@ export interface App {
     slotId: string,
     content: string,
   ): Promise<{ path: string; backup: string }>
+  /** 人格文件 `_archive` 里的备份。 */
+  mainAgentIdentityBackups(agentId: string): readonly IdentityBackup[]
+  /** 恢复一份人格备份；恢复前会先备份当前版本。 */
+  restoreMainAgentIdentity(
+    agentId: string,
+    file: string,
+  ): Promise<{ slot: string; path: string; backup: string }>
 
   /** 工具列表；带 agentId 时附带该 agent 的白名单/审批覆盖。 */
   toolViews(agentId?: string): ToolView[]
@@ -1779,6 +1786,34 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     return counts
   }
 
+  /** 人格文件变更后，给该 agent 名下的会话留一条一次性 system delta。 */
+  const notifyPersonaChanged = (agentId: string, label: string): void => {
+    let targetSessions: SessionInfo[] = []
+    try {
+      targetSessions = sessionsOfAgent(agentId)
+    } catch {
+      // 会话目录扫描失败不能让人格文件保存看起来失败。
+    }
+    for (const session of targetSessions) {
+      if (session.lifecycle === 'deleted') continue
+      try {
+        const writer = writerFor(session.id)
+        writer.append({
+          stream: sessionStream(session.id),
+          actor: 'system',
+          type: 'message.system',
+          payload: {
+            text: `人格文件已更新：${label}。请以最新人格文件为准；如果本会话早前的自我介绍与它冲突，以最新人格为准。`,
+            mark: 'injection',
+          },
+        })
+        writer.flush()
+      } catch {
+        // 单个会话写失败不影响人格文件保存；下一轮稳定身份段仍会重新读取。
+      }
+    }
+  }
+
   const agentSummaryOf = (
     agentId: string,
     counts?: ReadonlyMap<string, number>,
@@ -3134,7 +3169,32 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       }
       const manifest = manifestStore.readOrThrow(agentId)
       const store = new AgentIdentityStore(memoryRoot, agentId, { manifest })
-      return store.writeSlot(slotId, content)
+      const previous = store.readOrEmpty(slotId)
+      const result = await store.writeSlot(slotId, content)
+      if (previous !== content) {
+        notifyPersonaChanged(agentId, store.slot(slotId).label)
+      }
+      return result
+    },
+
+    mainAgentIdentityBackups(agentId) {
+      if (!manifestStore || !memoryRoot) {
+        throw new Error('memory is not configured')
+      }
+      const manifest = manifestStore.readOrThrow(agentId)
+      const store = new AgentIdentityStore(memoryRoot, agentId, { manifest })
+      return store.listBackups()
+    },
+
+    async restoreMainAgentIdentity(agentId, file) {
+      if (!manifestStore || !memoryRoot) {
+        throw new Error('memory is not configured')
+      }
+      const manifest = manifestStore.readOrThrow(agentId)
+      const store = new AgentIdentityStore(memoryRoot, agentId, { manifest })
+      const result = await store.restoreBackup(file)
+      notifyPersonaChanged(agentId, store.slot(result.slot).label)
+      return result
     },
 
     async waitForAgents(timeoutMs = 30_000) {

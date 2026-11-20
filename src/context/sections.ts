@@ -51,8 +51,9 @@ export function sessionMemorySection(
     render: (context) => {
       const chunks = readSources(resolveSources(context.sessionId))
       if (chunks.length === 0) return
+      const notice = '当前人格文件如下；若与本会话历史里的自我介绍冲突，以这里为准。'
       return {
-        text: chunks.map(chunk => `<!-- ${chunk.id} -->\n${chunk.text}`).join('\n\n'),
+        text: `${notice}\n\n${chunks.map(chunk => `<!-- ${chunk.id} -->\n${chunk.text}`).join('\n\n')}`,
         meta: { sources: chunks.map(chunk => ({ id: chunk.id, bytes: chunk.bytes, digest: chunk.digest })) },
       }
     },
@@ -71,7 +72,7 @@ export function timeSection(priority = 100): ContextSection {
         dateStyle: 'full',
         timeStyle: 'medium',
       }).format(context.now)
-      return { text }
+      return { text: `当前时间：${text}` }
     },
   }
 }

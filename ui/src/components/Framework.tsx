@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import type { SessionInfo } from '../types'
 import { groupSessions, sessionDisplayTitle, sessionTime } from '../lib/sessions'
@@ -55,23 +55,71 @@ function AgentRow({
 function SessionRow({
   session,
   selected,
+  busy,
   onSelect,
+  onArchive,
+  onUnarchive,
+  onDelete,
 }: {
   session: SessionInfo
   selected: boolean
+  busy: boolean
   onSelect: (id: string) => void
+  onArchive: (id: string) => void
+  onUnarchive: (id: string) => void
+  onDelete: (id: string) => void
 }) {
   return (
-    <button
-      type="button"
-      className={`fw-session${selected ? ' is-selected' : ''}`}
-      aria-current={selected ? 'page' : undefined}
-      onClick={() => onSelect(session.id)}
-      title={session.id}
-    >
-      <span className="fw-session-title">{sessionDisplayTitle(session)}</span>
-      <span className="fw-session-time">{sessionTime(session.updatedAt)}</span>
-    </button>
+    <div className={`fw-session-row${selected ? ' is-selected' : ''}`}>
+      <button
+        type="button"
+        className="fw-session"
+        aria-current={selected ? 'page' : undefined}
+        onClick={() => onSelect(session.id)}
+        title={session.id}
+      >
+        <span className="fw-session-title">{sessionDisplayTitle(session)}</span>
+        <span className="fw-session-time">{sessionTime(session.updatedAt)}</span>
+      </button>
+      <span className="fw-session-actions">
+        {session.lifecycle === 'active' && (
+          <button
+            type="button"
+            className="fw-row-action"
+            title="归档"
+            aria-label="归档"
+            disabled={busy}
+            onClick={() => onArchive(session.id)}
+          >
+            <Icon name="archive" size={12} />
+          </button>
+        )}
+        {session.lifecycle === 'archived' && (
+          <button
+            type="button"
+            className="fw-row-action"
+            title="恢复"
+            aria-label="恢复"
+            disabled={busy}
+            onClick={() => onUnarchive(session.id)}
+          >
+            <Icon name="refresh" size={12} />
+          </button>
+        )}
+        {session.lifecycle !== 'deleted' && (
+          <button
+            type="button"
+            className="fw-row-action is-danger"
+            title="删除"
+            aria-label="删除"
+            disabled={busy}
+            onClick={() => onDelete(session.id)}
+          >
+            <Icon name="trash" size={12} />
+          </button>
+        )}
+      </span>
+    </div>
   )
 }
 
@@ -81,9 +129,16 @@ export function FrameSidebar({
   agents,
   selectedAgentId,
   selectedId,
+  busy,
+  showDeleted,
   onSelect,
   onSelectAgent,
+  onCreate,
   onAddAgent,
+  onArchive,
+  onUnarchive,
+  onDelete,
+  onToggleDeleted,
   onResizeStart,
 }: {
   sessions: SessionInfo[]
@@ -91,12 +146,20 @@ export function FrameSidebar({
   agents: MainAgentListItem[]
   selectedAgentId: string
   selectedId: string | undefined
+  busy: boolean
+  showDeleted: boolean
   onSelect: (id: string) => void
   onSelectAgent: (id: string) => void
+  onCreate: () => void
   onAddAgent: () => void
+  onArchive: (id: string) => void
+  onUnarchive: (id: string) => void
+  onDelete: (id: string) => void
+  onToggleDeleted: () => void
   onResizeStart: (event: ReactPointerEvent<HTMLDivElement>) => void
 }) {
-  const groups = useMemo(() => groupSessions(sessions, ''), [sessions])
+  const [query, setQuery] = useState('')
+  const groups = useMemo(() => groupSessions(sessions, query), [query, sessions])
 
   return (
     <aside className="fw-left" aria-label="agent 与会话列表">
@@ -134,9 +197,46 @@ export function FrameSidebar({
         </nav>
 
         <div className="fw-session-pane">
+          <div className="fw-session-head">
+            <span>会话</span>
+            <div className="fw-session-head-actions">
+              <button
+                type="button"
+                className={`fw-session-filter${showDeleted ? ' is-active' : ''}`}
+                onClick={onToggleDeleted}
+                title={showDeleted ? '隐藏已删除会话' : '显示已删除会话'}
+              >
+                已删除
+              </button>
+              <button
+                type="button"
+                className="fw-session-add"
+                onClick={onCreate}
+                disabled={busy}
+                title="新建会话"
+              >
+                <Icon name="plus" size={12} />
+                新建
+              </button>
+            </div>
+          </div>
+          <div className="fw-session-search">
+            <Icon name="search" size={12} />
+            <input
+              value={query}
+              onChange={event => setQuery(event.target.value)}
+              placeholder="搜索会话"
+              aria-label="搜索会话"
+            />
+            {query && (
+              <button type="button" onClick={() => setQuery('')} aria-label="清空搜索">
+                ×
+              </button>
+            )}
+          </div>
           <div className="fw-list">
             {groups.length === 0 && (
-              <div className="fw-empty-list">还没有会话</div>
+              <div className="fw-empty-list">{query ? '没有匹配的会话' : '还没有会话'}</div>
             )}
             {groups.map(group => (
               <section className="fw-group" key={group.key}>
@@ -146,7 +246,11 @@ export function FrameSidebar({
                     key={session.id}
                     session={session}
                     selected={session.id === selectedId}
+                    busy={busy}
                     onSelect={onSelect}
+                    onArchive={onArchive}
+                    onUnarchive={onUnarchive}
+                    onDelete={onDelete}
                   />
                 ))}
               </section>
@@ -164,21 +268,62 @@ export function FrameCenter({
   session,
   rightOpen,
   error,
+  busy,
   onToggleRight,
   onCreate,
+  onArchive,
+  onUnarchive,
+  onDelete,
   children,
 }: {
   session: SessionInfo | undefined
   rightOpen: boolean
   error: string | undefined
+  busy: boolean
   onToggleRight: () => void
   onCreate: () => void
+  onArchive: (id: string) => void
+  onUnarchive: (id: string) => void
+  onDelete: (id: string) => void
   children?: ReactNode
 }) {
   return (
     <main className="fw-center" aria-label="主工作区">
       <header className="fw-center-head">
         <h1>{session ? sessionDisplayTitle(session) : 'In_Fate'}</h1>
+        {session && session.lifecycle === 'active' && (
+          <button
+            type="button"
+            className="fw-head-action"
+            onClick={() => onArchive(session.id)}
+            disabled={busy}
+          >
+            <Icon name="archive" size={13} />
+            归档
+          </button>
+        )}
+        {session && session.lifecycle === 'archived' && (
+          <button
+            type="button"
+            className="fw-head-action"
+            onClick={() => onUnarchive(session.id)}
+            disabled={busy}
+          >
+            <Icon name="refresh" size={13} />
+            恢复
+          </button>
+        )}
+        {session && session.lifecycle !== 'deleted' && (
+          <button
+            type="button"
+            className="fw-head-action is-danger"
+            onClick={() => onDelete(session.id)}
+            disabled={busy}
+          >
+            <Icon name="trash" size={13} />
+            删除
+          </button>
+        )}
         <button
           type="button"
           className={`fw-panel-btn${rightOpen ? ' is-active' : ''}`}

@@ -74,12 +74,18 @@ export function TurnBlock({
   cache,
   refreshKey,
   running = false,
+  agentName,
+  modelLabel: fallbackModelLabel,
 }: {
   sessionId: string
   meta: UiTurnMeta
   cache: TurnCache
   refreshKey: number
   running?: boolean
+  /** 当前主 agent 的显示名。 */
+  agentName?: string
+  /** 当前 agent 的模型；本轮还没写入 turnUsage 时兜底。 */
+  modelLabel?: string
 }) {
   const [items, setItems] = useState<UiTimelineItem[] | undefined>(() => cache.get(meta.turn))
   const [error, setError] = useState<string | undefined>()
@@ -112,6 +118,10 @@ export function TurnBlock({
   const assistantItems = list.filter(item => item.kind === 'assistant')
   const systemItems = list.filter(item => item.kind === 'system')
   const turnItems = list.filter(item => item.kind === 'turn')
+  const turnModel = turnItems.find(item => item.turnUsage?.model)?.turnUsage?.model
+  const modelLabel = turnModel
+    ? `${turnModel.provider}/${turnModel.model}`
+    : fallbackModelLabel
   const turnDuration = turnItems.find(item =>
     item.turnUsage?.durationMs !== undefined)?.turnUsage?.durationMs
   const turnStartedAt = userItems[0]?.ts ?? list[0]?.ts
@@ -138,7 +148,10 @@ export function TurnBlock({
           <img className="msg-avatar" src="/icon.png" alt="" />
           <div className="turn-agent-main">
             <div className="turn-agent-head">
-              <span>In_Fate</span>
+              <span className="turn-agent-name">{agentName ?? '助手'}</span>
+              <span className="turn-agent-model" title={modelLabel}>
+                {modelLabel ?? '模型'}
+              </span>
               {agentTime && <span className="msg-time">{agentTime}</span>}
             </div>
             {(processItems.length > 0 || running) && (
@@ -151,7 +164,13 @@ export function TurnBlock({
               />
             )}
             {assistantItems.map(item => (
-              <ItemCard key={item.id} sessionId={sessionId} item={item} bare />
+              <ItemCard
+                key={item.id}
+                sessionId={sessionId}
+                item={item}
+                bare
+                {...(modelLabel ? { modelLabel } : {})}
+              />
             ))}
           </div>
         </div>
