@@ -701,6 +701,10 @@ test('单文件 exe 安装器能解压并通过参数安装到临时目录', {
     assert.equal(existsSync(join(installed, 'In_Fate', 'bin', 'if.ts')), true)
     const info = JSON.parse(readFileSync(join(installed, 'install.json'), 'utf8')) as { version: string }
     assert.equal(info.version, '9.9.9')
+
+    const portable = spawnSync(setup, ['--portable', '--no-launch', '--quiet'], { encoding: 'utf8' })
+    assert.notEqual(portable.status, 0)
+    assert.match(portable.stderr, /portable/i)
   } finally {
     cleanup(root)
   }

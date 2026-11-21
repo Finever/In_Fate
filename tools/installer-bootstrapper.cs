@@ -19,6 +19,15 @@ internal static class Program
 
         try
         {
+            if (HasArg(args, "--portable"))
+            {
+                throw new InvalidOperationException("--portable is not supported by the setup exe; use the release zip instead");
+            }
+            if ((HasArg(args, "--uninstall") || HasArg(args, "--repair")) && !HasArg(args, "--dir"))
+            {
+                throw new InvalidOperationException("--uninstall/--repair need an explicit --dir when using the setup exe; prefer the installed uninstall.cmd/repair.cmd");
+            }
+
             Console.WriteLine("In_Fate Setup");
             Console.WriteLine("Extracting package...");
             ExtractPayload(self, zip);
@@ -170,6 +179,15 @@ internal static class Program
             }
             offset += read;
         }
+    }
+
+    private static bool HasArg(string[] args, string name)
+    {
+        foreach (string arg in args)
+        {
+            if (String.Equals(arg, name, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
     }
 
     private static string Quote(string value)

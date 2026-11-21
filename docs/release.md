@@ -56,7 +56,7 @@ release/In_Fate-Setup-v0.0.1.3-win32-x64.exe.sha256
 
 `tools/installer-bootstrapper.cs` 用系统自带的 .NET Framework `csc` 编译，不依赖 NSIS / Inno Setup / 7-Zip。exe 尾部依次是发布 zip、16 字节 magic 和 8 字节 payload 长度；运行时把自己解到 `%TEMP%\In_Fate-Setup-<guid>`，再调用包内 `install.cmd`。它会把用户参数原样转交给安装器，并在前面补 `--launch`；测试时可以传 `--no-launch --no-shortcuts --no-registry --dir <临时目录>`，不会碰真实安装。安装结束后清理临时目录。
 
-单文件 exe 依赖系统自带的 .NET Framework 4.5+（Windows 10/11 自带），没有代码签名，Windows SmartScreen 可能提示未知发布者；正式分发前应签名。
+单文件 exe 面向安装版：它拒绝 `--portable`（便携模式请直接用发布 zip）；`--uninstall` / `--repair` 必须显式带 `--dir`，否则请用安装根下的 `uninstall.cmd` / `repair.cmd`，避免把临时解压目录当成安装根。它依赖系统自带的 .NET Framework 4.5+（Windows 10/11 自带），没有代码签名，Windows SmartScreen 可能提示未知发布者；正式分发前应签名。
 
 ## 包内结构
 

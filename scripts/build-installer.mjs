@@ -65,6 +65,7 @@ if (!existsSync(join(root, 'tools', 'install.mjs'))) {
 }
 const installerMtime = Math.max(
   statSync(join(root, 'tools', 'install.mjs')).mtimeMs,
+  statSync(source).mtimeMs,
   statSync(join(root, 'VERSION')).mtimeMs,
 )
 if (statSync(packagePath).mtimeMs < installerMtime) {
