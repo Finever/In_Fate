@@ -97,10 +97,17 @@ export class ModelRegistry {
     const endpoint = provider.endpoints[family]
     if (!endpoint) throw new Error(`provider ${providerId} has no endpoint: ${family}`)
 
+    // Anthropic Messages 原生支持以 assistant 消息结尾做 prefill；旧配置没写
+    // 这个能力位时在这里补上，避免升级后已存在的 Anthropic provider 被漏掉。
+    const resolvedEndpoint = endpoint.supportsAssistantPrefill === undefined
+      && (family === 'anthropic' || family === 'anthropic-messages')
+      ? { ...endpoint, supportsAssistantPrefill: true }
+      : endpoint
+
     return {
       provider,
       model,
-      endpoint,
+      endpoint: resolvedEndpoint,
       apiModelId: model.apiModelId ?? model.id,
       family,
     }

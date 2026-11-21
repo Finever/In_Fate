@@ -10,9 +10,14 @@
 
 import type { EndpointConfig, ProviderConfig } from './types.ts'
 
-const endpoint = (adapterFamily: string, baseUrl: string): EndpointConfig => ({
+const endpoint = (
+  adapterFamily: string,
+  baseUrl: string,
+  extra: Partial<EndpointConfig> = {},
+): EndpointConfig => ({
   adapterFamily,
   baseUrl,
+  ...extra,
 })
 
 export const BUILTIN_PROVIDERS: readonly ProviderConfig[] = [
@@ -35,7 +40,11 @@ export const BUILTIN_PROVIDERS: readonly ProviderConfig[] = [
     apiKeyEnv: 'ANTHROPIC_API_KEY',
     defaultChatEndpoint: 'anthropic-messages',
     endpoints: {
-      'anthropic-messages': endpoint('anthropic-messages', 'https://api.anthropic.com'),
+      'anthropic-messages': endpoint(
+        'anthropic-messages',
+        'https://api.anthropic.com',
+        { supportsAssistantPrefill: true },
+      ),
     },
     models: [],
   },

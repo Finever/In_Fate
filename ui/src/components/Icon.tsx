@@ -28,6 +28,7 @@ export type IconName =
   | 'more'
   | 'down'
   | 'filter'
+  | 'pin'
 
 const PATHS: Record<IconName, string[]> = {
   chat: [
@@ -54,7 +55,11 @@ const PATHS: Record<IconName, string[]> = {
   plus: ['M12 5v14', 'M5 12h14'],
   search: ['M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z', 'M16 16l4.5 4.5'],
   refresh: ['M20 11a8 8 0 1 0-2.3 5.7', 'M20 5v6h-6'],
-  archive: ['M4 7h16', 'M6 7l1 13h10l1-13', 'M9 7V4h6v3', 'M10 11v5', 'M14 11v5'],
+  archive: [
+    'M3 4h18v4H3V4Z',
+    'M4.5 8h15v12h-15V8Z',
+    'M9.5 12h5',
+  ],
   trash: ['M4 7h16', 'M9 7V4h6v3', 'M6 7l1 13h10l1-13', 'M10 11v5', 'M14 11v5'],
   close: ['M6 6l12 12', 'M18 6L6 18'],
   link: [
@@ -80,6 +85,7 @@ const PATHS: Record<IconName, string[]> = {
   more: ['M6 12h.01', 'M12 12h.01', 'M18 12h.01'],
   down: ['M6 9l6 6 6-6'],
   filter: ['M4 6h16', 'M7 12h10', 'M10 18h4'],
+  pin: ['M9 4h6l-1 5 3 3v2H7v-2l3-3-1-5Z', 'M12 14v6'],
 }
 
 export function Icon({

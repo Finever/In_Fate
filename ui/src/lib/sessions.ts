@@ -85,6 +85,54 @@ export function groupSessions(sessions: SessionInfo[], query: string): SessionGr
   return groups.filter(group => group.sessions.length > 0)
 }
 
+/**
+ * 有自定义分类/置顶时按分类收拢；否则保留按日期分组。
+ * 归档/已删除永远单独放最后，不混进分类。
+ */
+export function groupSessionsSmart(sessions: SessionInfo[], query: string): SessionGroup[] {
+  if (
+    query.trim()
+    || !sessions.some(session => session.lifecycle === 'active' && (session.category || session.pinned))
+  ) {
+    return groupSessions(sessions, query)
+  }
+
+  const sorted = [...sessions].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+  const pinned: SessionInfo[] = []
+  const buckets = new Map<string, SessionInfo[]>()
+  const archived: SessionInfo[] = []
+  const deleted: SessionInfo[] = []
+
+  for (const session of sorted) {
+    if (session.pinned && session.lifecycle === 'active') {
+      pinned.push(session)
+      continue
+    }
+    if (session.lifecycle === 'archived') archived.push(session)
+    else if (session.lifecycle === 'deleted') deleted.push(session)
+    else {
+      const category = session.category?.trim() || '未分类'
+      const list = buckets.get(category) ?? []
+      list.push(session)
+      buckets.set(category, list)
+    }
+  }
+
+  const categories = [...buckets.keys()]
+    .filter(category => category !== '未分类')
+    .sort((a, b) => a.localeCompare(b, 'zh'))
+  if (buckets.has('未分类')) categories.push('未分类')
+
+  const groups: SessionGroup[] = []
+  if (pinned.length > 0) groups.push({ key: 'pinned', label: '置顶', sessions: pinned })
+  for (const category of categories) {
+    groups.push({ key: `category:${category}`, label: category, sessions: buckets.get(category)! })
+  }
+  if (archived.length > 0) groups.push({ key: 'archived', label: '归档', sessions: archived })
+  if (deleted.length > 0) groups.push({ key: 'deleted', label: '已删除', sessions: deleted })
+  return groups
+}
+
 export interface LinkedSession {
   session: SessionInfo
   relation: SessionLink['relation']

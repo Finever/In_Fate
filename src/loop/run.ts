@@ -53,6 +53,8 @@ export interface RunLoopOptions {
   readonly cwd?: string
   /** 防死循环：一步 = 一次模型请求 */
   readonly maxSteps?: number
+  /** assistant prefill；只有端点声明 supportsAssistantPrefill 时适配器才会用。 */
+  readonly assistantPrefill?: string
   /** 上下文总字节预算；不传用管线默认值 */
   readonly maxBytes?: number
   /** 工具结果写时卸载；不传就全内联 */
@@ -264,6 +266,7 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
       resolved: options.model,
       system: rendered.system,
       messages: rendered.messages,
+      ...(options.assistantPrefill ? { assistantPrefill: options.assistantPrefill } : {}),
       tools: toolSpecs(),
       signal: options.signal,
       ...(options.modelRetry ? { retry: options.modelRetry } : {}),

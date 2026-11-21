@@ -373,14 +373,37 @@ body.fw-resizing {
 .fw-session-row:hover { background: rgba(255, 255, 255, .035); }
 .fw-session-row.is-selected { background: var(--accent-soft); }
 .fw-session-row.is-selected .fw-session { background: none; }
-.fw-session-title {
+.fw-session-main {
   min-width: 0;
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.fw-session-title {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12.5px;
 }
+.fw-session-agent {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--faint);
+  font: 8.5px/1 var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fw-session-state {
+  width: 5px;
+  height: 5px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--faint);
+}
+.fw-session-state.is-running { background: var(--mint); }
+.fw-session-state.is-waiting { background: var(--waiting); }
 .fw-session-time {
   flex: none;
   color: var(--faint);
@@ -462,6 +485,11 @@ body.fw-resizing {
 .fw-head-action:hover:not(:disabled) {
   color: var(--text);
   background: rgba(255, 255, 255, .05);
+}
+.fw-head-action.is-active {
+  color: var(--accent);
+  border-color: rgba(143, 123, 255, .35);
+  background: var(--accent-soft);
 }
 .fw-head-action.is-danger:hover:not(:disabled) {
   color: var(--danger);
@@ -1111,6 +1139,38 @@ body.fw-resizing {
   border-radius: 14px;
   background: var(--panel);
   box-shadow: 0 24px 70px rgba(0, 0, 0, .55);
+}
+.fw-thinking-dialog {
+  width: min(560px, 100%);
+}
+.fw-thinking-note {
+  margin: 0 0 12px;
+  color: var(--faint);
+  font-size: 9.5px;
+  line-height: 1.65;
+}
+.fw-thinking-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 10px;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+.fw-thinking-toggle input { accent-color: var(--accent); }
+.fw-thinking-warning {
+  margin-bottom: 10px;
+  padding: 7px 9px;
+  border: 1px solid rgba(242, 180, 95, .25);
+  border-radius: 7px;
+  background: rgba(242, 180, 95, .06);
+  color: var(--warn);
+  font-size: 9.5px;
+  line-height: 1.55;
+}
+.fw-thinking-dialog .fw-field textarea {
+  min-height: 132px;
+  resize: vertical;
 }
 .fw-dialog-head {
   display: flex;

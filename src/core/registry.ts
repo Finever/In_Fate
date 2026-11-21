@@ -35,6 +35,7 @@ export function registerCoreEvents(): void {
   const core: CoreEventType[] = [
     'session.created',
     'session.lifecycle',
+    'session.meta',
     'session.link',
     'session.link.closed',
     'session.message',

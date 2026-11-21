@@ -1515,6 +1515,46 @@ async function handle(
     return
   }
 
+  if (req.method === 'PATCH' && action === 'meta' && parts.length === 4) {
+    const body = await readOptionalJson(req)
+    if (body.category !== undefined
+      && body.category !== null
+      && typeof body.category !== 'string') {
+      json(res, 400, { error: 'category must be a string or null' })
+      return
+    }
+    if (body.pinned !== undefined && typeof body.pinned !== 'boolean') {
+      json(res, 400, { error: 'pinned must be a boolean' })
+      return
+    }
+    if (body.thinkingHead !== undefined
+      && body.thinkingHead !== null
+      && typeof body.thinkingHead !== 'string') {
+      json(res, 400, { error: 'thinkingHead must be a string or null' })
+      return
+    }
+    if (body.thinkingHeadEnabled !== undefined && typeof body.thinkingHeadEnabled !== 'boolean') {
+      json(res, 400, { error: 'thinkingHeadEnabled must be a boolean' })
+      return
+    }
+    try {
+      const meta = app.setSessionMeta(sessionId, {
+        ...(body.category !== undefined ? { category: body.category as string | null } : {}),
+        ...(body.pinned !== undefined ? { pinned: body.pinned } : {}),
+        ...(body.thinkingHead !== undefined
+          ? { thinkingHead: body.thinkingHead as string | null }
+          : {}),
+        ...(body.thinkingHeadEnabled !== undefined
+          ? { thinkingHeadEnabled: body.thinkingHeadEnabled }
+          : {}),
+      })
+      json(res, 200, { meta })
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
+
   if (req.method === 'GET' && action === 'events' && parts.length === 4) {
     const afterSeq = numberParam(url, 'afterSeq')
     const limit = numberParam(url, 'limit')

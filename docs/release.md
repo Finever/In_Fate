@@ -5,12 +5,12 @@
 版本号唯一来源是仓库根目录的 `VERSION` 文件。当前：
 
 ```text
-V0.0.1.2
+V0.0.1.3
 ```
 
 改版本时只改 `VERSION`，发布脚本、CLI `--version`、`/api/version` 都读它。`package.json` 的 `version` 保持同步即可。版本号支持 `x.y.z` 和 `x.y.z.w`；第四段是补丁修订号。
 
-> V0.0.1 内置的更新器只认三段版本号，读到 `0.0.1.1` 会报 `update_version`。从 V0.0.1 升到 V0.0.1.1 要用新包的 `install.cmd` 覆盖安装，或便携包替换 `In_Fate/`；V0.0.1.1 → V0.0.1.2 可直接走内置更新；从 V0.0.1.1 起后续四段版本都可正常走内置更新。
+> V0.0.1 内置的更新器只认三段版本号，读到 `0.0.1.1` 会报 `update_version`。从 V0.0.1 升到 V0.0.1.1 要用新包的 `install.cmd` 覆盖安装，或便携包替换 `In_Fate/`；V0.0.1.1 → V0.0.1.2、V0.0.1.2 → V0.0.1.3 可直接走内置更新；从 V0.0.1.1 起后续四段版本都可正常走内置更新。
 
 ## 构建
 
@@ -29,7 +29,7 @@ npm run release
 
 ```text
 release/In_First/                        独立目录
-release/In_First-v0.0.1.2-win32-x64.zip   Windows 当前平台压缩包
+release/In_First-v0.0.1.3-win32-x64.zip   Windows 当前平台压缩包
 ```
 
 如果只想出后端 + UI 的便携包，不带 Electron：
@@ -37,6 +37,26 @@ release/In_First-v0.0.1.2-win32-x64.zip   Windows 当前平台压缩包
 ```bash
 npm run release:portable
 ```
+
+### 单文件安装器 exe
+
+发布 zip 生成后，可以再包一个单文件 Windows 安装器：
+
+```bash
+npm run installer
+# 或一次完成：npm run release:setup
+```
+
+产物：
+
+```text
+release/In_Fate-Setup-v0.0.1.3-win32-x64.exe
+release/In_Fate-Setup-v0.0.1.3-win32-x64.exe.sha256
+```
+
+`tools/installer-bootstrapper.cs` 用系统自带的 .NET Framework `csc` 编译，不依赖 NSIS / Inno Setup / 7-Zip。exe 尾部依次是发布 zip、16 字节 magic 和 8 字节 payload 长度；运行时把自己解到 `%TEMP%\In_Fate-Setup-<guid>`，再调用包内 `install.cmd`。它会把用户参数原样转交给安装器，并在前面补 `--launch`；测试时可以传 `--no-launch --no-shortcuts --no-registry --dir <临时目录>`，不会碰真实安装。安装结束后清理临时目录。
+
+单文件 exe 依赖系统自带的 .NET Framework 4.5+（Windows 10/11 自带），没有代码签名，Windows SmartScreen 可能提示未知发布者；正式分发前应签名。
 
 ## 包内结构
 
@@ -50,8 +70,10 @@ In_First/
   config/           可变配置
   logs/             运行日志
   backups/          完整数据备份（预留）
-  tools/            安装器与启动前更新切换
+  tools/            安装器、Windows 快捷方式/卸载登记集成、启动前更新切换
   install.cmd/.sh   安装到本机（Windows 双击）
+  repair.cmd        安装后生成：重建启动脚本/快捷方式/卸载登记
+  uninstall.cmd     安装后生成：卸载，默认保留 data
   smoke.mjs         独立冒烟测试
   start-if.cmd/.sh  浏览器/CLI 启动
   start-desktop     桌面启动（包含 desktop 时）
@@ -74,7 +96,20 @@ Windows 双击 `install.cmd`，Linux/macOS 运行 `./install.sh`。
 
 都是用户目录下的可见文件夹，不写 AppData，也不请求管理员权限。`--dir` 和 `--data-dir` 可以改成任意位置。
 
-安装器复制 `In_Fate`、`runtime`、`tools` 和配置模板，写 `install.json` 与 `if-home.txt`，创建桌面/开始菜单快捷方式和卸载注册表项。双击 `install.cmd` 安装完成后会直接启动 In_Fate；以后从桌面/开始菜单的「In_Fate」快捷方式打开，或运行安装根下的 `start-desktop.cmd`。`--no-launch` 可关闭自动启动。`--no-shortcuts`、`--no-registry`、`--portable`、`--data-dir`、`--uninstall`、`--purge`、`--force` 可用。`--portable` 表示就地注册当前发布包，不复制到默认安装根；目标目录非空且不像 In_First 安装根时安装器会拒绝，`--force` 可跳过。升级安装保留数据与配置，旧程序层留在 `previous/`。
+安装器分两步：Node 负责程序层与数据布局，`tools/windows-install.ps1` 负责 Windows 原生的快捷方式和卸载登记。
+
+1. 先检查发布包、目标路径和数据目录，并做 Windows 集成预检：在桌面/开始菜单各建一个临时 `.lnk`，在卸载登记父键下建一个临时值，确认能写后立即删除。
+2. 把程序复制到 `.install-staging-*`，再整体切换到 `In_Fate`；旧程序层移到 `previous/`。复制失败会回滚。
+3. 写启动、卸载、修复脚本和 `if-home.txt`。
+4. 创建正式快捷方式：先写临时 `.lnk`，回读校验 `TargetPath` 与参数，再替换正式文件。快捷方式显式指向 `wscript.exe`，不依赖 `.vbs` 文件关联。
+5. 写 `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\In_Fate`，包括 `DisplayName`、`DisplayVersion`、`Publisher`、`InstallLocation`、`DisplayIcon`、`UninstallString`、`QuietUninstallString`、`ModifyPath`、`InstallDate`、`EstimatedSize` 和 `NoRepair`；每个值写完后回读校验。
+6. 以上都通过后才写 `install.json`、打印「完成」并启动。
+
+任何一步失败都不会打印完成：首次安装失败会清掉本次登记并回滚程序层；升级失败会把 `previous/` 换回来并恢复旧版本的快捷方式和卸载登记。全过程写入 `logs/install.log`。
+
+双击 `install.cmd` 安装完成后会直接启动 In_Fate；以后从桌面/开始菜单的「In_Fate」快捷方式打开，或运行安装根下的 `start-desktop.cmd`。`--no-launch` 可关闭自动启动。`--no-shortcuts`、`--no-registry`、`--portable`、`--data-dir`、`--uninstall`、`--purge`、`--force`、`--repair`、`--dry-run` 可用。`--portable` 表示就地注册当前发布包，不复制到默认安装根；目标目录非空且不像 In_First 安装根时安装器会拒绝，`--force` 可跳过。升级安装保留数据与配置，旧程序层留在 `previous/`。
+
+安装根会生成 `repair.cmd`：快捷方式、卸载登记或启动脚本丢失时，双击它即可重建，不复制程序、不动数据。`uninstall.cmd` 默认保留 `data/`；`uninstall.cmd --purge` 才连数据一起删。卸载登记里的 `UninstallString` 带 `--from-registry`，从「设置 → 应用」卸载时不会停在 `pause`。
 
 ## 内置更新
 
@@ -170,5 +205,5 @@ npm install --omit=dev
 - Electron 桌面版仍使用当前 `desktop` 壳；多窗口还没做。
 - 更新清单没有签名校验；只适合自己的更新源，正式分发前应加 Ed25519 签名。
 - 更新包是整个发布 zip（约 185M），下载/解压会占用磁盘；暂无增量更新。
-- 安装器是 Node 脚本 + cmd/sh 启动器，不是 NSIS 单文件 exe；Windows 快捷方式和卸载注册表已做。
+- 安装器主体是 Node 脚本 + `cmd`/`sh` 启动器 + `tools/windows-install.ps1`；单文件 exe 是自解压 bootstrapper，不是 NSIS/Inno Setup 向导式安装器，且未签名。Windows 快捷方式、HKCU 卸载登记、修复和卸载验证已做。
 - 发布包不含测试和 `DSH源码/`。

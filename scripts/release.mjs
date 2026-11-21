@@ -177,6 +177,11 @@ write('release.json', `${JSON.stringify({
   ui: 'In_Fate/ui/dist',
   config: 'config/if.release.json',
   data: 'data',
+  installer: {
+    entry: 'tools/install.mjs',
+    windowsIntegration: 'tools/windows-install.ps1',
+    schema: 2,
+  },
 }, null, 2)}\n`)
 
 write('start-if.cmd', `@echo off
@@ -256,6 +261,7 @@ fi
 
 write('install.cmd', `@echo off
 setlocal
+chcp 65001 >nul
 cd /d "%~dp0"
 if exist "%~dp0runtime\\node.exe" (
   set "NODE=%~dp0runtime\\node.exe"
@@ -290,8 +296,11 @@ write('README.md', `# In_Fate V${version} 发布包
 
 - Windows：双击 \`install.cmd\`
 - Linux/macOS：\`./install.sh\`
+- 如果拿到的是 \`In_Fate-Setup-v*.exe\`，双击它即可；它会自解压到临时目录，再调用本包的 \`install.cmd\`。
 
-默认安装到 \`%USERPROFILE%\\In_First\`：程序在 \`%USERPROFILE%\\In_First\\In_Fate\`，数据在 \`%USERPROFILE%\\In_First\\data\`；不请求管理员权限，也不进 AppData。安装后可拖桌面快捷方式启动。
+默认安装到 \`%USERPROFILE%\\In_First\`：程序在 \`%USERPROFILE%\\In_First\\In_Fate\`，数据在 \`%USERPROFILE%\\In_First\\data\`；不请求管理员权限，也不进 AppData。
+
+安装器会创建桌面与开始菜单快捷方式，并在 \`HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\In_Fate\` 写入卸载登记。每一步写入后都会回读验证；失败会报错、撤销本次登记并回滚程序层，不会假装安装成功。诊断记录在 \`logs/install.log\`。
 
 可选参数：
 
@@ -299,11 +308,15 @@ write('README.md', `# In_Fate V${version} 发布包
 --dir <目录>        安装目录
 --data-dir <目录>   数据目录
 --portable          就地注册当前发布包（根就是解压目录）
---force             目标目录非空且不像 In_First 安装根时仍然写入
+--repair            修复安装：重建启动脚本、快捷方式、卸载登记，不复制程序
+--dry-run           只检查，不写文件
+--force             目标目录非空且不像 In_First 安装根时仍然写入；卸载时强行继续
 --no-shortcuts      不创建快捷方式
 --no-registry       不写卸载注册表
---uninstall         卸载（加 --purge 连数据一起删）
+--uninstall         卸载（默认保留 data；加 --purge 连数据一起删）
 \`\`\`
+
+安装根的 \`repair.cmd\` 可以在快捷方式或卸载登记丢失时重建它们；\`uninstall.cmd\` 默认保留数据，\`uninstall.cmd --purge\` 才会删数据。
 
 ## 免安装运行
 

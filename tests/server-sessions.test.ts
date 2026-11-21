@@ -25,6 +25,7 @@ function configFor(dataRoot: string): AppConfig {
         'openai-chat-completions': {
           adapterFamily: 'openai',
           baseUrl: 'http://127.0.0.1:1',
+          supportsAssistantPrefill: true,
         },
       },
       models: [{ id: 'm' }],
@@ -39,6 +40,7 @@ function configFor(dataRoot: string): AppConfig {
 test('POST /api/sessions 直接落 session.created', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'if-server-sessions-'))
   const app = buildBundle(configFor(dir), new Container())
+  await app.updateAgentSettings('main', { model: { provider: 'fake', model: 'm' } })
   const handle = await startServer(app, { port: 0, token: 'test-token' })
   try {
     const created = await fetch(`${handle.url}/api/sessions`, {
@@ -77,6 +79,38 @@ test('POST /api/sessions 直接落 session.created', async () => {
     assert.equal(custom.status, 200)
     const customBody = await custom.json() as { sessionId: string }
     assert.equal(customBody.sessionId, 'work-log-2026')
+
+    const meta = await fetch(`${handle.url}/api/sessions/work-log-2026/meta`, {
+      method: 'PATCH',
+      headers: {
+        authorization: 'Bearer test-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        category: '工作',
+        pinned: true,
+        thinkingHead: '先复述目标',
+        thinkingHeadEnabled: true,
+      }),
+    })
+    assert.equal(meta.status, 200)
+    const listedAfterMeta = await fetch(`${handle.url}/api/sessions?includeArchived=1&includeDeleted=1`, {
+      headers: { authorization: 'Bearer test-token' },
+    })
+    const metaSessions = (await listedAfterMeta.json() as {
+      sessions: Array<{
+      id: string
+      category?: string
+      pinned?: boolean
+      thinkingHead?: string
+      thinkingHeadEnabled?: boolean
+    }>
+    }).sessions
+    const metaSession = metaSessions.find(item => item.id === 'work-log-2026')
+    assert.equal(metaSession?.category, '工作')
+    assert.equal(metaSession?.pinned, true)
+    assert.equal(metaSession?.thinkingHead, '先复述目标')
+    assert.equal(metaSession?.thinkingHeadEnabled, true)
 
     const duplicate = await fetch(`${handle.url}/api/sessions`, {
       method: 'POST',

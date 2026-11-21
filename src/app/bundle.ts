@@ -107,7 +107,7 @@ import { apiUrl } from '../model/urls.ts'
 import { validatePricing } from '../model/pricing.ts'
 import { ModelRegistry as Registry } from '../model/registry.ts'
 import { BalanceInputError, ModelBalanceService, type ModelBalance } from '../model/balance.ts'
-import { normalizeEndpointFamily } from '../model/chat-model.ts'
+import { normalizeEndpointFamily, supportsAssistantPrefill } from '../model/chat-model.ts'
 import { ModelGate, type ModelPriority } from '../model/gate.ts'
 import { resolveRetryPolicy } from '../model/retry.ts'
 import {
@@ -125,6 +125,7 @@ import {
 } from './inspect.ts'
 import { SessionHost } from '../session/host.ts'
 import { pendingWakeMessages } from '../session/inbox.ts'
+import { SessionMetaStore, type SessionMeta, type SessionMetaPatch } from '../session/meta.ts'
 import {
   SessionBusyError,
   SessionLifecycle,
@@ -287,6 +288,8 @@ export interface App {
   unarchiveSession(sessionId: string, input?: SessionLifecycleInput): SessionLifecycleRecord
   /** 软删除；关闭连接、取消涉及它的等待，不删盘。 */
   deleteSession(sessionId: string, input?: SessionLifecycleInput): SessionLifecycleRecord
+  /** 设置会话分类/置顶；写在 workspace 流，不进模型上下文。 */
+  setSessionMeta(sessionId: string, input: SessionMetaPatch): SessionMeta
   /** 只读事件尾部；调试用，不进模型上下文。 */
   sessionEvents(sessionId: string, options?: SessionTailOptions): SessionTail
   /** 会话当前状态、pending 工具与连接。 */
@@ -630,6 +633,8 @@ export interface AgentSummary {
   readonly hasManifest: boolean
   readonly model?: ModelRef
   readonly modelConfigured: boolean
+  /** 当前主模型的端点是否支持 assistant prefill。 */
+  readonly prefillSupported: boolean
   readonly subagentModels: readonly ModelRef[]
   readonly subagentPresets?: readonly string[]
   readonly availablePresets: readonly AgentPresetSummary[]
@@ -882,9 +887,11 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   container.register('sessionGraph', sessionGraph)
   container.onDispose('sessionGraph', () => graphWriter.close())
 
-  // 生命周期和 link 共用 workspace 流；不写会话自己的日志。
+  // 生命周期、分类/置顶和 link 共用 workspace 流；不写会话自己的日志。
   const sessionLifecycle = new SessionLifecycle(graphStore, graphWriter)
   container.register('sessionLifecycle', sessionLifecycle)
+  const sessionMeta = new SessionMetaStore(graphStore, graphWriter)
+  container.register('sessionMeta', sessionMeta)
 
   // 同一会话同一时刻只允许一个 turn；不同会话并行。
   const sessionHost = new SessionHost()
@@ -1822,10 +1829,12 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     const settings = settingsOfQuietly(agentId)
     const model = settings?.models?.main
     let modelConfigured = false
+    let prefillSupported = false
     if (model) {
       try {
-        resolveModelWithOverrides(model.provider, model.model)
+        const resolved = resolveModelWithOverrides(model.provider, model.model)
         modelConfigured = true
+        prefillSupported = supportsAssistantPrefill(resolved)
       } catch {
         modelConfigured = false
       }
@@ -1842,6 +1851,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       hasManifest: Boolean(manifest),
       ...(model ? { model } : {}),
       modelConfigured,
+      prefillSupported,
       subagentModels: settings?.models?.subagents ?? [],
       ...(settings?.subagentPresets !== undefined
         ? { subagentPresets: settings.subagentPresets }
@@ -2249,6 +2259,12 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     const agentId = agentIdOfSession(input.sessionId)
     const model = resolveAgentModel(agentId)
     const settings = agentSettingsOf(agentId)
+    const meta = sessionMeta.metaOf(input.sessionId)
+    const assistantPrefill = meta?.thinkingHeadEnabled
+      && meta.thinkingHead
+      && supportsAssistantPrefill(model)
+      ? meta.thinkingHead
+      : undefined
     const result = await runTurn(input.text, {
       store,
       writer,
@@ -2264,6 +2280,7 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       modelRetry,
       ...(modelGate ? { modelGate } : {}),
       priority: input.priority ?? 'interactive',
+      ...(assistantPrefill ? { assistantPrefill } : {}),
       ...(skipStartEvent ? { skipStartEvent: true } : {}),
       ...(settings?.tools?.allow !== undefined
         ? { toolAllow: settings.tools.allow }
@@ -2771,7 +2788,27 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         includeDeleted: options.includeDeleted ?? false,
         withState: true,
         withTitle: true,
+        meta: id => sessionMeta.metaOf(id),
       })
+    },
+
+    setSessionMeta(sessionId, input) {
+      requireSession(sessionId)
+      if (input.thinkingHeadEnabled === true) {
+        const text = input.thinkingHead?.trim() || sessionMeta.metaOf(sessionId)?.thinkingHead
+        if (!text) throw new Error('thinking head text is required')
+        const agentId = agentIdOfSession(sessionId)
+        let supported = false
+        try {
+          supported = supportsAssistantPrefill(resolveAgentModel(agentId))
+        } catch {
+          supported = false
+        }
+        if (!supported) {
+          throw new Error('current model endpoint does not support assistant prefill')
+        }
+      }
+      return sessionMeta.set(sessionId, input)
     },
 
     recoverInboxes() {

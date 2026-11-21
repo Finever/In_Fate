@@ -37,6 +37,7 @@ import type {
   SessionInspection,
   SessionLifecycleRecord,
   SessionLink,
+  SessionMeta,
   ToolView,
   TurnResponse,
   UiApproval,
@@ -400,6 +401,7 @@ export const api = {
       name: body.agent.name,
       hasManifest: true,
       modelConfigured: false,
+      prefillSupported: false,
       subagentModels: [],
       availablePresets: [],
       tools: {},
@@ -812,5 +814,21 @@ export const api = {
       { method: 'POST', body: JSON.stringify(input) },
     )
     return body.session
+  },
+
+  async setSessionMeta(
+    sessionId: string,
+    input: {
+      category?: string | null
+      pinned?: boolean
+      thinkingHead?: string | null
+      thinkingHeadEnabled?: boolean
+    },
+  ): Promise<SessionMeta> {
+    const body = await request<{ meta: SessionMeta }>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/meta`,
+      { method: 'PATCH', body: JSON.stringify(input) },
+    )
+    return body.meta
   },
 }

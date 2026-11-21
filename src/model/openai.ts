@@ -73,14 +73,20 @@ function toOpenAITools(tools: readonly ToolSpec[]): Record<string, unknown>[] {
 
 function requestBody(request: ChatRequest): Record<string, unknown> {
   const { resolved } = request
+  const prefill = resolved.endpoint.supportsAssistantPrefill
+    ? request.assistantPrefill
+    : undefined
+  const messages: Record<string, unknown>[] = [
+    { role: request.systemAsUser ? 'user' : 'system', content: request.system },
+    ...toOpenAIMessages(request.messages, request.systemAsUser ?? false),
+  ]
+  if (prefill) messages.push({ role: 'assistant', content: prefill })
   return {
     model: resolved.apiModelId,
     stream: true,
     stream_options: { include_usage: true },
-    messages: [
-      { role: request.systemAsUser ? 'user' : 'system', content: request.system },
-      ...toOpenAIMessages(request.messages, request.systemAsUser ?? false),
-    ],
+    messages,
+    ...(prefill ? { continue_final_message: true } : {}),
     ...(request.tools?.length ? { tools: toOpenAITools(request.tools) } : {}),
     ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
     ...(request.maxTokens !== undefined ? { max_tokens: request.maxTokens } : {}),

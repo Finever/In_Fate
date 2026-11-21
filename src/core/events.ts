@@ -14,6 +14,7 @@ export const ENVELOPE_VERSION = 1
 export type CoreEventType =
   | 'session.created'
   | 'session.lifecycle'
+  | 'session.meta'
   | 'session.link'
   | 'session.link.closed'
   | 'session.message'

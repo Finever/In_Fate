@@ -18,6 +18,8 @@ export interface ChatRequest {
   readonly tools?: readonly ToolSpec[]
   readonly temperature?: number
   readonly maxTokens?: number
+  /** 最后一条 assistant 的续写前缀；只有 supportsAssistantPrefill 的端点会用。 */
+  readonly assistantPrefill?: string
   readonly signal?: AbortSignal
   /** system 角色的消息是否转成 user（部分来源不认 system）。默认 false。 */
   readonly systemAsUser?: boolean

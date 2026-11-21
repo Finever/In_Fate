@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import test from 'node:test'
-import { chatModel } from '../src/model/chat-model.ts'
+import { chatModel, supportsAssistantPrefill } from '../src/model/chat-model.ts'
 import type { ChatRequest } from '../src/model/chat.ts'
 import { ModelRegistry, type ResolvedModel } from '../src/model/registry.ts'
 import type { ModelEvent, ProviderConfig } from '../src/model/types.ts'
@@ -119,6 +119,54 @@ test('resolveApiKeys：跳过停用、去重、兼容旧单密钥', () => {
     apiKey: 'legacy',
   })
   assert.deepEqual(registry.resolveApiKeys(registry.get('p')), ['same', 'other', 'legacy'])
+})
+
+test('Anthropic 端点自动获得 prefill 能力，显式关闭仍尊重', () => {
+  const registry = new ModelRegistry()
+  registry.register({
+    id: 'p',
+    name: 'P',
+    defaultChatEndpoint: 'anthropic-messages',
+    endpoints: {
+      'anthropic-messages': {
+        adapterFamily: 'anthropic-messages',
+        baseUrl: 'http://127.0.0.1:1',
+      },
+    },
+    models: [{ id: 'm' }],
+  })
+  assert.equal(supportsAssistantPrefill(registry.resolve('p', 'm')), true)
+
+  const disabled = new ModelRegistry()
+  disabled.register({
+    id: 'p',
+    name: 'P',
+    defaultChatEndpoint: 'anthropic-messages',
+    endpoints: {
+      'anthropic-messages': {
+        adapterFamily: 'anthropic-messages',
+        baseUrl: 'http://127.0.0.1:1',
+        supportsAssistantPrefill: false,
+      },
+    },
+    models: [{ id: 'm' }],
+  })
+  assert.equal(supportsAssistantPrefill(disabled.resolve('p', 'm')), false)
+
+  const openai = new ModelRegistry()
+  openai.register({
+    id: 'p',
+    name: 'P',
+    defaultChatEndpoint: 'openai-chat-completions',
+    endpoints: {
+      'openai-chat-completions': {
+        adapterFamily: 'openai-chat-completions',
+        baseUrl: 'http://127.0.0.1:1',
+      },
+    },
+    models: [{ id: 'm' }],
+  })
+  assert.equal(supportsAssistantPrefill(openai.resolve('p', 'm')), false)
 })
 
 test('SSE 读取器兼容 CRLF 与多行 data', async () => {
@@ -263,6 +311,57 @@ test('Anthropic Messages：tool_use 与缓存用量', async () => {
     ])
   } finally {
     await server.close()
+  }
+})
+
+test('assistant prefill 只对声明支持且实现了 prefill 的端点附加', async () => {
+  const anthropic = await mockServer(() => ({
+    body: 'data: {"type":"message_stop"}\n\n',
+  }))
+  const openai = await mockServer(() => ({
+    body: 'data: [DONE]\n\n',
+  }))
+  try {
+    const base = resolvedModel('anthropic-messages', anthropic.baseUrl)
+    const resolved = {
+      ...base,
+      endpoint: { ...base.endpoint, supportsAssistantPrefill: true },
+    }
+    await collect(chatModel({
+      ...request(resolved, [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }]),
+      assistantPrefill: '思考头：',
+    }))
+    const messages = anthropic.captured.body?.messages as Array<{
+      role: string
+      content: Array<{ text?: string }>
+    }>
+    assert.equal(messages.at(-1)?.role, 'assistant')
+    assert.equal(messages.at(-1)?.content[0]?.text, '思考头：')
+
+    const openaiBase = resolvedModel('openai-chat-completions', `${openai.baseUrl}/v1`)
+    const openaiResolved = {
+      ...openaiBase,
+      endpoint: { ...openaiBase.endpoint, supportsAssistantPrefill: true },
+    }
+    await collect(chatModel({
+      ...request(openaiResolved, [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }]),
+      assistantPrefill: '思考头：',
+    }))
+    const openaiMessages = openai.captured.body?.messages as Array<{ role: string; content?: string }>
+    assert.equal(openaiMessages.at(-1)?.role, 'assistant')
+    assert.equal(openaiMessages.at(-1)?.content, '思考头：')
+    assert.equal(openai.captured.body?.continue_final_message, true)
+
+    const unsupportedBase = resolvedModel('anthropic-messages', anthropic.baseUrl)
+    await collect(chatModel({
+      ...request(unsupportedBase, [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }]),
+      assistantPrefill: '不生效',
+    }))
+    const noPrefill = anthropic.captured.body?.messages as Array<{ role: string }>
+    assert.notEqual(noPrefill.at(-1)?.role, 'assistant')
+  } finally {
+    await anthropic.close()
+    await openai.close()
   }
 })
 

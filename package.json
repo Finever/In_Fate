@@ -1,6 +1,6 @@
 {
   "name": "in-fate",
-  "version": "0.0.1.2",
+  "version": "0.0.1.3",
   "private": true,
   "type": "module",
   "engines": {
@@ -15,6 +15,8 @@
     "release": "npm run check && npm test && npm run build:ui && node scripts/release.mjs",
     "release:portable": "npm run check && npm test && npm run build:ui && node scripts/release.mjs --no-desktop",
     "release:smoke": "node scripts/release-smoke.mjs",
+    "installer": "node scripts/build-installer.mjs",
+    "release:setup": "npm run release && npm run installer",
     "desktop": "npm --prefix desktop start",
     "desktop:smoke": "npm --prefix desktop run smoke",
     "desktop:shortcut": "node desktop/install-shortcut.mjs",

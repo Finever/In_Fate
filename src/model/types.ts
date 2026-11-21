@@ -20,6 +20,8 @@ export interface EndpointConfig {
   readonly baseUrl: string
   readonly headers?: Readonly<Record<string, string>>
   readonly reasoningFormat?: string
+  /** 该端点支持 assistant prefill（最后一条 assistant 消息作为续写前缀）。 */
+  readonly supportsAssistantPrefill?: boolean
 }
 
 export interface PriceRate {

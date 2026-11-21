@@ -7,6 +7,7 @@
 import { chatAnthropic } from './anthropic.ts'
 import { chatGoogle } from './google.ts'
 import type { ChatRequest } from './chat.ts'
+import type { ResolvedModel } from './registry.ts'
 import { chatOpenAI } from './openai.ts'
 import { chatOpenAIResponses } from './openai-responses.ts'
 import type { ModelEvent } from './types.ts'
@@ -53,6 +54,21 @@ export function resolveEndpointFamily(request: ChatRequest): EndpointFamily {
       ?? request.resolved.endpoint.adapterFamily
       ?? request.resolved.provider.defaultChatEndpoint,
   )
+}
+
+/** 端点声明了 prefill，且适配器真的实现了这个能力。 */
+export function supportsAssistantPrefill(resolved: ResolvedModel): boolean {
+  if (resolved.endpoint.supportsAssistantPrefill !== true) return false
+  try {
+    const family = normalizeEndpointFamily(
+      resolved.family
+        ?? resolved.endpoint.adapterFamily
+        ?? resolved.provider.defaultChatEndpoint,
+    )
+    return family === 'anthropic-messages' || family === 'openai-chat-completions'
+  } catch {
+    return false
+  }
 }
 
 /** 流式对话；按 provider 配置的端点格式分发。 */

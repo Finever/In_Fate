@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import type { SessionInfo } from '../types'
-import { groupSessions, sessionDisplayTitle, sessionTime } from '../lib/sessions'
+import { groupSessionsSmart, sessionDisplayTitle, sessionTime } from '../lib/sessions'
 import { Icon } from './Icon'
 
 function FrameResizer({
@@ -56,6 +56,8 @@ function SessionRow({
   session,
   selected,
   busy,
+  agentLabel,
+  showAgent,
   onSelect,
   onArchive,
   onUnarchive,
@@ -64,11 +66,16 @@ function SessionRow({
   session: SessionInfo
   selected: boolean
   busy: boolean
+  agentLabel: string
+  showAgent: boolean
   onSelect: (id: string) => void
   onArchive: (id: string) => void
   onUnarchive: (id: string) => void
   onDelete: (id: string) => void
 }) {
+  const state = session.state === 'running' || session.state === 'waiting'
+    ? session.state
+    : undefined
   return (
     <div className={`fw-session-row${selected ? ' is-selected' : ''}`}>
       <button
@@ -78,7 +85,11 @@ function SessionRow({
         onClick={() => onSelect(session.id)}
         title={session.id}
       >
-        <span className="fw-session-title">{sessionDisplayTitle(session)}</span>
+        {state && <span className={`fw-session-state is-${state}`} title={state === 'running' ? '运行中' : '等待'} />}
+        <span className="fw-session-main">
+          <span className="fw-session-title">{sessionDisplayTitle(session)}</span>
+          {showAgent && <span className="fw-session-agent">{agentLabel}</span>}
+        </span>
         <span className="fw-session-time">{sessionTime(session.updatedAt)}</span>
       </button>
       <span className="fw-session-actions">
@@ -159,7 +170,12 @@ export function FrameSidebar({
   onResizeStart: (event: ReactPointerEvent<HTMLDivElement>) => void
 }) {
   const [query, setQuery] = useState('')
-  const groups = useMemo(() => groupSessions(sessions, query), [query, sessions])
+  const groups = useMemo(() => groupSessionsSmart(sessions, query), [query, sessions])
+  const agentNames = useMemo(
+    () => new Map(agents.map(agent => [agent.id, agent.name])),
+    [agents],
+  )
+  const showAgent = selectedAgentId === 'all'
 
   return (
     <aside className="fw-left" aria-label="agent 与会话列表">
@@ -247,6 +263,10 @@ export function FrameSidebar({
                     session={session}
                     selected={session.id === selectedId}
                     busy={busy}
+                    agentLabel={agentNames.get(session.agentId ?? agents[0]?.id ?? 'main')
+                      ?? session.agentId
+                      ?? '默认'}
+                    showAgent={showAgent}
                     onSelect={onSelect}
                     onArchive={onArchive}
                     onUnarchive={onUnarchive}
@@ -271,6 +291,10 @@ export function FrameCenter({
   busy,
   onToggleRight,
   onCreate,
+  onCategory,
+  onThinking,
+  onTogglePin,
+  thinkingSupported,
   onArchive,
   onUnarchive,
   onDelete,
@@ -282,6 +306,10 @@ export function FrameCenter({
   busy: boolean
   onToggleRight: () => void
   onCreate: () => void
+  onCategory: () => void
+  onThinking: () => void
+  onTogglePin: (id: string, pinned: boolean) => void
+  thinkingSupported: boolean
   onArchive: (id: string) => void
   onUnarchive: (id: string) => void
   onDelete: (id: string) => void
@@ -291,6 +319,40 @@ export function FrameCenter({
     <main className="fw-center" aria-label="主工作区">
       <header className="fw-center-head">
         <h1>{session ? sessionDisplayTitle(session) : 'In_Fate'}</h1>
+        {session && session.lifecycle === 'active' && (
+          <button
+            type="button"
+            className="fw-head-action"
+            onClick={onCategory}
+            disabled={busy}
+          >
+            <Icon name="layers" size={13} />
+            {session.category ? '改分类' : '分类'}
+          </button>
+        )}
+        {session && session.lifecycle === 'active' && (
+          <button
+            type="button"
+            className={`fw-head-action${session.thinkingHeadEnabled ? ' is-active' : ''}`}
+            onClick={onThinking}
+            disabled={busy || (!thinkingSupported && !session.thinkingHeadEnabled && !session.thinkingHead)}
+            title={thinkingSupported ? '会话思考头' : '当前模型接口不支持 assistant prefill'}
+          >
+            <Icon name="chat" size={13} />
+            思考头
+          </button>
+        )}
+        {session && session.lifecycle === 'active' && (
+          <button
+            type="button"
+            className={`fw-head-action${session.pinned ? ' is-active' : ''}`}
+            onClick={() => onTogglePin(session.id, !session.pinned)}
+            disabled={busy}
+          >
+            <Icon name="pin" size={13} />
+            {session.pinned ? '取消置顶' : '置顶'}
+          </button>
+        )}
         {session && session.lifecycle === 'active' && (
           <button
             type="button"
@@ -313,7 +375,7 @@ export function FrameCenter({
             恢复
           </button>
         )}
-        {session && session.lifecycle !== 'deleted' && (
+        {session && session.lifecycle === 'active' && (
           <button
             type="button"
             className="fw-head-action is-danger"

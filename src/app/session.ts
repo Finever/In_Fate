@@ -38,6 +38,11 @@ export interface SessionInfo {
   readonly lastActivity?: string
   /** 只在 withTitle 时计算；取首条用户消息，截断后作为列表标题 */
   readonly title?: string
+  /** 用户自定义分类；空表示未分类 */
+  readonly category?: string
+  readonly pinned?: boolean
+  readonly thinkingHead?: string
+  readonly thinkingHeadEnabled?: boolean
 }
 
 export function sessionsDir(dataRoot: string): string {
@@ -347,6 +352,13 @@ export interface ListSessionsOptions {
   readonly withState?: boolean
   /** true = 扫每条会话开头，补 title */
   readonly withTitle?: boolean
+  /** 用户分类/置顶投影；不传就当未分类 */
+  readonly meta?: (sessionId: string) => {
+    readonly category?: string
+    readonly pinned?: boolean
+    readonly thinkingHead?: string
+    readonly thinkingHeadEnabled?: boolean
+  } | undefined
 }
 
 export function listSessions(dataRoot: string, options: ListSessionsOptions = {}): SessionInfo[] {
@@ -386,6 +398,7 @@ export function listSessions(dataRoot: string, options: ListSessionsOptions = {}
         // 标题只是列表装饰；读不到不影响会话本身
       }
     }
+    const meta = options.meta?.(id)
 
     sessions.push({
       id,
@@ -401,6 +414,10 @@ export function listSessions(dataRoot: string, options: ListSessionsOptions = {}
       ...(tail ? { state: tail.state } : {}),
       ...(tail?.lastActivity ? { lastActivity: tail.lastActivity } : {}),
       ...(title ? { title } : {}),
+      ...(meta?.category ? { category: meta.category } : {}),
+      ...(meta?.pinned ? { pinned: true } : {}),
+      ...(meta?.thinkingHead ? { thinkingHead: meta.thinkingHead } : {}),
+      ...(meta?.thinkingHeadEnabled ? { thinkingHeadEnabled: true } : {}),
     })
   }
   return sessions.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))

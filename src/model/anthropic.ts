@@ -106,11 +106,20 @@ function toTools(tools: readonly ToolSpec[]): Block[] {
 
 function requestBody(request: ChatRequest): Record<string, unknown> {
   const system = systemText(request)
+  const messages = toMessages(request.messages)
+  const prefill = request.resolved.endpoint.supportsAssistantPrefill
+    ? request.assistantPrefill
+    : undefined
+  if (prefill) {
+    const last = messages.at(-1)
+    if (last?.role === 'assistant') last.content.push({ type: 'text', text: prefill })
+    else messages.push({ role: 'assistant', content: [{ type: 'text', text: prefill }] })
+  }
   return {
     model: request.resolved.apiModelId,
     max_tokens: request.maxTokens ?? request.resolved.model.maxOutputTokens ?? 4096,
     stream: true,
-    messages: toMessages(request.messages),
+    messages,
     ...(system.length > 0 ? { system } : {}),
     ...(request.tools?.length ? { tools: toTools(request.tools) } : {}),
     ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),

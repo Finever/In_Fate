@@ -20,6 +20,21 @@ export interface SessionInfo {
   state?: SessionState
   lastActivity?: string
   title?: string
+  /** 用户自定义分类；空表示未分类 */
+  category?: string
+  pinned?: boolean
+  thinkingHead?: string
+  thinkingHeadEnabled?: boolean
+}
+
+export interface SessionMeta {
+  sessionId: string
+  category?: string
+  pinned?: boolean
+  thinkingHead?: string
+  thinkingHeadEnabled?: boolean
+  updatedAt: string
+  updatedBy: string
 }
 
 export interface AgentRunInfo {
@@ -468,6 +483,7 @@ export interface AgentSummary {
   hasManifest: boolean
   model?: ModelRef
   modelConfigured: boolean
+  prefillSupported: boolean
   subagentModels: ModelRef[]
   subagentPresets?: string[]
   availablePresets: AgentPresetSummary[]

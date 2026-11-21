@@ -2,7 +2,7 @@
 
 > 本地优先、事件溯源的 agent 框架与桌面工作台。
 >
-> 当前版本：**V0.0.1.2**；文档快照：**2026-11-20**。
+> 当前版本：**V0.0.1.3**；文档快照：**2026-11-21**。
 > 仓库：Gitee <https://gitee.com/findnevery/in_fate> · GitHub <https://github.com/Finever/In_Fate>
 
 ---
@@ -50,7 +50,7 @@ IF 不是“聊天框 + 插件”的壳。下面这些是当前代码里真的�
 | **工具结果有契约** | 统一 `ToolResult` envelope：`text / structured / bytes / encoding / mime / ref / contentRef / structuredRef / presentation`；spill / offload；`meta.writeScope` 取路径 / 工作区租约；审批后再执行 | 可用；跨进程 workspace 锁、`presentation` 富渲染还没做 |
 | **多会话是一张图，不是父子树** | 会话都归用户；`workspace.jsonl` 里 `peer / handoff / reference` 连接；同一会话单 active turn、不同会话并行；`send / wake / join`；记忆权限按 `MemoryGrant` 能力位 | 后端可用；会话图 UI 后置 |
 | **插件先钉边界** | `PluginManifest / PluginContext / PluginRegistry`；只支持 tool / ui-panel；工具命名空间 `<plugin>__<tool>`、默认停用、审批 required；面板 `iframe sandbox + srcDoc + CSP`；5MB 私有 KV | v0；进程内、无第三方安装 / provider / 事件总线 / 市场 |
-| **装得上、更新得了、数据不丢** | 发布结构 `In_First/In_Fate` + `In_First/data`；`install.cmd` 安装/卸载，卸载默认保留 `data/`；`latest.json` + sha256；`.updates` 暂存、pending 启动前切换、`previous` 回滚；zip 路径穿越 / 解压上限检查；版本号支持 `x.y.z` 与 `x.y.z.w` | 可用；清单签名、增量更新、NSIS 单文件包和托盘还没做 |
+| **装得上、更新得了、数据不丢** | 发布结构 `In_First/In_Fate` + `In_First/data`；`install.cmd` 安装/修复/卸载，Windows 快捷方式与 HKCU 卸载登记先预检、写入后回读验证，失败回滚程序层；`npm run installer` 产出单文件 `In_Fate-Setup-v*.exe`，自解压后调用同一安装器；卸载默认保留 `data/`；`latest.json` + sha256；`.updates` 暂存、pending 启动前切换、`previous` 回滚；zip 路径穿越 / 解压上限检查；版本号支持 `x.y.z` 与 `x.y.z.w` | 可用；单文件安装器未签名；清单签名、增量更新、NSIS 向导和托盘还没做 |
 | **危险动作先分级** | 工具审批前再过一道 `RiskGuard`：bash 识别递归删除、强推/重写 git、提权、改服务/注册表、管道执行下载脚本、格式化/关机等；write/edit/read 识别 `.ssh`、`.aws`、`.env`、本机配置和系统目录；默认 high 发问、critical 拒绝，审批卡显示命中原因 | V0.0.1.1 可用；基于命令/路径模式，不是完整 shell 解析器，也不替代 FS/Network 沙箱 |
 | **agent 可收起来** | 主 agent 可新建、改人格、配模型；删除时把 `memory/agents/<id>` 与 `data/agents/<id>` 移到各自 `.trash`，不物理删除；默认主 agent 和还有未删除会话的 agent 拒绝删除 | V0.0.1.1 可用；回收站恢复还没有 UI，需手动从 `.trash` 挪回 |
 
@@ -141,7 +141,7 @@ cd desktop && npm install && npm start
 ### 版本号规则
 
 - 程序的唯一版本来源是仓库根目录 `VERSION`；`/api/version`、`if --version` 和发布脚本都读它；`package.json` 的 `version` 需要同步。
-- 版本由项目所有者每次发布时手定；当前是 `0.0.1.2`。
+- 版本由项目所有者每次发布时手定；当前是 `0.0.1.3`。
 - 版本号支持 `x.y.z` 和 `x.y.z.w`；第四段是补丁修订号，比较时依次比较 `major.minor.patch.revision`。
 - 数据 schema 是独立版本：`DATA_SCHEMA_VERSION = 1`，状态在 `<dataRoot>/.state/data-schema.json`。
 - 程序跨版本更新不等于数据结构一定变；但数据结构一旦变，必须在 `DATA_MIGRATIONS` 里登记迁移。
@@ -152,7 +152,35 @@ cd desktop && npm install && npm start
 |---|---|---|
 | V0.0.1 | 2026-11-18 | 首个可独立拷贝、安装、启动、更新和回滚的骨架版本 |
 | V0.0.1.1 | 2026-11-19 | 风险操作守卫、agent 删除、稳定版审计修复 |
-| V0.0.1.2 | 2026-11-20 | 会话搜索/删除入口、人格备份恢复、时间戳根因修复；当前版本 |
+| V0.0.1.2 | 2026-11-20 | 会话搜索/删除入口、人格备份恢复、时间戳根因修复 |
+| V0.0.1.3 | 2026-11-21 | 会话分类/置顶、会话级思考头、安装器重写与单文件 setup exe；当前版本 |
+
+### V0.0.1.3（2026-11-21）
+
+**定位**：V0.0.1.2 的会话整理与安装体验补丁，不改数据 schema。
+
+**这一版包含**：
+
+- **会话分类与置顶**：分类/置顶写入 workspace 事件流，不进模型上下文；左侧有分类时按分类收拢，无分类时仍按今天/昨天/7 天内分组。归档和已删除始终单独放最后。
+- **会话列表辨识**：选择“全部 agent”时，会话行显示所属 agent 名称和运行/等待状态点；归档和删除图标已区分。
+- **会话级思考头**：可以给单个会话设一段固定的 assistant 接续前缀，作为最后一条 assistant 消息续写；只对声明 `supportsAssistantPrefill` 的端点生效。Anthropic Messages 自动具备该能力，OpenAI-compatible 端点需要显式声明。会话切换模型后，不支持时不会发送 prefill；打开思考头设置会看到提示。
+- **安装器重写**：`tools/windows-install.ps1` 负责快捷方式与 HKCU 卸载登记，安装前预检、写入后逐项回读；失败会回滚程序层并恢复旧登记。安装根生成 `repair.cmd`，`uninstall.cmd` 默认保留数据，`--purge` 才删。
+- **单文件安装器**：`npm run installer` 用系统自带 .NET Framework 编译自解压 bootstrapper，把发布 zip 焊成 `In_Fate-Setup-v*.exe`；运行时解到 `%TEMP%` 后调用同一套安装器。未签名，SmartScreen 可能提示未知发布者。
+
+**兼容与升级**：
+
+- 数据 schema 不变，`data/` 可以直接沿用。
+- V0.0.1.2 → V0.0.1.3 可以走内置更新；也可以直接运行单文件 setup exe。
+- 回滚仍只保留 `previous/` 一代。
+
+**验证基线（2026-11-21）**：
+
+- `npm run check`：`tsc --noEmit` 通过
+- `npm test`：259 个测试全过
+- UI build：通过
+- 发布包 smoke：通过
+- 单文件 setup exe：临时包构建、参数安装到临时目录通过
+- 当前安装根 `C:\Users\qielan\In_First` 未改动（C 端环境）
 
 ### V0.0.1.2（2026-11-20）
 
@@ -234,13 +262,15 @@ cd desktop && npm install && npm start
 
 ```bash
 npm run release          # 检查 + 测试 + UI build + 生成 release/In_First/
+npm run installer        # 把发布 zip 包成单文件 In_Fate-Setup-v*.exe
+npm run release:setup    # release + installer
 npm run release:portable # 不带 Electron，只出后端 + UI
 npm run release:smoke    # 冒烟：独立启动、health、version、UI
 ```
 
 产物分成两层：`In_Fate/` 是程序（bin/src/ui/dist/desktop），`data/` 是可变数据；另有包内 `runtime/`、`config/if.release.json`、`tools/`、`logs/`、`backups/`。升级时整体替换 `In_Fate/`，`data/` 不动。启动脚本默认设置 `IF_HOME=包根/data`、`IF_PORTABLE=1`；安装版由 `install.cmd` 装到 `%USERPROFILE%\In_First`，程序在 `%USERPROFILE%\In_First\In_Fate`，数据在 `%USERPROFILE%\In_First\data`，都不进 AppData。
 
-安装器负责首次部署、升级保留数据、快捷方式和卸载注册表。双击 `install.cmd` 安装完成会自动启动 In_Fate；以后从桌面/开始菜单的「In_Fate」快捷方式打开，或运行安装根下的 `start-desktop.cmd`。更新器内置在设置 → 关于与更新：支持 `latest.json` 检查、下载、sha256 校验、应用和回滚，也支持直接选本地发布包 zip；应用只写 pending，下次启动前由 `tools/apply-pending.mjs` 整体切换 `In_Fate/`，运行中的进程不替换自己的文件。版本号唯一来源是根目录 `VERSION`；当前 `V0.0.1.2`。详见 [`docs/release.md`](docs/release.md)。
+安装器负责首次部署、升级保留数据、快捷方式和卸载注册表。Windows 集成由 `tools/windows-install.ps1` 执行：先建临时快捷方式/临时注册表值做预检，正式写入后逐项回读验证；失败会撤销本次登记并回滚程序层，不会出现“打印完成但没登记”的半安装。安装根会生成 `repair.cmd`，快捷方式或卸载项丢了可以重建；`uninstall.cmd` 默认保留数据，`--purge` 才连数据删除。`npm run installer` 会把发布 zip 和自解压 bootstrapper 焊成一个 `In_Fate-Setup-v*.exe`，双击后解到 `%TEMP%` 再调用同一套安装器；它未签名，正式分发前要签名。双击 `install.cmd` 安装完成会自动启动 In_Fate；以后从桌面/开始菜单的「In_Fate」快捷方式打开，或运行安装根下的 `start-desktop.cmd`。更新器内置在设置 → 关于与更新：支持 `latest.json` 检查、下载、sha256 校验、应用和回滚，也支持直接选本地发布包 zip；应用只写 pending，下次启动前由 `tools/apply-pending.mjs` 整体切换 `In_Fate/`，运行中的进程不替换自己的文件。版本号唯一来源是根目录 `VERSION`；当前 `V0.0.1.3`。详见 [`docs/release.md`](docs/release.md)。
 
 ---
 
@@ -400,7 +430,7 @@ tests/          node:test 测试
 
 当前验证基线：
 
-- `npm test`：**250** 个测试全过
+- `npm test`：**259** 个测试全过
 - `npm run check`：`tsc --noEmit` 通过
 - `cd ui && npm run build`：通过
 - 发布包 smoke：通过

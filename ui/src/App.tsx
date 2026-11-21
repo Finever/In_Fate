@@ -9,6 +9,7 @@ import type { MainAgentListItem } from './components/Framework'
 import { PromptDialog } from './components/PromptDialog'
 import { SessionView } from './components/SessionView'
 import { SettingsDialog } from './components/SettingsDialog'
+import { ThinkingHeadDialog } from './components/ThinkingHeadDialog'
 import { TitleBar } from './components/TitleBar'
 import { useApprovals } from './hooks/useApprovals'
 import { useWorkspace } from './hooks/useWorkspace'
@@ -70,6 +71,13 @@ function Desktop() {
     storedWidth(RIGHT_KEY, RIGHT_DEFAULT, RIGHT_MIN, RIGHT_MAX))
   const [creating, setCreating] = useState(false)
   const [newSessionOpen, setNewSessionOpen] = useState(false)
+  const [categoryTarget, setCategoryTarget] = useState<{ id: string; value: string }>()
+  const [thinkingTarget, setThinkingTarget] = useState<{
+    id: string
+    enabled: boolean
+    text: string
+    supported: boolean
+  }>()
   const [addAgentOpen, setAddAgentOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [pendingAgentId, setPendingAgentId] = useState<string>()
@@ -325,6 +333,68 @@ function Desktop() {
     )
   }, [runSessionAction])
 
+  const openCategory = useCallback((): void => {
+    if (!selectedSession) return
+    setCategoryTarget({
+      id: selectedSession.id,
+      value: selectedSession.category ?? '',
+    })
+  }, [selectedSession])
+
+  const togglePin = useCallback((id: string, pinned: boolean): void => {
+    void runSessionAction(() => api.setSessionMeta(id, { pinned }))
+  }, [runSessionAction])
+
+  const submitCategory = useCallback(async (value: string): Promise<void> => {
+    if (!categoryTarget) return
+    setSessionBusy(true)
+    setActionError(undefined)
+    try {
+      await api.setSessionMeta(categoryTarget.id, {
+        category: value.trim() || null,
+      })
+      await workspace.refresh(true)
+      setCategoryTarget(undefined)
+    } catch (reason) {
+      setActionError(reason instanceof Error ? reason.message : String(reason))
+      throw reason
+    } finally {
+      setSessionBusy(false)
+    }
+  }, [categoryTarget, workspace])
+
+  const openThinking = useCallback((): void => {
+    if (!selectedSession) return
+    setThinkingTarget({
+      id: selectedSession.id,
+      enabled: selectedSession.thinkingHeadEnabled === true,
+      text: selectedSession.thinkingHead ?? '',
+      supported: selectedAgent?.prefillSupported === true,
+    })
+  }, [selectedAgent, selectedSession])
+
+  const submitThinking = useCallback(async (input: {
+    enabled: boolean
+    text: string
+  }): Promise<void> => {
+    if (!thinkingTarget) return
+    setSessionBusy(true)
+    setActionError(undefined)
+    try {
+      await api.setSessionMeta(thinkingTarget.id, {
+        thinkingHead: input.text || null,
+        thinkingHeadEnabled: input.enabled && input.text.length > 0,
+      })
+      await workspace.refresh(true)
+      setThinkingTarget(undefined)
+    } catch (reason) {
+      setActionError(reason instanceof Error ? reason.message : String(reason))
+      throw reason
+    } finally {
+      setSessionBusy(false)
+    }
+  }, [thinkingTarget, workspace])
+
   if (workspace.loading && workspace.sessions.length === 0) return <FrameBoot />
 
   const shellStyle = {
@@ -371,6 +441,10 @@ function Desktop() {
         busy={sessionBusy}
         onToggleRight={toggleRight}
         onCreate={() => void create()}
+        onCategory={openCategory}
+        onThinking={openThinking}
+        onTogglePin={togglePin}
+        thinkingSupported={selectedAgent?.prefillSupported === true}
         onArchive={archiveSession}
         onUnarchive={unarchiveSession}
         onDelete={deleteSession}
@@ -413,6 +487,29 @@ function Desktop() {
           confirmLabel="创建"
           onClose={() => setNewSessionOpen(false)}
           onSubmit={submitNewSession}
+        />
+      )}
+
+      {categoryTarget && (
+        <PromptDialog
+          title="会话分类"
+          label="分类名称"
+          placeholder="例如 工作、游戏、日常；留空取消分类"
+          defaultValue={categoryTarget.value}
+          allowEmpty
+          confirmLabel="保存"
+          onClose={() => setCategoryTarget(undefined)}
+          onSubmit={submitCategory}
+        />
+      )}
+
+      {thinkingTarget && (
+        <ThinkingHeadDialog
+          supported={thinkingTarget.supported}
+          initialEnabled={thinkingTarget.enabled}
+          initialText={thinkingTarget.text}
+          onClose={() => setThinkingTarget(undefined)}
+          onSubmit={submitThinking}
         />
       )}
 
