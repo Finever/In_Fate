@@ -118,6 +118,74 @@ function autoBucket(range: RangeKey): UsageBucket {
   }
 }
 
+type ReportKind = 'week' | 'month' | 'year'
+
+interface ReportState {
+  kind: ReportKind
+  /** 这一期的起始日（周一 / 1 号 / 1 月 1 日），本地时间。 */
+  start: Date
+}
+
+const REPORTS: Array<{ id: ReportKind; label: string }> = [
+  { id: 'week', label: '周报告' },
+  { id: 'month', label: '月报告' },
+  { id: 'year', label: '年报告' },
+]
+
+/** ISO 周：周一为一周之始。 */
+function isoWeekInfo(date: Date): { year: number; week: number } {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
+  const dayNum = d.getUTCDay() || 7
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum)
+  const isoYear = d.getUTCFullYear()
+  const yearStart = new Date(Date.UTC(isoYear, 0, 1))
+  const week = Math.ceil(((d.getTime() - yearStart.getTime()) / 86_400_000 + 1) / 7)
+  return { year: isoYear, week }
+}
+
+function periodStart(kind: ReportKind, date: Date): Date {
+  if (kind === 'week') {
+    const d = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
+    return d
+  }
+  if (kind === 'month') return new Date(date.getFullYear(), date.getMonth(), 1)
+  return new Date(date.getFullYear(), 0, 1)
+}
+
+function periodEndInclusive(kind: ReportKind, start: Date): Date {
+  if (kind === 'week') {
+    const d = new Date(start)
+    d.setDate(d.getDate() + 6)
+    return d
+  }
+  if (kind === 'month') return new Date(start.getFullYear(), start.getMonth() + 1, 0)
+  return new Date(start.getFullYear(), 11, 31)
+}
+
+function shiftPeriod(kind: ReportKind, start: Date, delta: number): Date {
+  if (kind === 'week') {
+    const d = new Date(start)
+    d.setDate(d.getDate() + delta * 7)
+    return d
+  }
+  if (kind === 'month') return new Date(start.getFullYear(), start.getMonth() + delta, 1)
+  return new Date(start.getFullYear() + delta, 0, 1)
+}
+
+function mmdd(date: Date): string {
+  return `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+function periodLabel(kind: ReportKind, start: Date): string {
+  if (kind === 'week') {
+    const { year, week } = isoWeekInfo(start)
+    return `${year} 年 第 ${week} 周 · ${mmdd(start)} ~ ${mmdd(periodEndInclusive(kind, start))}`
+  }
+  if (kind === 'month') return `${start.getFullYear()} 年 ${start.getMonth() + 1} 月`
+  return `${start.getFullYear()} 年`
+}
+
 interface TimelineBucket {
   bucket: string
   requests: number
@@ -277,6 +345,7 @@ export function UsagePanel() {
   const [groupBy, setGroupBy] = useState<UsageGroupBy>('model')
   const [requests, setRequests] = useState<UsageRequestPage>()
   const [range, setRange] = useState<RangeKey>('30')
+  const [report, setReport] = useState<ReportState>()
   const [bucket, setBucket] = useState<UsageBucket | 'auto'>('auto')
   const [tab, setTab] = useState<TabKey>('overview')
   const [filter, setFilter] = useState<UsageFilterState>(EMPTY_FILTER)
@@ -287,7 +356,12 @@ export function UsagePanel() {
   const [notice, setNotice] = useState<string>()
 
   const baseParams: UsageQueryParams = useMemo(() => ({
-    ...rangeParams(range),
+    ...(report
+      ? {
+        from: localDate(report.start),
+        to: localDate(periodEndInclusive(report.kind, report.start)),
+      }
+      : rangeParams(range)),
     ...(filter.modelId ? { modelId: filter.modelId } : {}),
     ...(filter.providerId ? { providerId: filter.providerId } : {}),
     ...(filter.agentId ? { agentId: filter.agentId } : {}),
@@ -298,7 +372,7 @@ export function UsagePanel() {
     ...(filter.modality ? { modality: filter.modality } : {}),
     ...(filter.priced === 'priced' ? { priced: true } : {}),
     ...(filter.priced === 'unpriced' ? { priced: false } : {}),
-  }), [range, filter])
+  }), [range, report, filter])
 
   // 输入框防抖：参数稳定后再发请求。
   const [query, setQuery] = useState<UsageQueryParams>(baseParams)
@@ -323,7 +397,15 @@ export function UsagePanel() {
     }
   }, [])
 
-  const effectiveBucket = bucket === 'auto' ? autoBucket(range) : bucket
+  const effectiveBucket = bucket === 'auto'
+    ? report
+      ? report.kind === 'year' ? 'month' : 'day'
+      : autoBucket(range)
+    : bucket
+
+  const reportCanNext = report !== undefined
+    && shiftPeriod(report.kind, report.start, 1).getTime()
+      <= periodStart(report.kind, new Date()).getTime()
 
   useEffect(() => {
     let cancelled = false
@@ -588,13 +670,61 @@ export function UsagePanel() {
               <button
                 key={option.id}
                 type="button"
-                className={`fw-usage-range-btn${range === option.id ? ' is-active' : ''}`}
-                onClick={() => setRange(option.id)}
+                className={`fw-usage-range-btn${
+                  report === undefined && range === option.id ? ' is-active' : ''
+                }`}
+                onClick={() => {
+                  setReport(undefined)
+                  setRange(option.id)
+                }}
               >
                 {option.label}
               </button>
             ))}
           </div>
+          <div className="fw-usage-range">
+            {REPORTS.map(option => (
+              <button
+                key={option.id}
+                type="button"
+                className={`fw-usage-range-btn${report?.kind === option.id ? ' is-active' : ''}`}
+                onClick={() => setReport({
+                  kind: option.id,
+                  start: periodStart(option.id, new Date()),
+                })}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          {report && (
+            <div className="fw-usage-reported">
+              <button
+                type="button"
+                className="fw-usage-nav-btn"
+                title="上一期"
+                onClick={() => setReport({
+                  ...report,
+                  start: shiftPeriod(report.kind, report.start, -1),
+                })}
+              >
+                ‹
+              </button>
+              <span className="fw-usage-period">{periodLabel(report.kind, report.start)}</span>
+              <button
+                type="button"
+                className="fw-usage-nav-btn"
+                title="下一期"
+                disabled={!reportCanNext}
+                onClick={() => setReport({
+                  ...report,
+                  start: shiftPeriod(report.kind, report.start, 1),
+                })}
+              >
+                ›
+              </button>
+            </div>
+          )}
           <select
             className="fw-usage-select"
             value={bucket}

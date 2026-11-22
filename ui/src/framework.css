@@ -5298,6 +5298,43 @@ body.fw-resizing {
   background: var(--accent-soft);
   color: var(--accent);
 }
+.fw-usage-reported {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px 2px 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .02);
+}
+.fw-usage-nav-btn {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.fw-usage-nav-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, .06);
+  color: var(--text);
+}
+.fw-usage-nav-btn:disabled {
+  opacity: .35;
+  cursor: default;
+}
+.fw-usage-period {
+  min-width: 158px;
+  text-align: center;
+  color: var(--text);
+  font-size: 11px;
+  white-space: nowrap;
+}
 .fw-usage-select,
 .fw-usage-input,
 .fw-usage-filters select {
