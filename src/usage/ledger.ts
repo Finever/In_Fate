@@ -1085,7 +1085,11 @@ export class UsageLedger {
       )
       this.db.exec('COMMIT')
     } catch (error) {
-      this.db.exec('ROLLBACK')
+      try {
+        this.db.exec('ROLLBACK')
+      } catch {
+        // 事务没起来就不用回滚；不掩盖原始错误。
+      }
       throw error
     }
     return counts

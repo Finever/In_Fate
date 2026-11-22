@@ -179,6 +179,7 @@ test('记忆空间工具：space 参数走 ACL，检索按空间过滤', async (
     const agentOf: Record<string, string> = {
       'main-steward': 'main',
       'helper-worker': 'helper',
+      'other-steward': 'other',
     }
     const spaceAccess = new MemorySpaceAccess(spaces, access, id => agentOf[id])
     const tools = new Map(createMemoryTools({
@@ -281,6 +282,43 @@ test('记忆空间工具：space 参数走 ACL，检索按空间过滤', async (
     }, context('helper-worker'))
     assert.equal(proposed.isError, undefined)
     assert.match(proposed.text ?? '', /detail:project-x\/环境\/other/)
+
+    // 注册过的共有空间：成员外直接按路径也读不到、写不进；检索里也不出现。
+    await store.add('detail:project-x/环境/计划', {
+      content: '共有空间关键词GAMMA',
+      tag: '可信',
+      introduction: '测试',
+    })
+    index.markDirty()
+    const memberRead = await tools.get('memory_read')!.run(
+      { target: 'detail:project-x/环境/计划' },
+      context('helper-worker'),
+    )
+    assert.equal(memberRead.isError, undefined)
+    assert.match(memberRead.text ?? '', /GAMMA/)
+    const outsiderRead = await tools.get('memory_read')!.run(
+      { target: 'detail:project-x/环境/计划' },
+      context('other-steward'),
+    )
+    assert.equal(outsiderRead.isError, true)
+    const outsiderWrite = await tools.get('memory_add')!.run({
+      target: 'detail:project-x/环境/插手',
+      content: '不该写进去',
+      tag: '可信',
+      introduction: '测试',
+    }, context('other-steward'))
+    assert.equal(outsiderWrite.isError, true)
+    const memberSearch = await tools.get('memory_search')!.run(
+      { query: '关键词' },
+      context('helper-worker'),
+    )
+    assert.match(memberSearch.text ?? '', /GAMMA/)
+    const outsiderSearch = await tools.get('memory_search')!.run(
+      { query: '关键词' },
+      context('other-steward'),
+    )
+    assert.match(outsiderSearch.text ?? '', /ALPHA/)
+    assert.doesNotMatch(outsiderSearch.text ?? '', /GAMMA/)
   } finally {
     index?.close()
     rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })

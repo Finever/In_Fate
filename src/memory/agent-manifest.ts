@@ -176,6 +176,7 @@ const PROMPT_DEFAULT = [
   '- log/<年>/<月>/<日>/ 是原始流水，append-only，不改；引用原话必须带 log-addr。',
   '- agents/<agent-id>/identity/ 是本 agent 的 principle / preference / prompt。别的 agent 的 人格文件 不混用。',
   '- 先用 memory_search / memory_read 查；memory_add / memory_update 需要写权限；没有写权限就用 memory_propose，等用户接受。',
+  '- 除共享域外还可能有记忆空间（私域/共有）；用 memory_spaces 看有哪些，给上面的工具传 space 参数读写。',
   '- 不要编原话，不要编 log-addr；没查到就说没查到，并说明搜索条件。',
   '- 写入后按当前环境做校验和提交；没有相应工具就明确说没做，不假装已经落盘。',
 ].join('\n')

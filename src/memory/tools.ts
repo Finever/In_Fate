@@ -97,14 +97,19 @@ export function createMemoryTools(deps: {
     | { readonly ok: true; readonly dir: string }
     | { readonly ok: false; readonly error: string }
 
+  type SpaceAction = 'read' | 'write' | 'propose'
+
   const resolveSpace = (
     sessionId: string,
     spaceId: string,
-    action: 'read' | 'write' | 'propose',
+    action: SpaceAction,
   ): SpaceResolution => {
     const space = deps.spaces?.get(spaceId)
     if (!space) return { ok: false, error: `unknown memory space: ${spaceId}` }
-    if (!deps.spaceAccess?.can(sessionId, spaceId, action)) {
+    // write 的最终判断交给调用方（policy approval off 时 worker 也能直写）；
+    // 这里只确认“看得见这个空间”，propose/read 则按对应动作校验。
+    const required = action === 'write' ? 'read' : action
+    if (!deps.spaceAccess?.can(sessionId, spaceId, required)) {
       return { ok: false, error: `memory space ${action} not granted: ${spaceId}` }
     }
     return { ok: true, dir: spaceDir(space) }
@@ -126,24 +131,32 @@ export function createMemoryTools(deps: {
     return `detail:${joined}`
   }
 
-  /** 解析 space + target；不传 space 就退回共享域（下划线目录仍禁止）。 */
+  /** 解析 space + target；不传 space 就退回共享域（下划线目录仍禁止）。
+   *  目标若落在注册过的空间目录里，也按那个空间的 ACL 校验，并带上 spaceId。 */
   const resolveTarget = (
     sessionId: string,
-    action: 'read' | 'write' | 'propose',
+    action: SpaceAction,
     value: string,
     spaceId: string | undefined,
-  ): { target: string } | { error: string } => {
-    if (spaceId === undefined || spaceId.length === 0) {
+  ): { target: string; spaceId?: string } | { error: string } => {
+    if (spaceId !== undefined && spaceId.length > 0) {
+      const resolved = resolveSpace(sessionId, spaceId, action)
+      if (!resolved.ok) return { error: resolved.error }
       try {
-        return { target: sharedTarget(value) }
+        return { target: targetInSpace(resolved.dir, value), spaceId }
       } catch (error) {
         return { error: error instanceof Error ? error.message : String(error) }
       }
     }
-    const resolved = resolveSpace(sessionId, spaceId, action)
-    if (!resolved.ok) return { error: resolved.error }
     try {
-      return { target: targetInSpace(resolved.dir, value) }
+      const target = sharedTarget(value)
+      const space = deps.spaces?.list().find(item => spaceDir(item) === topSegmentOf(target))
+      if (space) {
+        const resolved = resolveSpace(sessionId, space.id, action)
+        if (!resolved.ok) return { error: resolved.error }
+        return { target, spaceId: space.id }
+      }
+      return { target }
     } catch (error) {
       return { error: error instanceof Error ? error.message : String(error) }
     }
@@ -154,12 +167,14 @@ export function createMemoryTools(deps: {
     return body.split('/')[0] ?? ''
   }
 
-  /** 检索命中过滤：共享域看 shared 权限；下划线域看对应空间的可读性。 */
+  /** 检索命中过滤：注册过的空间看空间可读性；没登记的 `_` 目录一律不推；
+   *  其余共享域看 shared 权限。 */
   const hitReadable = (sessionId: string, target: string): boolean => {
     const top = topSegmentOf(target)
-    if (!top.startsWith('_')) return deps.access.canRead(sessionId, 'shared')
-    const visible = deps.spaceAccess?.visibleSpaces(sessionId) ?? []
-    return visible.some(space => spaceDir(space) === top)
+    const space = deps.spaces?.list().find(item => spaceDir(item) === top)
+    if (space) return deps.spaceAccess?.can(sessionId, space.id, 'read') === true
+    if (top.startsWith('_')) return false
+    return deps.access.canRead(sessionId, 'shared')
   }
 
   const spaceIdOfInput = (input: Record<string, unknown>): string | undefined => {
@@ -241,12 +256,12 @@ export function createMemoryTools(deps: {
         return denied('memory is turned off for this session')
       }
       const input = args as { target: string; id?: string; space?: string }
-      if ((input.space === undefined || input.space.length === 0)
+      const resolved = resolveTarget(context.sessionId, 'read', input.target, input.space)
+      if ('error' in resolved) return denied(resolved.error)
+      if (resolved.spaceId === undefined
         && !deps.access.canRead(context.sessionId, 'shared')) {
         return denied('memory read not granted')
       }
-      const resolved = resolveTarget(context.sessionId, 'read', input.target, input.space)
-      if ('error' in resolved) return denied(resolved.error)
       const doc = deps.store.read(resolved.target)
       if (input.id) {
         const entry = doc.entries.find(item => item.id === input.id)
@@ -287,16 +302,21 @@ export function createMemoryTools(deps: {
         return denied('memory is turned off for this session')
       }
       const input = args as Record<string, unknown>
-      const spaceId = spaceIdOfInput(input)
-      if (spaceId === undefined) {
-        if (!canWrite(context.sessionId)) {
-          return denied('memory write not granted; use memory_propose or turn write approval off')
-        }
-      } else if (!canWriteSpace(context.sessionId, spaceId)) {
-        return denied(`memory space write not granted: ${spaceId}`)
-      }
-      const resolved = resolveTarget(context.sessionId, 'write', String(input.target), spaceId)
+      const resolved = resolveTarget(
+        context.sessionId,
+        'write',
+        String(input.target),
+        spaceIdOfInput(input),
+      )
       if ('error' in resolved) return denied(resolved.error)
+      const allowed = resolved.spaceId !== undefined
+        ? canWriteSpace(context.sessionId, resolved.spaceId)
+        : canWrite(context.sessionId)
+      if (!allowed) {
+        return denied(resolved.spaceId !== undefined
+          ? `memory space write not granted: ${resolved.spaceId}`
+          : 'memory write not granted; use memory_propose or turn write approval off')
+      }
       const entry = await deps.store.add(resolved.target, entryInput(input))
       return {
         text: `已写入 ${resolved.target}#${entry.id}`,
@@ -328,16 +348,21 @@ export function createMemoryTools(deps: {
         return denied('memory is turned off for this session')
       }
       const input = args as Record<string, unknown>
-      const spaceId = spaceIdOfInput(input)
-      if (spaceId === undefined) {
-        if (!canWrite(context.sessionId)) {
-          return denied('memory write not granted; use memory_propose or turn write approval off')
-        }
-      } else if (!canWriteSpace(context.sessionId, spaceId)) {
-        return denied(`memory space write not granted: ${spaceId}`)
-      }
-      const resolved = resolveTarget(context.sessionId, 'write', String(input.target), spaceId)
+      const resolved = resolveTarget(
+        context.sessionId,
+        'write',
+        String(input.target),
+        spaceIdOfInput(input),
+      )
       if ('error' in resolved) return denied(resolved.error)
+      const allowed = resolved.spaceId !== undefined
+        ? canWriteSpace(context.sessionId, resolved.spaceId)
+        : canWrite(context.sessionId)
+      if (!allowed) {
+        return denied(resolved.spaceId !== undefined
+          ? `memory space write not granted: ${resolved.spaceId}`
+          : 'memory write not granted; use memory_propose or turn write approval off')
+      }
       const entry = await deps.store.update(resolved.target, String(input.id), {
         ...(input.content !== undefined ? { content: String(input.content) } : {}),
         ...(input.tag !== undefined ? { tag: parseTag(input.tag) } : {}),
@@ -409,12 +434,17 @@ export function createMemoryTools(deps: {
         }
       }
 
-      const spaceId = spaceIdOfInput(input)
-      if (spaceId === undefined && !deps.access.canPropose(context.sessionId, 'shared')) {
+      const resolved = resolveTarget(
+        context.sessionId,
+        'propose',
+        target,
+        spaceIdOfInput(input),
+      )
+      if ('error' in resolved) return denied(resolved.error)
+      if (resolved.spaceId === undefined
+        && !deps.access.canPropose(context.sessionId, 'shared')) {
         return denied('memory propose not granted')
       }
-      const resolved = resolveTarget(context.sessionId, 'propose', target, spaceId)
-      if ('error' in resolved) return denied(resolved.error)
       const proposal = deps.proposals.propose({
         target: resolved.target,
         sourceSession: context.sessionId,

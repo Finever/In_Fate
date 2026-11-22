@@ -380,6 +380,8 @@ export function UsagePanel() {
   }, [tab, query, page])
 
   const buckets = useMemo(() => mergeTimeline(points), [points])
+  const tokensOption = useMemo(() => tokensChartOption(buckets), [buckets])
+  const costOption = useMemo(() => costChartOption(buckets), [buckets])
 
   const activeChips = useMemo(() => {
     const chips: Array<{ key: keyof UsageFilterState; label: string; value: string }> = []
@@ -676,13 +678,13 @@ export function UsagePanel() {
             <div className="fw-usage-chart-title">Token 与请求</div>
             {buckets.length === 0
               ? <div className="fw-usage-empty">这个区间还没有用量记录。</div>
-              : <EChart option={tokensChartOption(buckets)} height={280} />}
+              : <EChart option={tokensOption} height={280} />}
           </section>
           <section className="fw-usage-chart">
             <div className="fw-usage-chart-title">费用</div>
             {buckets.length === 0 || !buckets.some(entry => entry.cost.size > 0)
               ? <div className="fw-usage-empty">没有已定价的调用。</div>
-              : <EChart option={costChartOption(buckets)} height={220} />}
+              : <EChart option={costOption} height={220} />}
           </section>
         </div>
       )}
