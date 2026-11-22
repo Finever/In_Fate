@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, type UsageQueryParams } from '../api'
 import { formatCost, formatDateTime, formatDuration, formatTokens, shortId } from '../lib/format'
+import {
+  periodEndInclusive,
+  periodLabel,
+  periodStart,
+  shiftPeriod,
+  type ReportKind,
+  type ReportState,
+} from '../lib/usage-period'
 import type {
   UsageBucket,
   UsageGroupBy,
@@ -118,73 +126,11 @@ function autoBucket(range: RangeKey): UsageBucket {
   }
 }
 
-type ReportKind = 'week' | 'month' | 'year'
-
-interface ReportState {
-  kind: ReportKind
-  /** 这一期的起始日（周一 / 1 号 / 1 月 1 日），本地时间。 */
-  start: Date
-}
-
 const REPORTS: Array<{ id: ReportKind; label: string }> = [
   { id: 'week', label: '周报告' },
   { id: 'month', label: '月报告' },
   { id: 'year', label: '年报告' },
 ]
-
-/** ISO 周：周一为一周之始。 */
-function isoWeekInfo(date: Date): { year: number; week: number } {
-  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
-  const dayNum = d.getUTCDay() || 7
-  d.setUTCDate(d.getUTCDate() + 4 - dayNum)
-  const isoYear = d.getUTCFullYear()
-  const yearStart = new Date(Date.UTC(isoYear, 0, 1))
-  const week = Math.ceil(((d.getTime() - yearStart.getTime()) / 86_400_000 + 1) / 7)
-  return { year: isoYear, week }
-}
-
-function periodStart(kind: ReportKind, date: Date): Date {
-  if (kind === 'week') {
-    const d = new Date(date.getFullYear(), date.getMonth(), date.getDate())
-    d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
-    return d
-  }
-  if (kind === 'month') return new Date(date.getFullYear(), date.getMonth(), 1)
-  return new Date(date.getFullYear(), 0, 1)
-}
-
-function periodEndInclusive(kind: ReportKind, start: Date): Date {
-  if (kind === 'week') {
-    const d = new Date(start)
-    d.setDate(d.getDate() + 6)
-    return d
-  }
-  if (kind === 'month') return new Date(start.getFullYear(), start.getMonth() + 1, 0)
-  return new Date(start.getFullYear(), 11, 31)
-}
-
-function shiftPeriod(kind: ReportKind, start: Date, delta: number): Date {
-  if (kind === 'week') {
-    const d = new Date(start)
-    d.setDate(d.getDate() + delta * 7)
-    return d
-  }
-  if (kind === 'month') return new Date(start.getFullYear(), start.getMonth() + delta, 1)
-  return new Date(start.getFullYear() + delta, 0, 1)
-}
-
-function mmdd(date: Date): string {
-  return `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-}
-
-function periodLabel(kind: ReportKind, start: Date): string {
-  if (kind === 'week') {
-    const { year, week } = isoWeekInfo(start)
-    return `${year} 年 第 ${week} 周 · ${mmdd(start)} ~ ${mmdd(periodEndInclusive(kind, start))}`
-  }
-  if (kind === 'month') return `${start.getFullYear()} 年 ${start.getMonth() + 1} 月`
-  return `${start.getFullYear()} 年`
-}
 
 interface TimelineBucket {
   bucket: string
@@ -396,6 +342,19 @@ export function UsagePanel() {
       cancelled = true
     }
   }, [])
+
+  // 小时粒度只对短区间开放；年报告、全部之类放开了会拉出上万个点。
+  const spanDays = report
+    ? Math.round(
+      (periodEndInclusive(report.kind, report.start).getTime() - report.start.getTime())
+      / 86_400_000,
+    ) + 1
+    : range === '7' ? 7 : range === '30' ? 30 : range === '90' ? 90 : Number.MAX_SAFE_INTEGER
+  const allowHour = spanDays <= 31
+
+  useEffect(() => {
+    if (!allowHour && bucket === 'hour') setBucket('auto')
+  }, [allowHour, bucket])
 
   const effectiveBucket = bucket === 'auto'
     ? report
@@ -731,7 +690,7 @@ export function UsagePanel() {
             onChange={event => setBucket(event.target.value as UsageBucket | 'auto')}
             title="时间线粒度"
           >
-            {BUCKETS.map(option => (
+            {BUCKETS.filter(option => option.id !== 'hour' || allowHour).map(option => (
               <option key={option.id} value={option.id}>粒度：{option.label}</option>
             ))}
           </select>
