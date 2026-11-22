@@ -77,6 +77,69 @@ test('探测按端点格式选接口与鉴权头', async () => {
   }
 })
 
+test('默认端点不支持 /models 时回退到同 provider 的其他端点', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'if-model-probe-fallback-'))
+  const dataRoot = join(dir, 'data')
+  mkdirSync(dataRoot, { recursive: true })
+
+  const mock = createServer((req, res) => {
+    if (req.url === '/v1/models' && req.headers['x-api-key'] === 'secret') {
+      res.writeHead(404, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({
+        error: {
+          message: 'Not Found (request_id: test)',
+          type: 'not_found_error',
+          param: null,
+          code: 'invalid_request_error',
+        },
+      }))
+      return
+    }
+    if (req.url === '/v1/models' && req.headers.authorization === 'Bearer secret') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ data: [{ id: 'm1' }, { id: 'm2' }] }))
+      return
+    }
+    res.writeHead(404, { 'content-type': 'text/plain' })
+    res.end('not found')
+  })
+  await new Promise<void>(resolve => mock.listen(0, '127.0.0.1', resolve))
+  const port = (mock.address() as AddressInfo).port
+  const baseUrl = `http://127.0.0.1:${port}`
+
+  const config: AppConfig = {
+    version: 1,
+    profile: {
+      dataRoot,
+      timeZone: 'Asia/Shanghai',
+      principals: { user: { id: 'user' }, agents: [{ id: 'main' }] },
+    },
+    providers: [],
+    presets: [],
+    patch: { tools: { enabled: [] } },
+  }
+  const app = buildBundle(config, new Container())
+  try {
+    await app.addModelProvider({
+      id: 'fallback',
+      name: 'Fallback',
+      baseUrl,
+      format: 'anthropic-messages',
+      apiKey: 'secret',
+      endpoints: {
+        'openai-chat-completions': { baseUrl: `${baseUrl}/v1` },
+      },
+      models: [],
+    })
+    const probed = await app.probeModelProvider({ provider: 'fallback' })
+    assert.deepEqual(probed.models, ['m1', 'm2'])
+  } finally {
+    await app.dispose()
+    await new Promise<void>(resolve => mock.close(() => resolve()))
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+  }
+})
+
 test('读取 provider 模型列表并手动追加模型', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'if-model-probe-'))
   const dataRoot = join(dir, 'data')

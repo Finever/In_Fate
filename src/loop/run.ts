@@ -21,9 +21,11 @@ import type { SessionWriter } from '../core/session-writer.ts'
 import type { EventStore } from '../core/store.ts'
 import type { WorkspaceLeaseManager } from '../core/workspace-lease.ts'
 import { sessionStream } from '../core/streams.ts'
-import type { ChatRequest } from '../model/chat.ts'
+import { randomUUID } from 'node:crypto'
+import type { ChatKeyInfo, ChatRequest } from '../model/chat.ts'
 import { chatModel } from '../model/chat-model.ts'
 import type { ResolvedModel } from '../model/registry.ts'
+import type { UsageLedger } from '../usage/ledger.ts'
 import type { ModelGate, ModelPriority } from '../model/gate.ts'
 import type { ModelRetryPolicy } from '../model/retry.ts'
 import { addCost, costOfUsage, type CostBreakdown } from '../model/pricing.ts'
@@ -55,6 +57,12 @@ export interface RunLoopOptions {
   readonly maxSteps?: number
   /** assistant prefill；只有端点声明 supportsAssistantPrefill 时适配器才会用。 */
   readonly assistantPrefill?: string
+  /** 会话所属 agent；用量事件与统计用。 */
+  readonly agentId?: string
+  /** 来源：用户会话 / agent 会话 / 子 agent 会话。 */
+  readonly source?: 'user' | 'agent' | 'subagent'
+  /** 用量账本；传了就把本轮事件实时投影进去。 */
+  readonly usageLedger?: UsageLedger
   /** 上下文总字节预算；不传用管线默认值 */
   readonly maxBytes?: number
   /** 工具结果写时卸载；不传就全内联 */
@@ -96,6 +104,7 @@ export interface RunUsage {
   input: number
   output: number
   cacheRead: number
+  cacheWrite?: number
 }
 
 export interface RunResult {
@@ -139,8 +148,15 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
       .filter(tool => tool.source !== 'plugin')
       .map(tool => tool.name))
   const toolSpecs = () => options.tools.toModelSpecs({ allowed: allowedTools })
-  const append = (input: NewEvent): Event =>
-    options.writer ? options.writer.append(input) : options.store.append(input)
+  const append = (input: NewEvent): Event => {
+    const event = options.writer ? options.writer.append(input) : options.store.append(input)
+    try {
+      options.usageLedger?.recordEvent(event)
+    } catch {
+      // 账本是统计投影，写失败不能影响会话事件。
+    }
+    return event
+  }
   const flush = (): void => {
     if (options.writer) options.writer.flush()
     else options.store.flush()
@@ -218,7 +234,7 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
   // 模型请求前先落盘：请求发出后崩溃，用户消息和压缩结果不会丢。
   flush()
 
-  const usage: RunUsage = { input: 0, output: 0, cacheRead: 0 }
+  const usage: RunUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
   let cost: CostBreakdown = {
     currency: null,
     input: 0,
@@ -272,7 +288,13 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
       ...(options.modelRetry ? { retry: options.modelRetry } : {}),
       ...(options.modelGate ? { gate: options.modelGate } : {}),
       priority: options.priority ?? 'normal',
-      onAttempt: () => options.metrics?.inc('model.attempts'),
+      onAttempt: () => {
+        stepAttempts += 1
+        options.metrics?.inc('model.attempts')
+      },
+      onKeySelected: info => {
+        stepKey = info
+      },
       onRetry: info => {
         options.metrics?.inc('model.retries')
         options.metrics?.observe('model.retry_delay_ms', info.delayMs,
@@ -286,12 +308,21 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
     let stepInput = 0
     let stepOutput = 0
     let stepCacheRead = 0
+    let stepCacheWrite = 0
+    let stepAttempts = 0
+    let stepKey: ChatKeyInfo | undefined
+    let stepFirstTokenMs: number | undefined
+    let stepError: string | undefined
+    let stepStatus: 'completed' | 'failed' | 'cancelled' = 'completed'
     const requestedAt = now()
     const modelStarted = Date.now()
 
     try {
       for await (const event of chatModel(request)) {
         options.onModelEvent?.(event)
+        if (event.type === 'text' || event.type === 'reasoning' || event.type === 'tool_call') {
+          if (stepFirstTokenMs === undefined) stepFirstTokenMs = Date.now() - modelStarted
+        }
         if (event.type === 'text') text.push(event.text)
         else if (event.type === 'reasoning') reasoning.push(event.text)
         else if (event.type === 'tool_call') calls.push(event)
@@ -299,36 +330,77 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
           const input = event.input ?? 0
           const output = event.output ?? 0
           const cacheRead = event.cacheRead ?? 0
+          const cacheWrite = event.cacheWrite ?? 0
           usage.input += input
           usage.output += output
           usage.cacheRead += cacheRead
+          usage.cacheWrite = (usage.cacheWrite ?? 0) + cacheWrite
           stepInput += input
           stepOutput += output
           stepCacheRead += cacheRead
+          stepCacheWrite += cacheWrite
         }
       }
       options.metrics?.inc('model.ok')
     } catch (error) {
       options.metrics?.inc('model.errors')
       // 用户中断不算失败；其它错误落痕后结束这一轮，不把异常漏给调用方。
+      const message = error instanceof Error ? error.message : String(error)
+      stepError = message
+      stepStatus = options.signal?.aborted ? 'cancelled' : 'failed'
       if (options.signal?.aborted) break
-      failure = error instanceof Error ? error.message : String(error)
+      failure = message
       break
     } finally {
       const elapsed = Date.now() - modelStarted
       modelDurationMs += elapsed
       options.metrics?.observe('model.duration_ms', elapsed)
-      if (stepInput + stepOutput + stepCacheRead > 0) {
-        cost = addCost(cost, costOfUsage(
-          options.model.model.pricing,
-          {
-            input: stepInput,
-            output: stepOutput,
-            cacheRead: stepCacheRead,
+      const stepCost = costOfUsage(
+        options.model.model.pricing,
+        {
+          input: stepInput,
+          output: stepOutput,
+          cacheRead: stepCacheRead,
+          cacheWrite: stepCacheWrite,
+        },
+        requestedAt,
+        options.profile.timeZone,
+      )
+      if (stepInput + stepOutput + stepCacheRead + stepCacheWrite > 0) {
+        cost = addCost(cost, stepCost)
+      }
+      try {
+        append({
+          stream,
+          actor: 'system',
+          type: 'usage.recorded',
+          payload: {
+            requestId: randomUUID(),
+            turn: currentTurn,
+            step: steps + 1,
+            provider: options.model.provider.id,
+            model: options.model.model.id,
+            ...(options.agentId ? { agentId: options.agentId } : {}),
+            ...(options.source ? { source: options.source } : {}),
+            usage: {
+              input: stepInput,
+              output: stepOutput,
+              cacheRead: stepCacheRead,
+              cacheWrite: stepCacheWrite,
+            },
+            cost: stepCost,
+            durationMs: elapsed,
+            ...(stepFirstTokenMs !== undefined ? { firstTokenMs: stepFirstTokenMs } : {}),
+            status: stepStatus,
+            ...(stepError ? { error: stepError } : {}),
+            attempts: stepAttempts,
+            ...(stepKey ? { key: stepKey } : {}),
+            priority: options.priority ?? 'normal',
+            requestedAt: requestedAt.toISOString(),
           },
-          requestedAt,
-          options.profile.timeZone,
-        ))
+        })
+      } catch {
+        // 用量事件写失败不影响整轮。
       }
     }
 
@@ -441,6 +513,9 @@ export async function runTurn(userText: string, options: RunLoopOptions): Promis
     type: 'turn.completed',
     payload: {
       steps,
+      turn: currentTurn,
+      ...(options.agentId ? { agentId: options.agentId } : {}),
+      ...(options.source ? { source: options.source } : {}),
       usage,
       aborted,
       hitLimit,

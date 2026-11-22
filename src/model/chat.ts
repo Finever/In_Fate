@@ -11,6 +11,13 @@ import type { ToolSpec } from './types.ts'
 import type { ModelGate, ModelPriority } from './gate.ts'
 import type { ModelRetryInfo, ModelRetryPolicy } from './retry.ts'
 
+export interface ChatKeyInfo {
+  readonly id?: string
+  readonly label?: string
+  readonly masked: string
+  readonly source: 'config' | 'legacy' | 'env' | 'none'
+}
+
 export interface ChatRequest {
   readonly resolved: ResolvedModel
   readonly system: string
@@ -30,6 +37,8 @@ export interface ChatRequest {
   readonly retry?: ModelRetryPolicy
   /** 每次尝试前回调，给指标用 */
   readonly onAttempt?: (attempt: number) => void
+  /** 换 key 时回调；只给掩码和 id，不给原文。 */
+  readonly onKeySelected?: (info: ChatKeyInfo) => void
   /** 即将重试前回调 */
   readonly onRetry?: (info: ModelRetryInfo) => void
 }

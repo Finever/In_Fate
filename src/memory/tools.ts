@@ -11,6 +11,8 @@ import type { MemoryPolicyStore } from './policy.ts'
 import type { MemoryProposalStore } from './proposals.ts'
 import type { MemorySearchIndex } from './search-index.ts'
 import type { SemanticMemoryIndex } from './semantic-index.ts'
+import type { MemorySpaceAccess } from './space-access.ts'
+import { spaceDir, type MemorySpaceStore } from './space.ts'
 import type { MemoryAddInput, MemoryQuote, MemoryTag, MemoryStore } from './store.ts'
 import type { ToolDefinition, ToolResult } from '../tools/types.ts'
 
@@ -67,6 +69,8 @@ export function createMemoryTools(deps: {
   readonly policy?: MemoryPolicyStore
   readonly searchIndex?: MemorySearchIndex
   readonly semanticIndex?: SemanticMemoryIndex
+  readonly spaces?: MemorySpaceStore
+  readonly spaceAccess?: MemorySpaceAccess
 }): ToolDefinition[] {
   const policyOf = (sessionId: string) =>
     deps.policy?.resolve(sessionId) ?? {
@@ -89,14 +93,89 @@ export function createMemoryTools(deps: {
     || (policyOf(sessionId).write.approval === 'off'
       && deps.access.canPropose(sessionId, 'shared'))
 
+  type SpaceResolution =
+    | { readonly ok: true; readonly dir: string }
+    | { readonly ok: false; readonly error: string }
+
+  const resolveSpace = (
+    sessionId: string,
+    spaceId: string,
+    action: 'read' | 'write' | 'propose',
+  ): SpaceResolution => {
+    const space = deps.spaces?.get(spaceId)
+    if (!space) return { ok: false, error: `unknown memory space: ${spaceId}` }
+    if (!deps.spaceAccess?.can(sessionId, spaceId, action)) {
+      return { ok: false, error: `memory space ${action} not granted: ${spaceId}` }
+    }
+    return { ok: true, dir: spaceDir(space) }
+  }
+
+  const canWriteSpace = (sessionId: string, spaceId: string): boolean =>
+    deps.spaceAccess?.can(sessionId, spaceId, 'write') === true
+    || (policyOf(sessionId).write.approval === 'off'
+      && deps.spaceAccess?.can(sessionId, spaceId, 'propose') === true)
+
+  /** space 内 target：已带空间目录就原样，否则自动加前缀。 */
+  const targetInSpace = (dir: string, value: string): string => {
+    const body = value.startsWith('detail:') ? value.slice('detail:'.length) : value
+    const segments = body.split('/').filter(part => part.length > 0)
+    if (segments.length === 0 || segments.some(part => part === '..' || part.startsWith('.'))) {
+      throw new Error(`invalid memory target in space: ${value}`)
+    }
+    const joined = segments[0] === dir ? segments.join('/') : [dir, ...segments].join('/')
+    return `detail:${joined}`
+  }
+
+  /** 解析 space + target；不传 space 就退回共享域（下划线目录仍禁止）。 */
+  const resolveTarget = (
+    sessionId: string,
+    action: 'read' | 'write' | 'propose',
+    value: string,
+    spaceId: string | undefined,
+  ): { target: string } | { error: string } => {
+    if (spaceId === undefined || spaceId.length === 0) {
+      try {
+        return { target: sharedTarget(value) }
+      } catch (error) {
+        return { error: error instanceof Error ? error.message : String(error) }
+      }
+    }
+    const resolved = resolveSpace(sessionId, spaceId, action)
+    if (!resolved.ok) return { error: resolved.error }
+    try {
+      return { target: targetInSpace(resolved.dir, value) }
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  const topSegmentOf = (value: string): string => {
+    const body = value.startsWith('detail:') ? value.slice('detail:'.length) : value
+    return body.split('/')[0] ?? ''
+  }
+
+  /** 检索命中过滤：共享域看 shared 权限；下划线域看对应空间的可读性。 */
+  const hitReadable = (sessionId: string, target: string): boolean => {
+    const top = topSegmentOf(target)
+    if (!top.startsWith('_')) return deps.access.canRead(sessionId, 'shared')
+    const visible = deps.spaceAccess?.visibleSpaces(sessionId) ?? []
+    return visible.some(space => spaceDir(space) === top)
+  }
+
+  const spaceIdOfInput = (input: Record<string, unknown>): string | undefined => {
+    const value = input.space
+    return typeof value === 'string' && value.length > 0 ? value : undefined
+  }
+
   const search: ToolDefinition = {
     name: 'memory_search',
-    description: '在共享 detail 记忆里搜索内容；只返回命中预览，不返回全文。',
+    description: '在共享 detail 记忆里搜索内容；只返回命中预览。带 space 参数可搜对应记忆空间。',
     inputSchema: {
       type: 'object',
       properties: {
         query: { type: 'string' },
         limit: { type: 'number', minimum: 1, maximum: 100 },
+        space: { type: 'string', description: '记忆空间 id；不传只搜共享域' },
       },
       required: ['query'],
       additionalProperties: false,
@@ -106,39 +185,52 @@ export function createMemoryTools(deps: {
       if (policyOf(context.sessionId).mode === 'off') {
         return denied('memory is turned off for this session')
       }
-      if (!deps.access.canRead(context.sessionId, 'shared')) {
+      const input = args as { query: string; limit?: number; space?: string }
+      const limit = Math.max(1, Math.min(Math.floor(input.limit ?? 20), 100))
+      let scopedDir: string | undefined
+      if (input.space !== undefined && input.space.length > 0) {
+        const resolved = resolveSpace(context.sessionId, input.space, 'read')
+        if (!resolved.ok) return denied(resolved.error)
+        scopedDir = resolved.dir
+      } else if (!deps.access.canRead(context.sessionId, 'shared')) {
         return denied('memory read not granted')
       }
-      const input = args as { query: string; limit?: number }
+      // 索引里可能混着私域条目，先多取一些再按权限过滤。
+      const fetchLimit = Math.min(limit * 4, 100)
       let hits
       try {
         const semanticReady = deps.semanticIndex?.status().ready
         hits = semanticReady && deps.semanticIndex
-          ? await deps.semanticIndex.search(input.query, { limit: input.limit ?? 20 })
+          ? await deps.semanticIndex.search(input.query, { limit: fetchLimit })
           : deps.searchIndex
-            ? deps.searchIndex.search(input.query, { limit: input.limit ?? 20 })
-            : deps.store.search(input.query, input.limit ?? 20)
+            ? deps.searchIndex.search(input.query, { limit: fetchLimit })
+            : deps.store.search(input.query, fetchLimit, { includePrivate: true })
       } catch {
         hits = deps.searchIndex
-          ? deps.searchIndex.search(input.query, { limit: input.limit ?? 20 })
-          : deps.store.search(input.query, input.limit ?? 20)
+          ? deps.searchIndex.search(input.query, { limit: fetchLimit })
+          : deps.store.search(input.query, fetchLimit, { includePrivate: true })
       }
+      const filtered = hits
+        .filter(hit => hitReadable(context.sessionId, hit.target))
+        .filter(hit => scopedDir === undefined || topSegmentOf(hit.target) === scopedDir)
+        .slice(0, limit)
       return {
-        text: hits.map(hit => `${hit.target}#${hit.id} [${hit.tag}] ${hit.preview}`).join('\n')
+        text: filtered.map(hit => `${hit.target}#${hit.id} [${hit.tag}] ${hit.preview}`).join('\n')
           || '（没有命中）',
-        structured: { hits },
+        structured: { hits: filtered },
       }
     },
   }
 
   const read: ToolDefinition = {
     name: 'memory_read',
-    description: '读取一个 detail 记忆文件，或其中一条 entry。',
+    description: '读取一个 detail 记忆文件，或其中一条 entry。带 space 参数可读对应记忆空间。',
     inputSchema: {
       type: 'object',
       properties: {
         target: { type: 'string', description: 'detail:<domain>/<file>' },
         id: { type: 'string' },
+        space: { type: 'string', description: '记忆空间 id；不传只读共享域' },
       },
       required: ['target'],
       additionalProperties: false,
@@ -148,11 +240,14 @@ export function createMemoryTools(deps: {
       if (policyOf(context.sessionId).mode === 'off') {
         return denied('memory is turned off for this session')
       }
-      if (!deps.access.canRead(context.sessionId, 'shared')) {
+      const input = args as { target: string; id?: string; space?: string }
+      if ((input.space === undefined || input.space.length === 0)
+        && !deps.access.canRead(context.sessionId, 'shared')) {
         return denied('memory read not granted')
       }
-      const input = args as { target: string; id?: string }
-      const doc = deps.store.read(sharedTarget(input.target))
+      const resolved = resolveTarget(context.sessionId, 'read', input.target, input.space)
+      if ('error' in resolved) return denied(resolved.error)
+      const doc = deps.store.read(resolved.target)
       if (input.id) {
         const entry = doc.entries.find(item => item.id === input.id)
         if (!entry) return { text: `memory entry not found: ${input.id}`, isError: true }
@@ -172,7 +267,7 @@ export function createMemoryTools(deps: {
 
   const add: ToolDefinition = {
     name: 'memory_add',
-    description: '向共享 detail 追加一条记忆。必须有 write:shared 能力。',
+    description: '向共享 detail 追加一条记忆；带 space 参数写入对应记忆空间。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -182,6 +277,7 @@ export function createMemoryTools(deps: {
         at: { type: 'string' },
         quotes: { type: 'array', items: QUOTE_SCHEMA },
         introduction: { type: 'string', description: '新文件必填' },
+        space: { type: 'string', description: '记忆空间 id；不传写共享域' },
       },
       required: ['target', 'content', 'tag'],
       additionalProperties: false,
@@ -190,13 +286,20 @@ export function createMemoryTools(deps: {
       if (policyOf(context.sessionId).mode === 'off') {
         return denied('memory is turned off for this session')
       }
-      if (!canWrite(context.sessionId)) {
-        return denied('memory write not granted; use memory_propose or turn write approval off')
-      }
       const input = args as Record<string, unknown>
-      const entry = await deps.store.add(sharedTarget(String(input.target)), entryInput(input))
+      const spaceId = spaceIdOfInput(input)
+      if (spaceId === undefined) {
+        if (!canWrite(context.sessionId)) {
+          return denied('memory write not granted; use memory_propose or turn write approval off')
+        }
+      } else if (!canWriteSpace(context.sessionId, spaceId)) {
+        return denied(`memory space write not granted: ${spaceId}`)
+      }
+      const resolved = resolveTarget(context.sessionId, 'write', String(input.target), spaceId)
+      if ('error' in resolved) return denied(resolved.error)
+      const entry = await deps.store.add(resolved.target, entryInput(input))
       return {
-        text: `已写入 ${String(input.target)}#${entry.id}`,
+        text: `已写入 ${resolved.target}#${entry.id}`,
         structured: entry,
       }
     },
@@ -204,7 +307,7 @@ export function createMemoryTools(deps: {
 
   const update: ToolDefinition = {
     name: 'memory_update',
-    description: '更新共享 detail 的一条记忆。必须有 write:shared 能力。',
+    description: '更新共享 detail 的一条记忆；带 space 参数更新对应记忆空间。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -215,6 +318,7 @@ export function createMemoryTools(deps: {
         at: { type: 'string' },
         quotes: { type: 'array', items: QUOTE_SCHEMA },
         expectedRevTime: { type: 'string' },
+        space: { type: 'string', description: '记忆空间 id；不传更新共享域' },
       },
       required: ['target', 'id'],
       additionalProperties: false,
@@ -223,11 +327,18 @@ export function createMemoryTools(deps: {
       if (policyOf(context.sessionId).mode === 'off') {
         return denied('memory is turned off for this session')
       }
-      if (!canWrite(context.sessionId)) {
-        return denied('memory write not granted; use memory_propose or turn write approval off')
-      }
       const input = args as Record<string, unknown>
-      const entry = await deps.store.update(sharedTarget(String(input.target)), String(input.id), {
+      const spaceId = spaceIdOfInput(input)
+      if (spaceId === undefined) {
+        if (!canWrite(context.sessionId)) {
+          return denied('memory write not granted; use memory_propose or turn write approval off')
+        }
+      } else if (!canWriteSpace(context.sessionId, spaceId)) {
+        return denied(`memory space write not granted: ${spaceId}`)
+      }
+      const resolved = resolveTarget(context.sessionId, 'write', String(input.target), spaceId)
+      if ('error' in resolved) return denied(resolved.error)
+      const entry = await deps.store.update(resolved.target, String(input.id), {
         ...(input.content !== undefined ? { content: String(input.content) } : {}),
         ...(input.tag !== undefined ? { tag: parseTag(input.tag) } : {}),
         ...(input.at !== undefined ? { at: input.at === null ? null : String(input.at) } : {}),
@@ -237,7 +348,7 @@ export function createMemoryTools(deps: {
           : {}),
       })
       return {
-        text: `已更新 ${String(input.target)}#${entry.id}`,
+        text: `已更新 ${resolved.target}#${entry.id}`,
         structured: entry,
       }
     },
@@ -258,6 +369,7 @@ export function createMemoryTools(deps: {
         reason: { type: 'string' },
         section: { type: 'string', description: 'identity 的二级标题' },
         mode: { type: 'string', enum: ['replace-section', 'append'] },
+        space: { type: 'string', description: '记忆空间 id；不传提议共享域' },
       },
       required: ['target', 'content'],
       additionalProperties: false,
@@ -297,21 +409,59 @@ export function createMemoryTools(deps: {
         }
       }
 
-      if (!deps.access.canPropose(context.sessionId, 'shared')) {
+      const spaceId = spaceIdOfInput(input)
+      if (spaceId === undefined && !deps.access.canPropose(context.sessionId, 'shared')) {
         return denied('memory propose not granted')
       }
+      const resolved = resolveTarget(context.sessionId, 'propose', target, spaceId)
+      if ('error' in resolved) return denied(resolved.error)
       const proposal = deps.proposals.propose({
-        target: sharedTarget(target),
+        target: resolved.target,
         sourceSession: context.sessionId,
         entry: entryInput(input),
         ...(typeof input.reason === 'string' ? { reason: input.reason } : {}),
       })
       return {
-        text: `已提交记忆提议 ${proposal.proposalId}`,
+        text: `已提交记忆提议 ${proposal.proposalId} → ${resolved.target}`,
         structured: proposal,
       }
     },
   }
 
-  return [search, read, add, update, propose]
+  const kindText: Record<string, string> = {
+    private: '私域',
+    shared: '共有',
+    user: '用户空间',
+  }
+
+  const spacesTool: ToolDefinition = {
+    name: 'memory_spaces',
+    description: '列出当前会话可见的记忆空间与权限；读写它们时给别的记忆工具传 space 参数。',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    },
+    meta: { readOnly: true },
+    async run(_args, context) {
+      if (policyOf(context.sessionId).mode === 'off') {
+        return denied('memory is turned off for this session')
+      }
+      const described = deps.spaceAccess?.describe(context.sessionId) ?? []
+      if (described.length === 0) {
+        return { text: '（没有可见的记忆空间）', structured: { spaces: [] } }
+      }
+      const text = described.map(space => {
+        const bits = [
+          `- ${space.id}（${kindText[space.kind] ?? space.kind}，角色 ${space.role}`,
+          space.autoPush ? '，自动推送' : '',
+          space.description ? `）${space.description}` : '）',
+        ]
+        return bits.join('')
+      }).join('\n')
+      return { text, structured: { spaces: described } }
+    },
+  }
+
+  return [search, read, add, update, propose, spacesTool]
 }

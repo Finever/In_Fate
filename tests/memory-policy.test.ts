@@ -87,13 +87,12 @@ test('记忆工具：worker 默认只能 propose，approval off 后可直接写�
     assert.equal(observerDenied.isError, true)
 
     // shared 工具不能借 detail:_... 绕过私域隐藏。
-    await assert.rejects(
-      () => tools.get('memory_read')!.run(
-        { target: 'detail:_私域/秘密' },
-        context('user-session'),
-      ),
-      /private memory target/,
+    const privateDenied = await tools.get('memory_read')!.run(
+      { target: 'detail:_私域/秘密' },
+      context('user-session'),
     )
+    assert.equal(privateDenied.isError, true)
+    assert.match(privateDenied.text ?? '', /private memory target/)
     index.markDirty()
 
     const searched = await tools.get('memory_search')!.run(

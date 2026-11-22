@@ -31,11 +31,25 @@ import { compactIfNeeded } from '../compaction/fold.ts'
 import type { CompactionConfig, CompactionPayload } from '../compaction/types.ts'
 import { staticSection, sessionMemorySection, timeSection } from '../context/sections.ts'
 import { memoryPushSection } from '../context/memory-push.ts'
+import { memorySpacesSection } from '../context/memory-spaces.ts'
 import type { ContextSection } from '../context/types.ts'
 import { BlobStore } from '../core/blobs.ts'
 import { FsPolicy } from '../core/fs-policy.ts'
 import { HostLease } from '../core/host-lease.ts'
 import { Metrics, type MetricsSnapshot } from '../core/metrics.ts'
+import { backfillUsage } from '../usage/backfill.ts'
+import { UsageLedger } from '../usage/ledger.ts'
+import type {
+  UsageBucket,
+  UsageFilter,
+  UsageGroupBy,
+  UsageGroupRow,
+  UsageLedgerStats,
+  UsageOverview,
+  UsageRequestPage,
+  UsageTimeZone,
+  UsageTimelinePoint,
+} from '../usage/types.ts'
 import { NetworkPolicy } from '../core/network-policy.ts'
 import { RiskGuard } from '../core/risk-guard.ts'
 import { registerCoreEvents } from '../core/registry.ts'
@@ -49,6 +63,8 @@ import { AgentManifestStore, type AgentManifest, type IdentitySlot } from '../me
 import { AgentIdentityStore, type IdentityBackup } from '../memory/identity-slots.ts'
 import { ManifestIdentityStore } from '../memory/identity-adapter.ts'
 import { MemoryAccess, type MemoryRole } from '../memory/access.ts'
+import { MemorySpaceAccess } from '../memory/space-access.ts'
+import { MemorySpaceStore, spaceDir } from '../memory/space.ts'
 import { MemoryCommitter } from '../memory/committer.ts'
 import { MemoryLogService } from '../memory/internal-log.ts'
 import { MemoryIdentityStore } from '../memory/identity.ts'
@@ -249,6 +265,25 @@ export interface SessionLifecycleInput {
   readonly force?: boolean
 }
 
+export interface UsageOverviewOptions {
+  readonly timeZone?: UsageTimeZone
+}
+
+export interface UsageTimelineOptions {
+  readonly bucket?: UsageBucket
+  readonly timeZone?: UsageTimeZone
+}
+
+export interface UsageGroupsOptions {
+  readonly groupBy: UsageGroupBy
+  readonly limit?: number
+}
+
+export interface UsageRequestOptions {
+  readonly limit?: number
+  readonly offset?: number
+}
+
 export interface App {
   readonly config: AppConfig
   readonly models: ModelRegistry
@@ -333,6 +368,17 @@ export interface App {
   waitForAgents(timeoutMs?: number): Promise<{ active: number; queued: number }>
   /** 进程内指标快照；关闭指标时返回空快照。 */
   metrics(): MetricsSnapshot
+
+  /** 用量账本状态（条数与回填进度）。 */
+  usageStats(): UsageLedgerStats
+  /** 用量总览：聚合 + 活跃日 / 连胜 / 峰值等派生指标。 */
+  usageOverview(filter: UsageFilter, options?: UsageOverviewOptions): UsageOverview
+  /** 用量时间线；同一 bucket 多币种时按 currency 拆行。 */
+  usageTimeline(filter: UsageFilter, options?: UsageTimelineOptions): readonly UsageTimelinePoint[]
+  /** 用量分组排行（provider/model/agent/session/key/source/...）。 */
+  usageGroups(filter: UsageFilter, options: UsageGroupsOptions): readonly UsageGroupRow[]
+  /** 用量请求明细分页，按时间倒序。 */
+  usageRequests(filter: UsageFilter, options?: UsageRequestOptions): UsageRequestPage
 
   /** 本地 embedding 模型清单与安装状态。 */
   embeddingModels(): EmbeddingModelStatus[]
@@ -796,6 +842,19 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
 
   // 运行时策略：默认开；配置可以关，但关的是检查，不是事件记录。
   const metrics = config.patch?.runtime?.metrics === false ? undefined : new Metrics()
+  const usageLedger = UsageLedger.openForDataRoot(config.profile.dataRoot)
+  container.register('usageLedger', usageLedger)
+  container.onDispose('usageLedger', () => usageLedger.close())
+  const usagePatch = config.patch?.runtime?.usage
+  setImmediate(() => {
+    void backfillUsage(config.profile.dataRoot, usageLedger)
+      .then(() => {
+        // 回填完再按保留策略聚合清理：早于保留期的明细聚成日汇总后删除。
+        if (usagePatch?.rollupOnStart === false) return
+        usageLedger.rollup({ detailDays: usagePatch?.detailRetentionDays ?? 1095 })
+      })
+      .catch(() => undefined)
+  })
   const modelRetry = resolveRetryPolicy(config.patch?.runtime?.model?.retry)
   const admission = config.patch?.runtime?.model?.admission
   const modelGate = admission?.enabled === false
@@ -1609,25 +1668,11 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     return modelConfigView()
   }
 
-  const probeModelProvider = async (
-    input: ModelProbeInput,
-  ): Promise<{ models: readonly string[] }> => {
-    const provider = models.get(input.provider)
-    const override = providerOverrides.get(provider.id)
-    const requestedFormat = input.format?.trim()
-    const family = requestedFormat
-      || provider.defaultChatEndpoint
-      || Object.keys(provider.endpoints)[0]
-    if (requestedFormat && !provider.endpoints[requestedFormat]) {
-      throw new Error(`provider ${provider.id} has no endpoint: ${requestedFormat}`)
-    }
-    const baseUrl = input.baseUrl?.trim()
-      || (family ? override?.baseUrls?.[family] : undefined)
-      || (family ? provider.endpoints[family]?.baseUrl : '')
-    if (!baseUrl) throw new Error(`provider ${provider.id} has no baseUrl`)
-    const apiKey = input.apiKey?.trim()
-      || models.resolveApiKeys(provider)[0]
-
+  const probeEndpointRequest = (
+    family: string,
+    baseUrl: string,
+    apiKey: string | undefined,
+  ): { url: string; headers: Record<string, string> } => {
     const endpointFormat = normalizeEndpointFamily(family)
     // Chat Completions 与对话请求同一约定：baseUrl 自带版本段。
     const url = endpointFormat === 'openai-chat-completions'
@@ -1648,53 +1693,121 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
           ? (apiKey ? { 'x-goog-api-key': apiKey } : {})
           : (apiKey ? { authorization: `Bearer ${apiKey}` } : {})),
     }
+    return { url, headers }
+  }
 
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 10_000)
-    try {
-      const response = await fetch(url, {
-        headers,
-        signal: controller.signal,
-      })
-      const text = await response.text()
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${text.slice(0, 200)}`)
-      }
-      let body: unknown
-      try {
-        body = JSON.parse(text)
-      } catch {
-        throw new Error('返回不是 JSON')
-      }
-      const rows: unknown[] = Array.isArray(body)
-        ? body
-        : (typeof body === 'object' && body !== null
-          && Array.isArray((body as { data?: unknown }).data))
-          ? (body as { data: unknown[] }).data
-          : (typeof body === 'object' && body !== null
-            && Array.isArray((body as { models?: unknown }).models))
-            ? (body as { models: unknown[] }).models
-            : []
-      const ids = rows.map(row => {
-        if (typeof row === 'string') return row
-        if (typeof row !== 'object' || row === null) return ''
-        const record = row as { id?: unknown; name?: unknown }
-        const value = typeof record.id === 'string'
-          ? record.id
-          : (typeof record.name === 'string' ? record.name : '')
-        return value.replace(/^models\//, '')
-      }).filter(id => id.length > 0)
-      const unique = [...new Set(ids)].sort()
-      if (unique.length === 0) throw new Error('返回里没有模型 id')
-      return { models: unique }
-    } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
-        throw new Error('读取模型列表超时（10 秒）')
-      }
-      throw error
-    } finally {
-      clearTimeout(timer)
+  const probeModelProvider = async (
+    input: ModelProbeInput,
+  ): Promise<{ models: readonly string[] }> => {
+    const provider = models.get(input.provider)
+    const override = providerOverrides.get(provider.id)
+    const requestedFormat = input.format?.trim()
+    if (requestedFormat && !provider.endpoints[requestedFormat]) {
+      throw new Error(`provider ${provider.id} has no endpoint: ${requestedFormat}`)
     }
+    const families: string[] = []
+    const addFamily = (family: string | undefined): void => {
+      if (!family || !provider.endpoints[family] || families.includes(family)) return
+      families.push(family)
+    }
+    addFamily(requestedFormat)
+    addFamily(provider.defaultChatEndpoint)
+    for (const family of Object.keys(provider.endpoints)) addFamily(family)
+    if (families.length === 0) throw new Error(`provider ${provider.id} has no endpoint`)
+
+    const apiKey = input.apiKey?.trim()
+      || models.resolveApiKeys(provider)[0]
+    const errors: string[] = []
+    const seen = new Set<string>()
+    const deadline = Date.now() + 20_000
+
+    for (const family of families) {
+      const remaining = deadline - Date.now()
+      if (remaining <= 0) {
+        errors.push('总超时（20 秒）')
+        break
+      }
+      const baseUrl = (family === families[0] ? input.baseUrl?.trim() : undefined)
+        || override?.baseUrls?.[family]
+        || provider.endpoints[family]?.baseUrl
+      if (!baseUrl) {
+        errors.push(`${family}: 没有 baseUrl`)
+        continue
+      }
+      let request: { url: string; headers: Record<string, string> }
+      try {
+        request = probeEndpointRequest(family, baseUrl, apiKey)
+      } catch (error) {
+        errors.push(`${family}: ${error instanceof Error ? error.message : String(error)}`)
+        continue
+      }
+      const dedupeKey = `${request.url}\u0000${
+        request.headers.authorization
+          ?? request.headers['x-api-key']
+          ?? request.headers['x-goog-api-key']
+          ?? ''
+      }`
+      if (seen.has(dedupeKey)) continue
+      seen.add(dedupeKey)
+
+      const controller = new AbortController()
+      const timer = setTimeout(
+        () => controller.abort(),
+        Math.max(1_000, Math.min(10_000, deadline - Date.now())),
+      )
+      try {
+        const response = await fetch(request.url, {
+          headers: request.headers,
+          signal: controller.signal,
+        })
+        const text = await response.text()
+        if (!response.ok) {
+          errors.push(`${family}: HTTP ${response.status}: ${text.slice(0, 200)}`)
+          continue
+        }
+        let body: unknown
+        try {
+          body = JSON.parse(text)
+        } catch {
+          errors.push(`${family}: 返回不是 JSON`)
+          continue
+        }
+        const rows: unknown[] = Array.isArray(body)
+          ? body
+          : (typeof body === 'object' && body !== null
+            && Array.isArray((body as { data?: unknown }).data))
+            ? (body as { data: unknown[] }).data
+            : (typeof body === 'object' && body !== null
+              && Array.isArray((body as { models?: unknown }).models))
+              ? (body as { models: unknown[] }).models
+              : []
+        const ids = rows.map(row => {
+          if (typeof row === 'string') return row
+          if (typeof row !== 'object' || row === null) return ''
+          const record = row as { id?: unknown; name?: unknown }
+          const value = typeof record.id === 'string'
+            ? record.id
+            : (typeof record.name === 'string' ? record.name : '')
+          return value.replace(/^models\//, '')
+        }).filter(id => id.length > 0)
+        const unique = [...new Set(ids)].sort()
+        if (unique.length === 0) {
+          errors.push(`${family}: 返回里没有模型 id`)
+          continue
+        }
+        return { models: unique }
+      } catch (error) {
+        errors.push(
+          `${family}: ${error instanceof Error && error.name === 'AbortError'
+            ? '超时'
+            : error instanceof Error ? error.message : String(error)}`,
+        )
+      } finally {
+        clearTimeout(timer)
+      }
+    }
+
+    throw new Error(`读取模型列表失败：\n${errors.map(item => `- ${item}`).join('\n')}`)
   }
 
   // 全文库与写时卸载：工具结果落事件前经过它。
@@ -1974,7 +2087,16 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     container.onDispose('memorySummaryWorker', () => memorySummaryWorker?.stop())
   }
   const memorySelector = memoryStore && memorySummaries
-    ? new HeuristicMemorySelector({ store: memoryStore, summaries: memorySummaries })
+    ? new HeuristicMemorySelector({
+      store: memoryStore,
+      summaries: memorySummaries,
+      // memorySpaceAccess 在下面装配；这个回调跑轮次时才调用，不会提前触发。
+      autoPushDirsFor: sessionId => memorySpaceAccess === undefined
+        ? []
+        : memorySpaceAccess.visibleSpaces(sessionId)
+          .filter(space => memorySpaceAccess.canAutoPush(sessionId, space.id))
+          .map(space => spaceDir(space)),
+    })
     : undefined
   if (memoryPolicyStore && memorySelector) {
     memoryPush = new MemoryPushService({
@@ -2029,6 +2151,16 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       sessionId => sessionInfo(config.profile.dataRoot, sessionId),
     )
     : undefined
+  const memorySpaces = memoryStore && memoryRoot
+    ? new MemorySpaceStore(memoryRoot)
+    : undefined
+  const memorySpaceAccess = memoryStore && memorySpaces && memoryAccess
+    ? new MemorySpaceAccess(
+      memorySpaces,
+      memoryAccess,
+      sessionId => sessionInfo(config.profile.dataRoot, sessionId)?.agentId ?? mainAgentId,
+    )
+    : undefined
   const memoryProposals = memoryStore
     ? new MemoryProposalStore(
       memoryRoot!,
@@ -2055,13 +2187,22 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       ...(memoryPolicyStore ? { policy: memoryPolicyStore } : {}),
       ...(memorySearchIndex ? { searchIndex: memorySearchIndex } : {}),
       ...(semanticMemoryIndex ? { semanticIndex: semanticMemoryIndex } : {}),
+      ...(memorySpaces ? { spaces: memorySpaces } : {}),
+      ...(memorySpaceAccess ? { spaceAccess: memorySpaceAccess } : {}),
     })) {
       tools.register(tool, 'builtin')
     }
     container.register('memoryStore', memoryStore)
     if (memoryLibrary) container.register('memoryLibrary', memoryLibrary)
     container.register('memoryAccess', memoryAccess)
+    if (memorySpaces) container.register('memorySpaces', memorySpaces)
+    if (memorySpaceAccess) container.register('memorySpaceAccess', memorySpaceAccess)
     container.register('memoryProposals', memoryProposals)
+    if (memorySpaces && memoryRoot) {
+      setImmediate(() => {
+        void memorySpaces.migratePrivateDirs(join(memoryRoot, 'detail')).catch(() => undefined)
+      })
+    }
     if (memoryPolicyStore) container.register('memoryPolicy', memoryPolicyStore)
     if (memorySearchIndex) {
       container.register('memorySearch', memorySearchIndex)
@@ -2244,6 +2385,9 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
   if (memoryPush) {
     sections.push(memoryPushSection('jev-memory', memoryPush, 95))
   }
+  if (memorySpaceAccess) {
+    sections.push(memorySpacesSection('memory-spaces', memorySpaceAccess, 92))
+  }
   sections.push(timeSection())
 
   const maxBytes = config.patch?.context?.maxBytes
@@ -2259,6 +2403,10 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
     const agentId = agentIdOfSession(input.sessionId)
     const model = resolveAgentModel(agentId)
     const settings = agentSettingsOf(agentId)
+    const source: 'user' | 'subagent' = (() => {
+      const info = sessionInfo(config.profile.dataRoot, input.sessionId)
+      return info?.kind === 'agent' || info?.createdBy?.startsWith('agent') ? 'subagent' : 'user'
+    })()
     const meta = sessionMeta.metaOf(input.sessionId)
     const assistantPrefill = meta?.thinkingHeadEnabled
       && meta.thinkingHead
@@ -2280,6 +2428,9 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
       modelRetry,
       ...(modelGate ? { modelGate } : {}),
       priority: input.priority ?? 'interactive',
+      agentId,
+      source,
+      usageLedger,
       ...(assistantPrefill ? { assistantPrefill } : {}),
       ...(skipStartEvent ? { skipStartEvent: true } : {}),
       ...(settings?.tools?.allow !== undefined
@@ -3252,6 +3403,26 @@ export function buildBundle(rawConfig: AppConfig, container: Container, options:
         histograms: [],
         gauges: [],
       }
+    },
+
+    usageStats() {
+      return usageLedger.stats()
+    },
+
+    usageOverview(filter, options) {
+      return usageLedger.overview(filter, options ?? {})
+    },
+
+    usageTimeline(filter, options) {
+      return usageLedger.timeline(filter, options ?? {})
+    },
+
+    usageGroups(filter, options) {
+      return usageLedger.groups(filter, options)
+    },
+
+    usageRequests(filter, options) {
+      return usageLedger.requests(filter, options ?? {})
     },
 
     embeddingModels() {

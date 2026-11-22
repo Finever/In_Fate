@@ -48,6 +48,14 @@ import type {
   UiSessionStats,
   UiTimelineItem,
   UiTurnMeta,
+  UsageBucket,
+  UsageGroupBy,
+  UsageGroupRow,
+  UsageLedgerStats,
+  UsageOverview,
+  UsageRequestPage,
+  UsageTimeZone,
+  UsageTimelinePoint,
 } from './types'
 
 export class ApiError extends Error {
@@ -134,6 +142,56 @@ function query(values: { includeArchived?: boolean; includeDeleted?: boolean }):
 export interface WorkspaceQuery {
   includeArchived?: boolean
   includeDeleted?: boolean
+}
+
+export interface UsageQueryParams {
+  from?: string
+  to?: string
+  providerId?: string
+  modelId?: string
+  agentId?: string
+  sessionId?: string
+  apiKeyId?: string
+  source?: string
+  modality?: string
+  status?: string
+  priority?: string
+  currency?: string
+  recordKind?: 'invocation' | 'legacy-aggregate' | 'rolled'
+  priced?: boolean
+}
+
+const USAGE_FILTER_KEYS: ReadonlyArray<readonly [keyof UsageQueryParams, string]> = [
+  ['from', 'from'],
+  ['to', 'to'],
+  ['providerId', 'provider'],
+  ['modelId', 'model'],
+  ['agentId', 'agent'],
+  ['sessionId', 'session'],
+  ['apiKeyId', 'key'],
+  ['source', 'source'],
+  ['modality', 'modality'],
+  ['status', 'status'],
+  ['priority', 'priority'],
+  ['currency', 'currency'],
+  ['recordKind', 'recordKind'],
+]
+
+function usageQuery(
+  params: UsageQueryParams,
+  extra: { [key: string]: string | number | undefined } = {},
+): string {
+  const search = new URLSearchParams()
+  for (const [field, key] of USAGE_FILTER_KEYS) {
+    const value = params[field]
+    if (value !== undefined && value !== '') search.set(key, String(value))
+  }
+  if (params.priced !== undefined) search.set('priced', params.priced ? 'true' : 'false')
+  for (const [key, value] of Object.entries(extra)) {
+    if (value !== undefined) search.set(key, String(value))
+  }
+  const text = search.toString()
+  return text ? `?${text}` : ''
 }
 
 export const api = {
@@ -830,5 +888,57 @@ export const api = {
       { method: 'PATCH', body: JSON.stringify(input) },
     )
     return body.meta
+  },
+
+  async usageStats(): Promise<UsageLedgerStats> {
+    const body = await request<{ usage: UsageLedgerStats }>('/api/usage')
+    return body.usage
+  },
+
+  async usageOverview(
+    params: UsageQueryParams = {},
+    timeZone: UsageTimeZone = 'local',
+  ): Promise<UsageOverview> {
+    const body = await request<{ overview: UsageOverview }>(
+      `/api/usage/overview${usageQuery(params, { timeZone })}`,
+    )
+    return body.overview
+  },
+
+  async usageTimeline(
+    params: UsageQueryParams = {},
+    options: { bucket?: UsageBucket; timeZone?: UsageTimeZone } = {},
+  ): Promise<UsageTimelinePoint[]> {
+    const body = await request<{ points: UsageTimelinePoint[] }>(
+      `/api/usage/timeline${usageQuery(params, {
+        bucket: options.bucket,
+        timeZone: options.timeZone ?? 'local',
+      })}`,
+    )
+    return body.points
+  },
+
+  async usageGroups(
+    params: UsageQueryParams = {},
+    groupBy: UsageGroupBy = 'model',
+    limit?: number,
+  ): Promise<UsageGroupRow[]> {
+    const body = await request<{ rows: UsageGroupRow[] }>(
+      `/api/usage/groups${usageQuery(params, { groupBy, limit })}`,
+    )
+    return body.rows
+  },
+
+  async usageRequests(
+    params: UsageQueryParams = {},
+    options: { limit?: number; offset?: number } = {},
+  ): Promise<UsageRequestPage> {
+    const body = await request<{ page: UsageRequestPage }>(
+      `/api/usage/requests${usageQuery(params, {
+        limit: options.limit,
+        offset: options.offset,
+      })}`,
+    )
+    return body.page
   },
 }

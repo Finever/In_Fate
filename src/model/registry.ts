@@ -17,6 +17,21 @@ export interface ResolvedModel {
   readonly family?: string
 }
 
+export interface ResolvedApiKey {
+  readonly key: string
+  /** 只用于展示和统计；原始 key 不落任何日志/账本。 */
+  readonly masked: string
+  readonly id?: string
+  readonly label?: string
+  readonly source: 'config' | 'legacy' | 'env'
+}
+
+export function maskApiKey(key: string): string {
+  const trimmed = key.trim()
+  if (trimmed.length <= 8) return '***'
+  return `${trimmed.slice(0, 4)}…${trimmed.slice(-4)}`
+}
+
 export class ModelRegistry {
   private readonly providers = new Map<string, ProviderConfig>()
 
@@ -114,23 +129,41 @@ export class ModelRegistry {
   }
 
   /** 启用中的多密钥 → 旧单密钥 → 环境变量；去重、去空。 */
-  resolveApiKeys(provider: ProviderConfig): string[] {
-    const keys: string[] = []
+  resolveApiKeyEntries(provider: ProviderConfig): ResolvedApiKey[] {
+    const entries: ResolvedApiKey[] = []
+    const seen = new Set<string>()
+    const add = (
+      key: string | undefined,
+      meta: Omit<ResolvedApiKey, 'key' | 'masked'>,
+    ): void => {
+      const trimmed = typeof key === 'string' ? key.trim() : ''
+      if (!trimmed || seen.has(trimmed)) return
+      seen.add(trimmed)
+      entries.push({ key: trimmed, masked: maskApiKey(trimmed), ...meta })
+    }
     for (const entry of provider.apiKeys ?? []) {
       if (entry.isEnabled === false) continue
-      if (typeof entry.key !== 'string' || entry.key.trim().length === 0) continue
-      keys.push(entry.key.trim())
+      add(entry.key, {
+        ...(entry.id ? { id: entry.id } : {}),
+        ...(entry.name ? { label: entry.name } : {}),
+        source: 'config',
+      })
     }
-    if (typeof provider.apiKey === 'string' && provider.apiKey.trim()) {
-      keys.push(provider.apiKey.trim())
-    }
-    const env = provider.apiKeyEnv ? process.env[provider.apiKeyEnv]?.trim() : undefined
-    if (env) keys.push(env)
-    return [...new Set(keys)]
+    add(provider.apiKey, { source: 'legacy' })
+    const env = provider.apiKeyEnv ? process.env[provider.apiKeyEnv] : undefined
+    add(env, {
+      ...(provider.apiKeyEnv ? { label: provider.apiKeyEnv } : {}),
+      source: 'env',
+    })
+    return entries
+  }
+
+  resolveApiKeys(provider: ProviderConfig): string[] {
+    return this.resolveApiKeyEntries(provider).map(entry => entry.key)
   }
 
   resolveApiKey(provider: ProviderConfig): string | undefined {
-    return this.resolveApiKeys(provider)[0]
+    return this.resolveApiKeyEntries(provider)[0]?.key
   }
 
   load(path: string): readonly ProviderConfig[] {
@@ -169,6 +202,10 @@ export function resolveApiKey(provider: ProviderConfig): string | undefined {
 
 export function resolveApiKeys(provider: ProviderConfig): string[] {
   return defaultRegistry.resolveApiKeys(provider)
+}
+
+export function resolveApiKeyEntries(provider: ProviderConfig): ResolvedApiKey[] {
+  return defaultRegistry.resolveApiKeyEntries(provider)
 }
 
 export function loadRegistry(path: string): readonly ProviderConfig[] {

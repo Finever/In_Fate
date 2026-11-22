@@ -801,3 +801,124 @@ export interface PluginPanelContent extends PluginPanelInfo {
   pluginId: string
   html: string
 }
+
+export interface UsageLedgerStats {
+  requests: number
+  turns: number
+  tools: number
+  legacy: number
+  schemaVersion: number
+  backfillDone: boolean
+  backfillAt?: string
+  rollupRows: number
+  detailSince?: string
+}
+
+export interface UsageTokenTotals {
+  input: number
+  output: number
+  cacheRead: number
+  cacheWrite: number
+  reasoning: number
+  total: number
+}
+
+export interface UsageCurrencyTotal {
+  currency: string
+  total: number
+}
+
+export interface UsageOverview {
+  requests: number
+  turns: number
+  tokens: UsageTokenTotals
+  costTotal: number
+  costByCurrency: UsageCurrencyTotal[]
+  unpricedRequests: number
+  failedRequests: number
+  cacheHitRate: number
+  activeDays: number
+  longestStreak: number
+  peakDay?: { date: string; tokens: number }
+  topModel?: { providerId?: string; modelId?: string; tokens: number; cost: number }
+  dailyAverage: { tokens: number; requests: number }
+  avgFirstTokenMs?: number
+  avgDurationMs?: number
+  tps?: number
+}
+
+export interface UsageTimelinePoint {
+  bucket: string
+  requests: number
+  tokens: UsageTokenTotals
+  cost: number
+  currency?: string
+}
+
+export type UsageGroupBy =
+  | 'provider'
+  | 'model'
+  | 'agent'
+  | 'session'
+  | 'key'
+  | 'source'
+  | 'modality'
+  | 'status'
+  | 'priority'
+  | 'tool'
+
+export type UsageBucket = 'hour' | 'day' | 'week' | 'month'
+export type UsageTimeZone = 'local' | 'utc'
+
+export interface UsageGroupRow {
+  key: string
+  label: string
+  providerId?: string
+  modelId?: string
+  agentId?: string
+  sessionId?: string
+  apiKeyId?: string
+  source?: string
+  modality?: string
+  status?: string
+  requestCount: number
+  tokens: UsageTokenTotals
+  cost: number
+  currency?: string
+  toolErrors?: number
+  toolDurationMs?: number
+}
+
+export interface UsageRequestRow {
+  id: string
+  requestId: string
+  recordKind: 'invocation' | 'legacy-aggregate' | 'rolled'
+  requestCount: number
+  sessionId: string
+  turn: number | null
+  agentId?: string
+  source: string
+  providerId?: string
+  modelId?: string
+  apiKeyId?: string
+  apiKeyLabel?: string
+  apiKeyMasked?: string
+  modality: string
+  priority?: string
+  status: string
+  error?: string
+  tokens: UsageTokenTotals
+  cost: number
+  currency?: string
+  priced: boolean
+  durationMs?: number
+  firstTokenMs?: number
+  createdAt: string
+}
+
+export interface UsageRequestPage {
+  rows: UsageRequestRow[]
+  total: number
+  offset: number
+  limit: number
+}

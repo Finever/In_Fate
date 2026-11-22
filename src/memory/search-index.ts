@@ -121,7 +121,7 @@ export class MemorySearchIndex {
       this.dirty = true
     }
     const signature = this.store.listDocuments({
-      includePrivate: false,
+      includePrivate: true,
       includeInvalid: false,
     }).map(item => `${item.target}:${item.updatedAt}:${item.bytes}:${item.entries}`).join('\n')
     if (signature !== this.signature) {
@@ -133,7 +133,7 @@ export class MemorySearchIndex {
 
   private rebuild(): void {
     const db = this.db!
-    const docs = this.store.listDocuments({ includePrivate: false, includeInvalid: false })
+    const docs = this.store.listDocuments({ includePrivate: true, includeInvalid: false })
     db.exec('BEGIN')
     try {
       db.exec('DELETE FROM entries')

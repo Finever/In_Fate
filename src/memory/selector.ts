@@ -47,6 +47,15 @@ export interface HeuristicMemorySelectorOptions {
   readonly store: MemoryStore
   readonly summaries: MemorySummaryStore
   readonly now?: () => Date
+  /**
+   * 该会话可自动推送的私域目录名（如 `_weiliang`）；不配 = 只推共享域。
+   * 私域 autoPush 只对 owner agent 的 steward 会话开，由空间 ACL 决定。
+   */
+  readonly autoPushDirsFor?: (sessionId: string) => readonly string[]
+}
+
+function namespaceInDirs(namespace: string, dirs: readonly string[]): boolean {
+  return dirs.some(dir => namespace === dir || namespace.startsWith(`${dir}/`))
 }
 
 const TAG_WEIGHT: Record<MemoryTag, number> = { 确信: 3, 可信: 2, 有疑: 1 }
@@ -128,11 +137,13 @@ export class HeuristicMemorySelector implements MemorySelector {
   private readonly store: MemoryStore
   private readonly summaries: MemorySummaryStore
   private readonly now: () => Date
+  private readonly autoPushDirsFor?: (sessionId: string) => readonly string[]
 
   constructor(options: HeuristicMemorySelectorOptions) {
     this.store = options.store
     this.summaries = options.summaries
     this.now = options.now ?? (() => new Date())
+    if (options.autoPushDirsFor) this.autoPushDirsFor = options.autoPushDirsFor
   }
 
   select(input: MemorySelectionInput): MemoryPacket | undefined {
@@ -140,6 +151,7 @@ export class HeuristicMemorySelector implements MemorySelector {
     const queryTerms = termsOf(query)
     const maxEntries = Math.max(1, input.policy.maxEntries)
     const maxBytes = Math.max(512, input.policy.maxBytes)
+    const autoPushDirs = this.autoPushDirsFor?.(input.sessionId) ?? []
 
     const candidates: {
       target: string
@@ -147,7 +159,8 @@ export class HeuristicMemorySelector implements MemorySelector {
       cached?: MemoryEntrySummary
       score: number
     }[] = []
-    for (const file of this.store.listDocuments({ includePrivate: false, includeInvalid: false })) {
+    for (const file of this.store.listDocuments({ includePrivate: true, includeInvalid: false })) {
+      if (file.private && !namespaceInDirs(file.namespace ?? file.domain, autoPushDirs)) continue
       if (!scopeAllows(file.target, file.domain, input.policy)) continue
       let doc
       try {

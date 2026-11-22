@@ -11,6 +11,7 @@ import type { ResolvedModel } from '../src/model/registry.ts'
 import { InMemoryApprovalRegistry } from '../src/tools/approval.ts'
 import { ToolRegistry } from '../src/tools/registry.ts'
 import { projectUiTimeline } from '../src/ui/timeline.ts'
+import { UsageLedger } from '../src/usage/ledger.ts'
 
 const standard = (n: number) => ({ currency: 'CNY', perMillionTokens: n })
 
@@ -78,6 +79,7 @@ test('turn.completed 记录模型、耗时、用量与成本（缓存不重复�
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
   const port = (server.address() as AddressInfo).port
 
+  let ledger: UsageLedger | undefined
   try {
     const store = new EventStore(join(dir, 'session.jsonl'))
     store.append({ stream: 'session:s', actor: 'system', type: 'session.created', payload: {} })
@@ -91,6 +93,7 @@ test('turn.completed 记录模型、耗时、用量与成本（缓存不重复�
       },
     })
 
+    ledger = UsageLedger.open(join(dir, 'usage.sqlite'))
     const result = await runTurn('go', {
       store,
       sessionId: 's',
@@ -105,6 +108,9 @@ test('turn.completed 记录模型、耗时、用量与成本（缓存不重复�
       sections: [],
       maxSteps: 5,
       now: () => new Date('2026-10-24T00:00:00.000Z'),
+      agentId: 'agent',
+      source: 'user',
+      usageLedger: ledger,
     })
 
     assert.equal(result.status, 'completed')
@@ -130,7 +136,38 @@ test('turn.completed 记录模型、耗时、用量与成本（缓存不重复�
     assert.equal(turn?.turnUsage?.toolDurationMs, result.toolDurationMs)
     assert.equal(turn?.turnUsage?.cost?.total, result.cost?.total)
     assert.equal(turn?.turnUsage?.cost?.period, 'standard')
+
+    const requests = store.read().filter(event => event.type === 'usage.recorded')
+    assert.equal(requests.length, 2)
+    assert.equal(requests[0]?.payload.turn, 1)
+    assert.equal(requests[0]?.payload.agentId, 'agent')
+    assert.equal(requests[0]?.payload.provider, 'test')
+    assert.equal(requests[0]?.payload.model, 'm')
+    assert.equal(requests[0]?.payload.status, 'completed')
+    assert.equal(
+      (requests[0]?.payload.usage as { input: number }).input,
+      1_000,
+    )
+    assert.equal(
+      (requests[1]?.payload.usage as { input: number }).input,
+      2_000,
+    )
+    assert.equal(
+      (requests[0]?.payload.key as { masked: string }).masked,
+      '***',
+    )
+    assert.deepEqual(ledger.stats(), {
+      requests: 2,
+      turns: 1,
+      tools: 0,
+      legacy: 0,
+      schemaVersion: 4,
+      backfillDone: false,
+      rollupRows: 0,
+      detailSince: '2026-10-24T00:00:00.000Z',
+    })
   } finally {
+    ledger?.close()
     server.closeAllConnections?.()
     await new Promise<void>(resolve => server.close(() => resolve()))
     rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })

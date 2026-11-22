@@ -5242,3 +5242,384 @@ body.fw-resizing {
   color: var(--faint);
   font-size: 11px;
 }
+
+/* ---------- 设置：用量统计 ---------- */
+
+.fw-usage {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.fw-usage-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.fw-usage-head h3 {
+  margin: 0 0 2px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+.fw-usage-head small {
+  color: var(--faint);
+  font-size: 10.5px;
+}
+.fw-usage-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.fw-usage-range {
+  display: flex;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.fw-usage-range-btn {
+  padding: 5px 10px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+.fw-usage-range-btn + .fw-usage-range-btn {
+  border-left: 1px solid var(--line);
+}
+.fw-usage-range-btn:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, .04);
+}
+.fw-usage-range-btn.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.fw-usage-select,
+.fw-usage-input,
+.fw-usage-filters select {
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 11px;
+  outline: none;
+}
+.fw-usage-select:focus,
+.fw-usage-input:focus,
+.fw-usage-filters select:focus {
+  border-color: var(--line-strong);
+}
+.fw-usage-sync {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.fw-usage-sync:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+.fw-usage-sync:disabled {
+  opacity: .5;
+}
+
+.fw-usage-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.fw-usage-tab {
+  padding: 5px 12px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: none;
+  color: var(--muted);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.fw-usage-tab:hover {
+  color: var(--text);
+}
+.fw-usage-tab.is-active {
+  border-color: rgba(143, 123, 255, .28);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.fw-usage-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+.fw-usage-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .03);
+  color: var(--muted);
+  font-size: 10.5px;
+  cursor: pointer;
+}
+.fw-usage-chip:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.fw-usage-chip.is-clear {
+  border-style: dashed;
+}
+
+.fw-usage-error {
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 107, 125, .3);
+  border-radius: 8px;
+  background: rgba(255, 107, 125, .08);
+  color: var(--danger);
+  font-size: 11px;
+}
+.fw-usage-notice {
+  padding: 8px 10px;
+  border: 1px solid rgba(95, 227, 192, .25);
+  border-radius: 8px;
+  background: rgba(95, 227, 192, .07);
+  color: var(--mint);
+  font-size: 11px;
+}
+.fw-usage-empty {
+  padding: 24px 0;
+  color: var(--faint);
+  font-size: 11.5px;
+  text-align: center;
+}
+
+.fw-usage-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.fw-usage-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .02);
+}
+.fw-usage-card-label {
+  color: var(--faint);
+  font-size: 10px;
+  letter-spacing: .04em;
+}
+.fw-usage-card-value {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fw-usage-card-hint {
+  color: var(--faint);
+  font-size: 9.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fw-usage-chart {
+  margin-bottom: 10px;
+  padding: 10px 12px 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .015);
+}
+.fw-usage-chart-title {
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.fw-usage-dims {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.fw-usage-dim {
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: none;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+.fw-usage-dim:hover {
+  color: var(--text);
+}
+.fw-usage-dim.is-active {
+  border-color: rgba(143, 123, 255, .3);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.fw-usage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.fw-usage-table th {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line-strong);
+  color: var(--faint);
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+}
+.fw-usage-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+  vertical-align: top;
+}
+.fw-usage-table tr.is-clickable {
+  cursor: pointer;
+}
+.fw-usage-table tr.is-clickable:hover td {
+  background: rgba(255, 255, 255, .03);
+}
+.fw-usage-table .is-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.fw-usage-table .is-mono {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.fw-usage-table .is-bar {
+  width: 90px;
+}
+.fw-usage-label {
+  display: block;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fw-usage-sub {
+  display: block;
+  color: var(--faint);
+  font-size: 9.5px;
+}
+.fw-usage-bar {
+  display: block;
+  min-width: 2px;
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(143, 123, 255, .65), rgba(143, 123, 255, .25));
+}
+.fw-usage-status {
+  padding: 1px 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  font-size: 10px;
+}
+.fw-usage-status.is-completed {
+  color: var(--mint);
+  border-color: rgba(95, 227, 192, .3);
+}
+.fw-usage-status.is-failed {
+  color: var(--danger);
+  border-color: rgba(255, 107, 125, .35);
+}
+.fw-usage-status.is-cancelled {
+  color: var(--warn);
+  border-color: rgba(242, 180, 95, .3);
+}
+.fw-usage-status.is-waiting {
+  color: var(--waiting);
+  border-color: rgba(108, 199, 255, .3);
+}
+
+.fw-usage-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.fw-usage-filters label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--faint);
+  font-size: 10.5px;
+}
+.fw-usage-input {
+  width: 120px;
+}
+.fw-usage-export {
+  margin-left: auto;
+  padding: 5px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .03);
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+}
+.fw-usage-export:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.fw-usage-export:disabled {
+  opacity: .55;
+}
+.fw-usage-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 2px 2px;
+  color: var(--faint);
+  font-size: 10.5px;
+}
+.fw-usage-pager button {
+  margin-left: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  font-size: 10.5px;
+  cursor: pointer;
+}
+.fw-usage-pager button:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+.fw-usage-pager button:disabled {
+  opacity: .4;
+  cursor: default;
+}

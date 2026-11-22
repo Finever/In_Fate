@@ -150,7 +150,7 @@ export class SemanticMemoryIndex {
     if (!modelId) throw new Error('embedding model is not activated')
     this.open()
     const signature = this.store.listDocuments({
-      includePrivate: false,
+      includePrivate: true,
       includeInvalid: false,
     }).map(item => `${item.target}:${item.updatedAt}:${item.bytes}:${item.entries}`).join('\n')
     if (signature !== this.signature) {
@@ -174,7 +174,7 @@ export class SemanticMemoryIndex {
 
   private async rebuild(modelId: string): Promise<void> {
     const db = this.db!
-    const docs = this.store.listDocuments({ includePrivate: false, includeInvalid: false })
+    const docs = this.store.listDocuments({ includePrivate: true, includeInvalid: false })
     db.exec('BEGIN')
     try {
       db.exec('DELETE FROM vectors')

@@ -16,6 +16,12 @@ import { tmpdir } from 'node:os'
 import { extname, join, resolve, sep } from 'node:path'
 import type { MemoryRole } from '../memory/access.ts'
 import { MemoryValidationError, type MemoryDocument } from '../memory/store.ts'
+import type {
+  UsageBucket,
+  UsageFilter,
+  UsageGroupBy,
+  UsageTimeZone,
+} from '../usage/types.ts'
 import type { App } from './bundle.ts'
 import { UPDATE_MAX_BYTES, UpdateError } from './update.ts'
 import { IF_NAME, IF_VERSION } from '../version.ts'
@@ -66,6 +72,59 @@ function updateErrorBody(error: unknown): { error: string; code?: string } {
     error: error instanceof Error ? error.message : String(error),
     ...(code ? { code } : {}),
   }
+}
+
+const USAGE_FILTER_PARAMS = [
+  ['from', 'from'],
+  ['to', 'to'],
+  ['provider', 'providerId'],
+  ['model', 'modelId'],
+  ['agent', 'agentId'],
+  ['session', 'sessionId'],
+  ['key', 'apiKeyId'],
+  ['source', 'source'],
+  ['modality', 'modality'],
+  ['status', 'status'],
+  ['priority', 'priority'],
+  ['currency', 'currency'],
+] as const satisfies ReadonlyArray<readonly [string, keyof UsageFilter]>
+
+const USAGE_GROUP_BY = [
+  'provider', 'model', 'agent', 'session', 'key',
+  'source', 'modality', 'status', 'priority', 'tool',
+] as const satisfies readonly UsageGroupBy[]
+
+interface UsageQueryOptions {
+  timeZone?: UsageTimeZone
+  bucket?: UsageBucket
+}
+
+/** 请求明细/聚合共用的筛选参数；空值一律视为不筛。 */
+function usageFilterFromQuery(url: URL): UsageFilter {
+  const filter: Record<string, string | boolean> = {}
+  for (const [param, field] of USAGE_FILTER_PARAMS) {
+    const value = url.searchParams.get(param)
+    if (value !== null && value !== '') filter[field] = value
+  }
+  const priced = url.searchParams.get('priced')
+  if (priced === 'true') filter.priced = true
+  else if (priced === 'false') filter.priced = false
+  const recordKind = url.searchParams.get('recordKind')
+  if (recordKind === 'invocation' || recordKind === 'legacy-aggregate') {
+    filter.recordKind = recordKind
+  }
+  return filter as unknown as UsageFilter
+}
+
+function usageOptionsFromQuery(url: URL): UsageQueryOptions {
+  const options: UsageQueryOptions = {}
+  const timeZone = url.searchParams.get('timeZone')
+  if (timeZone === 'utc' || timeZone === 'local') options.timeZone = timeZone
+  const bucket = url.searchParams.get('bucket')
+  if (bucket === 'hour' || bucket === 'day' || bucket === 'week' || bucket === 'month') {
+    options.bucket = bucket
+  }
+  return options
 }
 
 /** 更新包上传：流式落盘，最多 UPDATE_MAX_BYTES。 */
@@ -362,6 +421,53 @@ async function handle(
     } finally {
       rmSync(temp, { force: true })
     }
+    return
+  }
+
+  if (req.method === 'GET' && parts[1] === 'usage' && parts.length === 2) {
+    json(res, 200, { usage: app.usageStats() })
+    return
+  }
+
+  if (req.method === 'GET' && parts[1] === 'usage' && parts[2] === 'overview' && parts.length === 3) {
+    json(res, 200, {
+      overview: app.usageOverview(usageFilterFromQuery(url), usageOptionsFromQuery(url)),
+    })
+    return
+  }
+
+  if (req.method === 'GET' && parts[1] === 'usage' && parts[2] === 'timeline' && parts.length === 3) {
+    json(res, 200, {
+      points: app.usageTimeline(usageFilterFromQuery(url), usageOptionsFromQuery(url)),
+    })
+    return
+  }
+
+  if (req.method === 'GET' && parts[1] === 'usage' && parts[2] === 'groups' && parts.length === 3) {
+    const groupBy = url.searchParams.get('groupBy') ?? 'model'
+    if (!(USAGE_GROUP_BY as readonly string[]).includes(groupBy)) {
+      json(res, 400, { error: `invalid groupBy: ${groupBy}` })
+      return
+    }
+    const limit = numberParam(url, 'limit')
+    json(res, 200, {
+      rows: app.usageGroups(usageFilterFromQuery(url), {
+        groupBy: groupBy as UsageGroupBy,
+        ...(limit !== undefined ? { limit } : {}),
+      }),
+    })
+    return
+  }
+
+  if (req.method === 'GET' && parts[1] === 'usage' && parts[2] === 'requests' && parts.length === 3) {
+    const limit = numberParam(url, 'limit')
+    const offset = numberParam(url, 'offset')
+    json(res, 200, {
+      page: app.usageRequests(usageFilterFromQuery(url), {
+        ...(limit !== undefined ? { limit } : {}),
+        ...(offset !== undefined ? { offset } : {}),
+      }),
+    })
     return
   }
 

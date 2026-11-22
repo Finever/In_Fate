@@ -7,7 +7,7 @@
  */
 
 import type { ChatRequest } from './chat.ts'
-import { resolveApiKeys } from './registry.ts'
+import { resolveApiKeyEntries } from './registry.ts'
 import {
   ModelHttpError,
   isRetryableModelError,
@@ -28,7 +28,7 @@ export async function* runModelRequest(
 ): AsyncGenerator<ModelEvent> {
   const policy = resolveRetryPolicy(request.retry)
   const providerId = request.resolved.provider.id
-  const keys = resolveApiKeys(request.resolved.provider)
+  const keys = resolveApiKeyEntries(request.resolved.provider)
   const release = request.gate
     ? await request.gate.acquire({
       providerId,
@@ -47,10 +47,18 @@ export async function* runModelRequest(
       const key = keys.length > 0
         ? keys[(attemptCount - 1) % keys.length]
         : undefined
+      request.onKeySelected?.(key
+        ? {
+          ...(key.id ? { id: key.id } : {}),
+          ...(key.label ? { label: key.label } : {}),
+          masked: key.masked,
+          source: key.source,
+        }
+        : { masked: '', source: 'none' })
       let emitted = 0
 
       try {
-        for await (const event of attempt(request, key, policy.timeoutMs)) {
+        for await (const event of attempt(request, key?.key, policy.timeoutMs)) {
           emitted += 1
           yield event
         }

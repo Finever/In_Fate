@@ -29,6 +29,7 @@ export type IconName =
   | 'down'
   | 'filter'
   | 'pin'
+  | 'chart'
 
 const PATHS: Record<IconName, string[]> = {
   chat: [
@@ -86,6 +87,7 @@ const PATHS: Record<IconName, string[]> = {
   down: ['M6 9l6 6 6-6'],
   filter: ['M4 6h16', 'M7 12h10', 'M10 18h4'],
   pin: ['M9 4h6l-1 5 3 3v2H7v-2l3-3-1-5Z', 'M12 14v6'],
+  chart: ['M4 20V10', 'M10 20V4', 'M16 20v-7', 'M3 20h18'],
 }
 
 export function Icon({

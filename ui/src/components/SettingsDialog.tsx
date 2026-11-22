@@ -8,6 +8,7 @@ import { MemoryBrowser } from './MemoryBrowser'
 import { ModelEditorDialog } from './ModelEditorDialog'
 import { PluginsPanel } from './PluginsPanel'
 import { UpdatePanel } from './UpdatePanel'
+import { UsagePanel } from './UsagePanel'
 
 interface ProviderDraft {
   baseUrl: string
@@ -66,7 +67,7 @@ function pricingSummary(pricing: ModelPricing | undefined): string {
 
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [config, setConfig] = useState<ModelConfig>()
-  const [view, setView] = useState<'models' | 'memory' | 'local' | 'plugins' | 'update'>('models')
+  const [view, setView] = useState<'models' | 'memory' | 'local' | 'usage' | 'plugins' | 'update'>('models')
   const [memoryDirty, setMemoryDirty] = useState(false)
   const [providerId, setProviderId] = useState('')
   const [drafts, setDrafts] = useState<Record<string, ProviderDraft>>({})
@@ -596,6 +597,24 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                 </button>
                 <button
                   type="button"
+                  className={`fw-settings-category${view === 'usage' ? ' is-active' : ''}`}
+                  onClick={() => {
+                    setView('usage')
+                    setError(undefined)
+                    setNotice(undefined)
+                  }}
+                  disabled={saving || Boolean(editing)}
+                >
+                  <span className="fw-settings-category-mark">
+                    <Icon name="chart" size={13} />
+                  </span>
+                  <span className="fw-settings-category-text">
+                    <b>用量统计</b>
+                    <small>token、费用与调用</small>
+                  </span>
+                </button>
+                <button
+                  type="button"
                   className={`fw-settings-category${view === 'plugins' ? ' is-active' : ''}`}
                   onClick={() => {
                     setView('plugins')
@@ -637,6 +656,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                   <MemoryBrowser onDirtyChange={setMemoryDirty} />
                 ) : view === 'local' ? (
                   <LocalEmbeddingPanel />
+                ) : view === 'usage' ? (
+                  <UsagePanel />
                 ) : view === 'plugins' ? (
                   <PluginsPanel />
                 ) : view === 'update' ? (

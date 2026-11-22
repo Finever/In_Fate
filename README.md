@@ -141,7 +141,7 @@ cd desktop && npm install && npm start
 ### 版本号规则
 
 - 程序的唯一版本来源是仓库根目录 `VERSION`；`/api/version`、`if --version` 和发布脚本都读它；`package.json` 的 `version` 需要同步。
-- 版本由项目所有者每次发布时手定；当前是 `0.0.1.3`。
+- 版本由项目所有者每次发布时手定；当前是 `0.0.1.4`。
 - 版本号支持 `x.y.z` 和 `x.y.z.w`；第四段是补丁修订号，比较时依次比较 `major.minor.patch.revision`。
 - 数据 schema 是独立版本：`DATA_SCHEMA_VERSION = 1`，状态在 `<dataRoot>/.state/data-schema.json`。
 - 程序跨版本更新不等于数据结构一定变；但数据结构一旦变，必须在 `DATA_MIGRATIONS` 里登记迁移。
@@ -153,7 +153,45 @@ cd desktop && npm install && npm start
 | V0.0.1 | 2026-11-18 | 首个可独立拷贝、安装、启动、更新和回滚的骨架版本 |
 | V0.0.1.1 | 2026-11-19 | 风险操作守卫、agent 删除、稳定版审计修复 |
 | V0.0.1.2 | 2026-11-20 | 会话搜索/删除入口、人格备份恢复、时间戳根因修复 |
-| V0.0.1.3 | 2026-11-21 | 会话分类/置顶、会话级思考头、安装器重写与单文件 setup exe；当前版本 |
+| V0.0.1.3 | 2026-11-21 | 会话分类/置顶、会话级思考头、安装器重写与单文件 setup exe |
+| V0.0.1.4 | 2026-11-22 | 用量统计、模型列表多端点回退、记忆空间与 ACL、保留聚合；当前版本 |
+
+### V0.0.1.4（2026-11-22）
+
+**定位**：统计与多 agent 记忆分区的功能版本，不改数据 schema（账本/空间注册表都是可重建投影）。
+
+**这一版包含**：
+
+- **用量统计**：设置新增「用量统计」页。
+  - 账本落在 `<dataRoot>/usage/usage.sqlite`；事件流仍是唯一真相，账本随时可重建。启动时把历史 `turn.completed` 回填成聚合行（重复回填幂等）。
+  - 每次模型调用落一条记录：provider/模型、agent、来源（用户/agent/子 agent）、key 的 id/标签/掩码（不落原始 key）、token 六类、费用、首 token/总时长、状态与错误。
+  - 概览：请求数、token（输入/输出/缓存读/写/推理）、费用（分币种）、缓存命中率、平均首 token/时长、生成速度、活跃天与最长连续、峰值日、头部模型、失败/未定价计数。
+  - 图表用 ECharts 按需注册 + 动态加载：不开这个页不加载图表代码。
+  - 分组：服务商/模型/agent/会话/密钥/来源/工具/状态，点一行即可下钻筛选（也即“按 agent 查看”）。
+  - 明细：分页请求表 + 状态/来源/计价/模型/agent 过滤；CSV 导出上限 5000 行。
+  - 保留策略：`patch.runtime.usage.detailRetentionDays`（默认 1095 天，`0` = 永久保留）；到期的明细先聚合成按天汇总（`usage_rollup*`）再删除，统计口径不变，重复执行幂等；`rollupOnStart` 可关掉启动时清理。
+- **模型列表回退**：读取模型列表时，按 provider 已配置的多个端点依次尝试，各自用对的 URL 与鉴权；默认端点 404（如 DeepSeek 的 Anthropic 地址）不再直接失败。
+- **记忆空间**：`spaces.json` 注册表 + ACL 落地。
+  - 三类空间：`private`（owner = `agent:<id>`，只允许该 agent 读写）、`shared`（按成员表）、`user`（用户空间，旧 `_` 目录自动迁移登记，不搬文件）。
+  - 成员角色 read/propose/write，按会话角色（steward/worker/observer）作天花板降级；衍生 agent 默认继承父级的 shared 成员，可关；group 先留口。
+  - 工具：新增 `memory_spaces`（列出可见空间与权限）；`memory_search` / `memory_read` / `memory_add` / `memory_update` / `memory_propose` 支持 `space` 参数，按空间 ACL 放行与落盘。
+  - 检索：私有/用户空间的条目进入索引，但结果按会话可读空间过滤；共享工具不带 `space` 时仍看不到私域，不能借下划线目录绕过。
+  - 上下文：每轮注入一张小表，列出当前会话可见的记忆空间（只给元数据，不给正文）。
+  - 推送：私域只有 owner agent 的 steward 会话、且该空间开了 autoPush 时才自动推送；其他会话必须显式用 `space` 查询。
+
+**兼容与升级**：
+
+- 数据 schema 不变，`data/` 可以直接沿用；`usage/` 与 `spaces.json` 都是新增文件。
+- V0.0.1.3 → V0.0.1.4 可以走内置更新；也可以直接运行单文件 setup exe。
+- 回滚仍只保留 `previous/` 一代。
+
+**验证基线（2026-11-22）**：
+
+- `npm run check`：`tsc --noEmit` 通过
+- `npm test`：274 个测试全过
+- UI build：通过（echarts 独立懒加载 chunk）
+- 发布包 smoke：通过
+- 当前安装根 `C:\Users\qielan\In_First` 未改动（C 端环境）
 
 ### V0.0.1.3（2026-11-21）
 
@@ -430,7 +468,7 @@ tests/          node:test 测试
 
 当前验证基线：
 
-- `npm test`：**259** 个测试全过
+- `npm test`：**274** 个测试全过
 - `npm run check`：`tsc --noEmit` 通过
 - `cd ui && npm run build`：通过
 - 发布包 smoke：通过
@@ -443,6 +481,8 @@ tests/          node:test 测试
 - 多模型格式适配、多 key、重试、并发闸门、计价
 - 工具审批、workspace lease、spill/offload、结果 envelope
 - 内置记忆库、结构编辑、策略、摘要 worker、FTS/语义索引、Jev 启发式推送
+- 记忆空间：spaces.json 注册表、私域/共有/用户三类、ACL、`space` 参数工具与检索过滤
+- 用量统计：SQLite 账本（可重建投影）、概览/分组/明细/CSV、ECharts 懒加载、保留聚合
 - 插件 v0：内置示例、dev 插件、工具/面板、sandbox iframe、私有 KV
 - 模型余额 v0：DeepSeek / Moonshot / OpenRouter，按 key 查询
 - 安装与更新：`In_First/In_Fate` + `In_First/data` 分层、安装器/卸载、`latest.json` + sha256、pending 切换、回滚、本地 zip
@@ -487,7 +527,7 @@ tests/          node:test 测试
 | Workspace / Project 层 | 未 | 会话、文件、记忆域、agent、产物、权限还没有项目级组织 |
 | 任务 / 作业引擎 | 未 | 定时、长任务、队列、进度、取消、恢复、任务看板都没有 |
 | 统一收件箱 | 未 | 审批、agent 完成、定时结果、远程消息、设备告警仍分散 |
-| 对话展示的 token 占比 / 多模态聚合 | 部分 | 轮次 usage/cost 有数据；没有完整 token 占比视图和多模态消息聚合 |
+| 对话展示的 token 占比 / 多模态聚合 | 部分 | 轮次 usage/cost 有数据，全局用量页有 token/费用分类；会话内占比视图和多模态消息聚合还没有 |
 | 产物仓库 | 未 | 图片、文档、代码、音频、ComfyUI 输出没有统一来源/版本/引用 |
 | 连接器 | 未 | 文件系统、浏览器、Git、邮箱、日历、数据库、IM、远程设备都没有统一连接器层 |
 | 统一摄入管线 | 部分 | 记忆有 FTS/可选 embedding；普通文档的解析、OCR、切分、翻译、格式转换、RAG 没串起来 |

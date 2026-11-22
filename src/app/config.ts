@@ -55,6 +55,12 @@ export interface RuntimePatch {
   }
   /** false = 不记录进程内指标（默认 true） */
   readonly metrics?: boolean
+  /** 用量账本：详细请求保留天数；0 = 永久保留。默认 1095（3 年）。 */
+  readonly usage?: {
+    readonly detailRetentionDays?: number
+    /** 启动时执行一次聚合清理；默认开。 */
+    readonly rollupOnStart?: boolean
+  }
   /** 进程级 host 锁：一个 dataRoot 只允许一个 host，默认开 */
   readonly hostLease?: {
     readonly enabled?: boolean
@@ -192,6 +198,20 @@ export function validateConfig(raw: unknown): AppConfig {
       if (value !== undefined && !['low', 'medium', 'high', 'critical'].includes(String(value))) {
         throw new ConfigError(`patch.runtime.riskGuard.${key}`, 'must be low/medium/high/critical')
       }
+    }
+  }
+  if (isRecord(raw.patch) && isRecord(raw.patch.runtime)
+    && raw.patch.runtime.usage !== undefined) {
+    const usage = raw.patch.runtime.usage
+    if (!isRecord(usage)) throw new ConfigError('patch.runtime.usage', 'must be an object')
+    if (usage.detailRetentionDays !== undefined
+      && (typeof usage.detailRetentionDays !== 'number'
+        || !Number.isFinite(usage.detailRetentionDays)
+        || usage.detailRetentionDays < 0)) {
+      throw new ConfigError('patch.runtime.usage.detailRetentionDays', 'must be a number >= 0')
+    }
+    if (usage.rollupOnStart !== undefined && typeof usage.rollupOnStart !== 'boolean') {
+      throw new ConfigError('patch.runtime.usage.rollupOnStart', 'must be a boolean')
     }
   }
   if (raw.update !== undefined) {
