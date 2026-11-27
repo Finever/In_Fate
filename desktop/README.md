@@ -89,7 +89,7 @@ npm run desktop:shortcut:remove
 | `IF_TOKEN` | 固定后端 token；默认随机 |
 | `IF_NODE` | 指定 Node 可执行文件；默认 `node` |
 
-`run.mjs` 会清掉 `ELECTRON_RUN_AS_NODE` / `ELECTRON_NO_ATTACH_CONSOLE`，避免在 Cherry Studio 这类终端里 Electron 被当成 Node 跑。
+`run.mjs` 会清掉 `ELECTRON_RUN_AS_NODE` / `ELECTRON_NO_ATTACH_CONSOLE`，避免在某些终端里 Electron 被当成 Node 跑。
 
 ## 冒烟测试
 

@@ -32,7 +32,7 @@ test('语义索引：向量召回、标脏重建、状态', async () => {
   const index = new SemanticMemoryIndex(root, store, fakeEmbedder)
   try {
     await store.add('detail:环境/测试', {
-      content: '触久喜欢在深夜写代码',
+      content: '喜欢在深夜写代码',
       tag: '确信',
       introduction: '测试',
     })

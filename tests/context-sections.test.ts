@@ -17,7 +17,7 @@ test('身份段带“当前人格优先”提示，时间段只给当前时间',
   const dir = mkdtempSync(join(tmpdir(), 'if-context-sections-'))
   try {
     const identity = join(dir, 'principle.md')
-    writeFileSync(identity, '# 原则\n\n我是未凉。\n', 'utf8')
+    writeFileSync(identity, '# 原则\n\n我是测试助手。\n', 'utf8')
     const rendered = renderContext({
       sections: [
         sessionMemorySection('memory', () => [{
@@ -35,7 +35,7 @@ test('身份段带“当前人格优先”提示，时间段只给当前时间',
       now: new Date('2026-11-20T05:35:00.000Z'),
     })
     assert.match(rendered.system, /当前人格文件/)
-    assert.match(rendered.system, /我是未凉/)
+    assert.match(rendered.system, /我是测试助手/)
     const ephemeral = JSON.stringify(rendered.messages)
     assert.match(ephemeral, /当前时间/)
   } finally {

@@ -65,7 +65,7 @@ test('记忆工具：worker 默认只能 propose，approval off 后可直接写�
     })
     const input = {
       target: 'detail:环境/测试',
-      content: '触久在深夜写记忆系统',
+      content: '在深夜写记忆系统',
       tag: '确信',
       introduction: '测试',
       quotes: [{ say: '深夜写记忆系统', 'log-addr': '2026-11-06-sess-1-1' }],

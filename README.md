@@ -192,7 +192,7 @@ cd desktop && npm install && npm start
 - `npm test`：274 个测试全过
 - UI build：通过（echarts 独立懒加载 chunk）
 - 发布包 smoke：通过
-- 当前安装根 `C:\Users\qielan\In_First` 未改动（C 端环境）
+- 当前安装根未改动（C 端环境）
 
 ### V0.0.1.3（2026-11-21）
 
@@ -219,7 +219,7 @@ cd desktop && npm install && npm start
 - UI build：通过
 - 发布包 smoke：通过
 - 单文件 setup exe：临时包构建、参数安装到临时目录通过
-- 当前安装根 `C:\Users\qielan\In_First` 未改动（C 端环境）
+- 当前安装根未改动（C 端环境）
 
 ### V0.0.1.2（2026-11-20）
 
@@ -322,7 +322,7 @@ npm run release:smoke    # 冒烟：独立启动、health、version、UI
 2. **2026-10-18：三样地基**
    事件模型（追加、带类型、可投影）、上下文管线形状（`sources → filter → budget → render`）、工具结果 envelope（`bytes` / `encoding` / `mime` / `structured`）。这三样先定，内容后定。
 3. **2026-10-21：借用边界**
-   DSH 只借装配/生命周期、loop 调度骨架、进程/存储原语、接入协议、服务 seam；工具管线、事件语义、压缩、沙箱、模型适配、驱动、记忆入口、UI 全部自定。`AGENTS.md` / `CLAUDE.md` 不是可蹭协议。
+   DSH 只借装配/生命周期、loop 调度骨架、进程/存储原语、接入协议、服务 seam；工具管线、事件语义、压缩、沙箱、模型适配、驱动、记忆入口、UI 全部自定。`AGENTS.md` 这类约定文件不是可蹭协议。
 4. **2026-10-21：UI 卸载 ≠ 模型上下文**
    会话窗把历史从 UI 卸下、滚动/跳转再取回，和模型上下文压缩/工具结果外置是两条线，必须分开命名、分开阈值。UI 叫“会话窗历史卸载/分页驻留”，模型叫“上下文压缩/结果外置”，存储叫“段归档/fork”。
 5. **2026-10-24：会话图 v3**

@@ -15,7 +15,7 @@ test('本地检索索引：中文子串、引号、domain/tag 过滤与增量标
   const index = new MemorySearchIndex(root, store)
   try {
     await store.add('detail:环境/测试', {
-      content: '触久喜欢在深夜写代码，窗外的月光落在键盘上。',
+      content: '喜欢在深夜写代码，窗外的月光落在键盘上。',
       tag: '确信',
       introduction: '测试记忆',
       quotes: [{ say: '窗外的月光落在键盘上', 'log-addr': '2026-11-06-sess-1-1' }],
@@ -23,7 +23,7 @@ test('本地检索索引：中文子串、引号、domain/tag 过滤与增量标
     index.markDirty()
 
     assert.equal(index.search('深夜').length, 1)
-    assert.equal(index.search('触久')[0]?.id, '测试-0001')
+    assert.equal(index.search('代码')[0]?.id, '测试-0001')
     assert.equal(index.search('月光').length, 1)
     assert.equal(index.search('月光', { domain: '环境' }).length, 1)
     assert.equal(index.search('月光', { domain: '不存在' }).length, 0)

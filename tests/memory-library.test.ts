@@ -31,18 +31,18 @@ function fixture(): {
 test('嵌套目录：可寻址、默认不进共享检索、UI 可列私域', async () => {
   const ctx = fixture()
   try {
-    await ctx.store.add('detail:_未凉/us/时间线', {
+    await ctx.store.add('detail:_private/us/时间线', {
       content: '深夜的约定',
       tag: '确信',
       introduction: '测试',
     })
-    const doc = ctx.store.read('detail:_未凉/us/时间线')
+    const doc = ctx.store.read('detail:_private/us/时间线')
     assert.equal(doc.filename, '时间线')
 
     assert.equal(ctx.store.listDocuments().some(item => item.private), false)
     assert.equal(ctx.store.search('深夜').length, 0)
     const privateDocs = ctx.store.listDocuments({ includePrivate: true })
-    assert.equal(privateDocs.some(item => item.target === 'detail:_未凉/us/时间线'), true)
+    assert.equal(privateDocs.some(item => item.target === 'detail:_private/us/时间线'), true)
     assert.equal(ctx.store.search('深夜', 20, { includePrivate: true }).length, 1)
   } finally {
     ctx.close()

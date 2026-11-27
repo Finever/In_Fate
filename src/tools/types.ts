@@ -121,7 +121,7 @@ export interface DispatchDecision {
   readonly approved: boolean
   readonly reason?: string
   readonly reasonSource?: 'user'
-  /** 批准时允许改参数（Cherry 的做法） */
+  /** 批准时允许改参数 */
   readonly updatedInput?: Record<string, unknown>
 }
 

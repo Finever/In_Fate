@@ -30,7 +30,7 @@ function fixture(): { root: string; close: () => void } {
   mkdirSync(dayDir, { recursive: true })
   writeFileSync(join(dayDir, 'sess-1.jsonl'), [
     JSON.stringify({ _meta: 1, agentid: 'main', agent_name: '测试', session: 'sess-1', date: '2026-11-02', cwd: 'x', start: '10:00:00' }),
-    JSON.stringify({ n: 1, who: '触久', type: 'turn-start', ts: '10:00:00' }),
+    JSON.stringify({ n: 1, who: '用户', type: 'turn-start', ts: '10:00:00' }),
     JSON.stringify({ n: 1, text: '你好', ts: '10:00:01' }),
     JSON.stringify({ n: 2, type: 'tool', call: 'read', hint: 'a.md', ts: '10:00:02' }),
     JSON.stringify({ n: 3, text: '第二条', ts: '10:00:03' }),

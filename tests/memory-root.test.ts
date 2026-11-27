@@ -16,7 +16,7 @@ function configFor(dataRoot: string): AppConfig {
     profile: {
       dataRoot,
       timeZone: 'Asia/Shanghai',
-      principals: { user: { id: 'user', name: '触久' }, agents: [{ id: 'main', name: '未凉' }] },
+      principals: { user: { id: 'user', name: '用户' }, agents: [{ id: 'main', name: '助手' }] },
     },
     providers: [],
     presets: [],
@@ -64,8 +64,8 @@ test('会话事件经 bundle 自动写内部 log，不靠 hook', async () => {
     const path = logPathForDay(join(dataRoot, 'memory'), stamp, sessionId)
     const rows = readLog(path)
     assert.equal(rows[0]?._meta, 1)
-    assert.equal(rows[0]?.agent_name, '未凉')
-    assert.equal(rows[1]?.who, '触久')
+    assert.equal(rows[0]?.agent_name, '助手')
+    assert.equal(rows[1]?.who, '用户')
     assert.equal(rows[1]?.text, '接入测试')
     assert.equal(rows[2]?.type, 'turn-start')
     assert.equal(rows[3]?.p, '收到')

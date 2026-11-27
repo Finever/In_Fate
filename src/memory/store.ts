@@ -54,7 +54,7 @@ export interface MemoryTarget {
   readonly target: string
   /** 顶层目录，沿用 project 的语义。 */
   readonly domain: string
-  /** 完整相对目录，可含多层，例如 `_未凉/us`。 */
+  /** 完整相对目录，可含多层，例如 `_private/us`。 */
   readonly namespace: string
   readonly file: string
   readonly path: string
@@ -97,7 +97,7 @@ export interface MemoryListOptions {
 export interface MemoryFileSummary {
   /** 顶层目录，保持旧字段语义。 */
   readonly domain: string
-  /** 完整相对目录，例如 `_未凉/us`。 */
+  /** 完整相对目录，例如 `_private/us`。 */
   readonly namespace?: string
   readonly project: string
   readonly filename: string
@@ -382,7 +382,7 @@ export class MemoryStore {
    * 扫 detail 目录，给 UI/索引用。
    *
    * 默认只列共享域且跳过坏文件；编辑器传 includePrivate/includeInvalid，
-   * 才能在树里看到 `_未凉` 和需要修复的文件。
+   * 才能在树里看到 `_private` 和需要修复的文件。
    */
   listDocuments(options: MemoryListOptions = {}): MemoryFileSummary[] {
     const detailRoot = join(this.root, 'detail')

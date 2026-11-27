@@ -17,8 +17,8 @@ function newService(memoryRoot: string): MemoryLogService {
   return new MemoryLogService({
     memoryRoot,
     timeZone: 'Asia/Shanghai',
-    userName: '触久',
-    metaFor: () => ({ agentId: 'main', agentName: '未凉', cwd: 'C:/work' }),
+    userName: '用户',
+    metaFor: () => ({ agentId: 'main', agentName: '助手', cwd: 'C:/work' }),
   })
 }
 
@@ -71,7 +71,7 @@ test('内部 log：从事件流写 hook 兼容行，重启不重复', async () =
     const rows = readLog(path)
     assert.equal(rows[0]?._meta, 1)
     assert.equal(rows[0]?.agentid, 'main')
-    assert.equal(rows[0]?.agent_name, '未凉')
+    assert.equal(rows[0]?.agent_name, '助手')
     assert.deepEqual(
       rows.slice(1).map(row => ({
         n: row.n,
@@ -84,8 +84,8 @@ test('内部 log：从事件流写 hook 兼容行，重启不重复', async () =
         src: Boolean(row.src),
       })),
       [
-        { n: 1, who: '触久', type: undefined, text: '第一问', p: undefined, call: undefined, hint: undefined, src: true },
-        { n: 2, who: '未凉', type: 'turn-start', text: undefined, p: undefined, call: undefined, hint: undefined, src: true },
+        { n: 1, who: '用户', type: undefined, text: '第一问', p: undefined, call: undefined, hint: undefined, src: true },
+        { n: 2, who: '助手', type: 'turn-start', text: undefined, p: undefined, call: undefined, hint: undefined, src: true },
         { n: 2, who: undefined, type: 'text', text: undefined, p: '第一答', call: undefined, hint: undefined, src: true },
         { n: 2, who: undefined, type: 'tool', text: undefined, p: undefined, call: 'read', hint: 'notes.md', src: true },
         { n: 2, who: undefined, type: 'turn-end', text: undefined, p: undefined, call: undefined, hint: undefined, src: false },

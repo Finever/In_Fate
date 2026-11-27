@@ -193,7 +193,7 @@ const TOKEN_SUMS = `
 `
 
 /**
- * total 口径 = 输入 + 输出（对齐 Cherry 的「提示 + 补全」）；
+ * total 口径 = 输入 + 输出（对齐常见的「提示 + 补全」）；
  * 缓存读写单列，不并进输入（各家 API 对 input 是否含缓存的语义不一致）。
  */
 function totalsFrom(row: Record<string, unknown>): UsageTokenTotals {

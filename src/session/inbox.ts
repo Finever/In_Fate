@@ -6,7 +6,7 @@
  * 当边界：消息可能在一轮进行中、模型请求投影之后才落盘，位置会排在那条
  * turn.completed 前面，却从未被看到。
  *
- * 这正是 DSH / Cherry agent loop 的 inbox 语义——消息在 `pre-step` 被
+ * 这正是常见 agent loop 的 inbox 语义——消息在 `pre-step` 被
  * claim 之前都算 pending；这里用 `lastSeenSeq` 做同一个判断。
  *
  * @module if/session/inbox

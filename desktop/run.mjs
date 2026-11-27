@@ -1,7 +1,7 @@
 /**
  * 启动 Electron 的小垫片。
  *
- * 有些环境（比如 Cherry Studio 的终端）会带 ELECTRON_RUN_AS_NODE=1，
+ * 有些终端环境会带 ELECTRON_RUN_AS_NODE=1，
  * 直接 `electron .` 会被当成 Node 跑，不开窗口。这里显式清掉这两个变量，
  * 再启动真正的 Electron 二进制。
  */

@@ -14,7 +14,7 @@ function configFor(dataRoot: string): AppConfig {
     profile: {
       dataRoot,
       timeZone: 'Asia/Shanghai',
-      principals: { user: { id: 'user', name: '触久' }, agents: [{ id: 'main', name: '未凉' }] },
+      principals: { user: { id: 'user', name: '用户' }, agents: [{ id: 'main', name: '助手' }] },
     },
     providers: [],
     presets: [],

@@ -61,7 +61,7 @@ test('摘要：生成到 summaries，选择器按查询命中，私域不进入�
   const ctx = fixture()
   try {
     await ctx.store.add('detail:环境/深夜', {
-      content: '触久喜欢在深夜写代码，夜里安静',
+      content: '喜欢在深夜写代码，夜里安静',
       tag: '确信',
       introduction: '环境',
     })
@@ -162,7 +162,7 @@ test('没有模型摘要时，选择器仍按正文选择', async () => {
   const ctx = fixture()
   try {
     await ctx.store.add('detail:环境/深夜', {
-      content: '触久喜欢在深夜写代码',
+      content: '喜欢在深夜写代码',
       tag: '确信',
       introduction: '环境',
     })
