@@ -1,11 +1,3 @@
-/**
- * 记忆能力位：按会话授权，不按主/子层级。
- *
- * 角色只是默认模板；用户可以随时把任意会话提升/降级。
- *
- * @module if/memory/access
- */
-
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 

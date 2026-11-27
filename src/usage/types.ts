@@ -1,12 +1,3 @@
-/**
- * 用量账本的记录形状。
- *
- * 账本只存统计元数据：provider / model / agent / key 快照、token、成本、
- * 时长、状态和错误；不存对话正文，也不存原始 API key。
- *
- * @module if/usage/types
- */
-
 export type UsageRecordKind = 'invocation' | 'legacy-aggregate' | 'rolled'
 export type UsageModality = 'language' | 'embedding' | 'image' | 'rerank'
 export type UsageSource = 'user' | 'agent' | 'subagent' | 'unknown'

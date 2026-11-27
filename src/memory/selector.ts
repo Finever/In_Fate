@@ -1,12 +1,3 @@
-/**
- * Jev 选择器的契约与轻量本地实现。
- *
- * 选择器直接按正文/原话打分；模型生成的摘要只是加分项和展示文本，
- * 缺失时仍能选择，不会退回抽取式摘要。
- *
- * @module if/memory/selector
- */
-
 import { createHash } from 'node:crypto'
 import type { HistoryMessage } from '../projections/history.ts'
 import type { ResolvedMemoryPolicy } from './policy.ts'

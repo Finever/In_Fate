@@ -1,11 +1,3 @@
-/**
- * 跨会话消息契约。
- *
- * 消息只写目标会话的收件箱；来源会话不写副本。
- *
- * @module if/session/message
- */
-
 export type SessionMessageKind = 'note' | 'question' | 'result' | 'wake'
 
 export interface SendSessionMessageInput {

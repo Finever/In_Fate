@@ -1,13 +1,3 @@
-/**
- * 模型计价：标准价 + 可自定义低谷价/低谷时段。
- *
- * 缓存命中是输入 token 的子集；计费时先扣掉 cacheRead，再按各自单价算。
- * 时间窗口按 profile.timeZone 的本地墙钟时间判断，结束开区间；跨午夜
- * 时后半段算在窗口开始那一天。
- *
- * @module if/model/pricing
- */
-
 import type {
   ModelPriceSet,
   ModelPricing,

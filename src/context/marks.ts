@@ -1,12 +1,3 @@
-/**
- * 系统消息标识：让模型一眼看出这段不是用户说的、也不是助手说的。
- *
- * 标识放在内容开头，不依赖 role——适配层可能把 system 映射成 user，
- * 但文字里的标识不会丢。
- *
- * @module if/context/marks
- */
-
 export type SystemMarkKind = 'compaction' | 'scheduled' | 'injection' | 'time' | 'session'
 
 const LABELS: Record<SystemMarkKind, string> = {

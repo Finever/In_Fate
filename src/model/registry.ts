@@ -1,10 +1,3 @@
-/**
- * 模型来源注册表。实例级，避免两个 App 互相污染。
- * 旧的模块级函数保留，内部走一个默认实例，兼容现有 demo。
- *
- * @module if/model/registry
- */
-
 import { readFileSync } from 'node:fs'
 import type { EndpointConfig, ModelCard, ProviderConfig } from './types.ts'
 

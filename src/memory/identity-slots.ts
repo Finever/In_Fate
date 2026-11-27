@@ -1,11 +1,3 @@
-/**
- * Manifest 驱动的身份槽位读写。
- *
- * 槽位 id 稳定；文件路径来自 manifest。写入只动指定二级标题，先备份再替换。
- *
- * @module if/memory/identity-slots
- */
-
 import {
   copyFileSync,
   existsSync,

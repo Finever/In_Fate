@@ -1,12 +1,3 @@
-/**
- * 工具结果裁剪：超过阈值的 payload 换成预览 + spill 引用。
- *
- * 原事件不改；裁剪结果写成 compaction.pruned，投影时应用。
- * 每条结果独立预览，不共享一段合并文本。
- *
- * @module if/compaction/prune
- */
-
 import type { Event } from '../core/events.ts'
 import type { SpillPolicy } from '../tools/spill.ts'
 import type { PruneItem, PrunePayload } from './types.ts'

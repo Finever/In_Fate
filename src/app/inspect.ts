@@ -1,11 +1,3 @@
-/**
- * 会话只读观察：事件 tail 与状态 inspect。
- *
- * 这是调试面，不参与模型上下文；事件正文只给预览，取全文走 payload。
- *
- * @module if/app/inspect
- */
-
 import type { Event } from '../core/events.ts'
 import type { SessionLink } from '../graph/links.ts'
 import type { SessionJoinSnapshot } from '../session/joins.ts'

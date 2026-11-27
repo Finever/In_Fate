@@ -1,11 +1,3 @@
-/**
- * 压缩的配置、摘要、锚点与事件载荷。
- *
- * 压缩只增不改：原始事件保留，摘要节点带地址，链尾有效。
- *
- * @module if/compaction/types
- */
-
 export interface CompactionConfig {
   readonly triggerAt: number
   readonly targetAt: number

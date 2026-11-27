@@ -1,12 +1,3 @@
-/**
- * 插件清单与路径校验。
- *
- * 这里只做静态契约：字段、版本、能力声明、路径是否越界。
- * 运行期错误由 PluginRegistry 隔离，不在这里吞掉。
- *
- * @module if/plugins/manifest
- */
-
 import { readFile } from 'node:fs/promises'
 import { lstatSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, resolve, sep } from 'node:path'

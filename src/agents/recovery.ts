@@ -1,11 +1,3 @@
-/**
- * 启动时修复孤儿 agent 流：有 requested/started 但没有终态的，标 interrupted。
- *
- * 不自动重放；队列本身仍在内存，重启后不假装任务还活着。
- *
- * @module if/agents/recovery
- */
-
 import type { Event, NewEvent } from '../core/events.ts'
 import type { SessionWriter } from '../core/session-writer.ts'
 import type { EventStore } from '../core/store.ts'

@@ -1,11 +1,3 @@
-/**
- * 把 Jev 选择出的记忆包做成 dynamic 上下文段。
- *
- * 段本身不读库；库里怎么选由 MemoryPushService 决定。
- *
- * @module if/context/memory-push
- */
-
 import type { ContextSection, PipelineContext } from './types.ts'
 import type { MemoryPushService } from '../memory/push.ts'
 import { formatMemoryPacket } from '../memory/push.ts'

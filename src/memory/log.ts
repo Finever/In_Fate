@@ -1,12 +1,3 @@
-/**
- * 记忆流水（hook_log）的格式与写入。
- *
- * 一行一块，只追加。文件头一行 _meta；每轮 turn-start → 块 → turn-end。
- * thinking 一律不记（见 hook_log.py）。坏行默认报错，不静默跳过。
- *
- * @module if/memory/log
- */
-
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 

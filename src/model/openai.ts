@@ -1,14 +1,3 @@
-/**
- * OpenAI Chat Completions 适配器（流式）。
- *
- * 只依赖来源配置里的 baseUrl 与密钥，不认识任何具体厂商。
- * 内部消息 → OpenAI 消息在这里转换；tool_calls 的增量参数在这里拼完整。
- *
- * 重试与 key 轮换由 runtime 统一处理；流一旦开始，重放会造成重复内容。
- *
- * @module if/model/openai
- */
-
 import type { HistoryMessage } from '../projections/history.ts'
 import type { ChatRequest } from './chat.ts'
 import { fallbackCallId, textOf } from './chat.ts'

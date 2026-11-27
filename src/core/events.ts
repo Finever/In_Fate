@@ -1,12 +1,3 @@
-/**
- * IF 的核心事件契约。
- *
- * envelope 只放所有事件共有的不变量；具体正文一律进 payload。
- * 内置类型只是默认套餐，扩展类型走 `x.` 命名空间，不改这个文件。
- *
- * @module if/core/events
- */
-
 /** envelope 版本。字段语义变化时递增，并配一条迁移。 */
 export const ENVELOPE_VERSION = 1
 

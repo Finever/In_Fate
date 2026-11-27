@@ -1,14 +1,3 @@
-/**
- * 启动：读配置 → 归一路径 → 装配。任何一步失败都回滚已建资源。
- *
- * 错误分三类，方便 CLI 给出不同提示：
- *   config      配置本身不合法
- *   dependency  配置合法，但引用的模型/预设/端点不存在
- *   environment 文件系统、权限、网络等外部条件
- *
- * @module if/app/bootstrap
- */
-
 import { resolve } from 'node:path'
 import { ConfigError, type AppConfig } from './config.ts'
 import { buildBundle, type App, type BuildOptions } from './bundle.ts'

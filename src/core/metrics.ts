@@ -1,12 +1,3 @@
-/**
- * 进程内指标：计数器、直方图、仪表。
- *
- * 不引外部依赖，不落盘；给 CLI、UI API 和排障时看当下状态用。
- * 标签按排序后的 key/value 归并，保证同名不同标签不会互相覆盖。
- *
- * @module if/core/metrics
- */
-
 export type MetricLabels = Readonly<Record<string, string | number>>
 
 export interface CounterMetric {

@@ -1,11 +1,3 @@
-/**
- * Jev 推送：按策略选择一次记忆包，并缓存 once 语义。
- *
- * 选择器本身是同步的；真正的模型选择器以后可以替换，但不改这里。
- *
- * @module if/memory/push
- */
-
 import type { HistoryMessage } from '../projections/history.ts'
 import type { MemoryPolicyStore } from './policy.ts'
 import type { MemoryPacket, MemorySelector } from './selector.ts'

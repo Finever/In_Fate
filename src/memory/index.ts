@@ -1,13 +1,3 @@
-/**
- * indexlist 生成：公用库里有什么、各自在哪儿、多大。
- *
- * 规则来自 make_indexlist.py：detail 一份一行、跳过 _trash/_archive、
- * introduction 即索引说明；其它目录只报文件数与更新时间。
- * 索引不是记忆，本身不参与统计。
- *
- * @module if/memory/index
- */
-
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, sep } from 'node:path'
 

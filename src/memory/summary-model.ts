@@ -1,11 +1,3 @@
-/**
- * 生成式摘要：用已配置的模型把记忆条目压成短标题/摘要/关键词。
- *
- * 这是摘要，不是事实源；模型失败时调用方保留旧摘要，绝不退回抽取。
- *
- * @module if/memory/summary-model
- */
-
 import type { ChatRequest } from '../model/chat.ts'
 import { chatModel } from '../model/chat-model.ts'
 import type { ResolvedModel } from '../model/registry.ts'

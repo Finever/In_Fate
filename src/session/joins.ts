@@ -1,12 +1,3 @@
-/**
- * 会话 join：等待一组目标会话完成，不占模型槽位。
- *
- * join 事件写在等待方自己的流里；目标完成后由调度器检查 all/any，
- * 满足时追加 join.done 与一条 system 注入，再唤醒等待方新一轮。
- *
- * @module if/session/joins
- */
-
 import { randomUUID } from 'node:crypto'
 import type { Event } from '../core/events.ts'
 import type { EventStore } from '../core/store.ts'

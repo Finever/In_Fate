@@ -1,9 +1,3 @@
-/**
- * 常用上下文段。段是注册项——用不用、优先级多少，由装配方决定。
- *
- * @module if/context/sections
- */
-
 import { readSources, type MemorySource } from '../memory/sources.ts'
 import type { ContextSection } from './types.ts'
 

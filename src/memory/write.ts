@@ -1,12 +1,3 @@
-/**
- * 记忆文件的写入：接号、查重、新条目校验、固定键序、UTF-8 + LF。
- *
- * 只校验**新增的条目**，不因为历史条目缺地址而拒绝追加——历史是历史，
- * 新写进来的必须守规矩。这条与 add_entry.py 的行为一致。
- *
- * @module if/memory/write
- */
-
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import {

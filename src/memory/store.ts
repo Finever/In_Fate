@@ -1,12 +1,3 @@
-/**
- * detail 记忆存储：按目标文件分片读写，不做全库锁。
- *
- * 同一个 target 串行，不同 target 可以并行；跨进程用目标文件锁。
- * 只接受逻辑地址 `detail:<domain>/<file>`，不接受任意文件路径。
- *
- * @module if/memory/store
- */
-
 import {
   existsSync,
   lstatSync,
@@ -54,7 +45,7 @@ export interface MemoryTarget {
   readonly target: string
   /** 顶层目录，沿用 project 的语义。 */
   readonly domain: string
-  /** 完整相对目录，可含多层，例如 `_private/us`。 */
+  /** 完整相对目录，可含多层。 */
   readonly namespace: string
   readonly file: string
   readonly path: string
@@ -97,7 +88,7 @@ export interface MemoryListOptions {
 export interface MemoryFileSummary {
   /** 顶层目录，保持旧字段语义。 */
   readonly domain: string
-  /** 完整相对目录，例如 `_private/us`。 */
+  /** 完整相对目录。 */
   readonly namespace?: string
   readonly project: string
   readonly filename: string
@@ -382,7 +373,7 @@ export class MemoryStore {
    * 扫 detail 目录，给 UI/索引用。
    *
    * 默认只列共享域且跳过坏文件；编辑器传 includePrivate/includeInvalid，
-   * 才能在树里看到 `_private` 和需要修复的文件。
+   * 才能在树里看到私有目录和需要修复的文件。
    */
   listDocuments(options: MemoryListOptions = {}): MemoryFileSummary[] {
     const detailRoot = join(this.root, 'detail')

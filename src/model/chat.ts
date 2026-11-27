@@ -1,9 +1,3 @@
-/**
- * 模型请求的公共形状：适配器只管把这份请求翻成厂商格式。
- *
- * @module if/model/chat
- */
-
 import { randomUUID } from 'node:crypto'
 import type { HistoryMessage } from '../projections/history.ts'
 import type { ResolvedModel } from './registry.ts'

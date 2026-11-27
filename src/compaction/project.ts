@@ -1,11 +1,3 @@
-/**
- * 压缩链与裁剪的投影索引。
- *
- * 只让链尾有效：被 supersedes 的节点不参与投影。
- *
- * @module if/compaction/project
- */
-
 import type { Event } from '../core/events.ts'
 import type { CompactionPayload, PruneItem, PrunePayload } from './types.ts'
 

@@ -1,11 +1,3 @@
-/**
- * 摘要合并与模型摘要解析。
- *
- * 滚动压缩只做“合并”，不把上一份摘要再总结一遍。
- *
- * @module if/compaction/summarize
- */
-
 import { extractiveSummary } from './extract.ts'
 import type { CompactionSummary, ExtractedFacts, Summarizer } from './types.ts'
 

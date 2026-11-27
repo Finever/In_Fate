@@ -1,14 +1,3 @@
-/**
- * 工具结果写时卸载。
- *
- * 只处理结果 envelope，不改变工具本身：
- *   - 文本超过阈值 → blob + 首尾预览 + contentRef
- *   - structured 超过阈值 → blob + structuredRef
- *   - blob 写失败 → 保留原内容并写 offloadError，不让工具调用失败
- *
- * @module if/tools/offload
- */
-
 import { BlobStore, type ContentRef } from '../core/blobs.ts'
 import type { ToolResult } from './types.ts'
 

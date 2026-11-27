@@ -1,11 +1,3 @@
-/**
- * 可一键安装的本地 embedding 模型清单。
- *
- * 权重不进仓库；这里只放仓库、文件、大小、sha256 和提示前缀。
- *
- * @module if/model/local/embedding-models
- */
-
 export interface EmbeddingModelPreset {
   readonly id: string
   readonly name: string

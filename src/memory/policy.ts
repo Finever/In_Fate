@@ -1,11 +1,3 @@
-/**
- * 记忆策略：全局 → agent → session 三级覆盖。
- *
- * 只描述“怎么用记忆”，不碰具体条目；写盘是普通 JSON，改错可回退。
- *
- * @module if/memory/policy
- */
-
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 

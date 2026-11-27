@@ -1,10 +1,3 @@
-/**
- * 最小 JSON Schema 校验：只覆盖工具参数常用的几种形状。
- * 不够用时换 ajv，调用方只依赖这个函数，不依赖内部实现。
- *
- * @module if/tools/schema
- */
-
 export interface SchemaIssue {
   readonly path: string
   readonly message: string

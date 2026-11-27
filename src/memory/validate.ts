@@ -1,14 +1,3 @@
-/**
- * 记忆文件的格式与标签校验。只读，不修改输入。
- *
- * 规则来自记忆库的 validate.py：
- *   顶层四字段、条目必填、三档闭集、id 形状与唯一、原话 say 必填、
- *   七类闭集、缺 log-addr 默认只提醒。
- * 写入前置校验把“缺地址”升成错误（对应 add_entry.py 的不变量）。
- *
- * @module if/memory/validate
- */
-
 import {
   ENTRY_KEYS,
   ID_PATTERN,

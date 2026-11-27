@@ -1,12 +1,3 @@
-/**
- * 记忆条目摘要：给选择器/展示用的生成式摘要，不替代 detail。
- *
- * 摘要由模型生成，写在 summaries/<namespace>/<file>.json；没有模型时
- * 不偷偷退回抽取式，选择器直接用正文。摘要是派生缓存，不是记忆真相。
- *
- * @module if/memory/summary
- */
-
 import { createHash } from 'node:crypto'
 import {
   existsSync,

@@ -1,9 +1,3 @@
-/**
- * 按端点格式选择适配器。上层只认 ChatRequest / ModelEvent。
- *
- * @module if/model/chat-model
- */
-
 import { chatAnthropic } from './anthropic.ts'
 import { chatGoogle } from './google.ts'
 import type { ChatRequest } from './chat.ts'

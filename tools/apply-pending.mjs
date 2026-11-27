@@ -1,15 +1,3 @@
-/**
- * 启动前应用 pending 更新。
- *
- * 这个文件放在 <安装根>/tools/，不在 In_Fate 里，所以它自己永远不会
- * 被正在应用的更新替换。用法：
- *
- *   node tools/apply-pending.mjs <安装根>
- *
- * 布局：<安装根>/In_Fate 是程序，<安装根>/data 是数据。
- * 没有 pending.json 时直接退出 0。切换失败会尽量回滚并留下日志。
- */
-
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from 'node:fs'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'

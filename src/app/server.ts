@@ -1,12 +1,3 @@
-/**
- * 本地 UI API：只绑 127.0.0.1，Bearer token。
- *
- * 路由只做转译，不直接读文件；所有数据都从 App 的投影/索引拿。
- * UI 展开全文时按 ref/事件 id 调 /payload，取的是切片，不是整段会话。
- *
- * @module if/app/server
- */
-
 import { randomBytes } from 'node:crypto'
 import { createReadStream, createWriteStream, existsSync, rmSync, statSync } from 'node:fs'
 import { once } from 'node:events'

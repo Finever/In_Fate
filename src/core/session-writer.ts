@@ -1,14 +1,3 @@
-/**
- * 会话写者：同一会话同一时刻只允许一个长写者。
- *
- * 与 withFileLock 的短临界区不同，它持有 `<file>.writer.lock` 直到 close：
- *   - 主循环、子 agent 回送、压缩、归档都走同一个写者
- *   - 同机死进程留下的写者锁可以接管
- *   - 活锁直接报“会话忙”，不两个进程交错写
- *
- * @module if/core/session-writer
- */
-
 import { closeSync, fstatSync, mkdirSync, openSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { hostname } from 'node:os'
 import { dirname } from 'node:path'

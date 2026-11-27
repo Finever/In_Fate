@@ -1,12 +1,3 @@
-/**
- * 记忆空间 ACL：把会话角色和空间成员表叠成最终权限。
- *
- * 空间成员表决定“名单/地板”；会话角色是“天花板”：
- *   steward 用满成员 role；worker 最高 read + propose；observer 最高 read。
- *
- * @module if/memory/space-access
- */
-
 import type { MemoryAccess, MemoryRole } from './access.ts'
 import { agentPrincipal, type MemorySpace, type MemorySpaceRole, type MemorySpaceStore } from './space.ts'
 

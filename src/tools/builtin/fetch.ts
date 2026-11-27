@@ -1,11 +1,3 @@
-/**
- * fetch：HTTP 请求。两个后端：
- *   - direct：进程内直连，任意 URL、二进制、内网都行（默认）
- *   - deepseek：DeepSeek Fetch API，服务端抓取并转文本，适合反爬页面
- *
- * @module if/tools/builtin/fetch
- */
-
 import type { ToolContext, ToolDefinition, ToolResult } from '../types.ts'
 
 const DEFAULT_BASE = 'https://api.deepseek.com/v1/tools'

@@ -1,12 +1,3 @@
-/**
- * 旧身份记忆（SOUL / USER / FACT）的受控写入；新 agent 用 manifest 槽位。
- *
- * 只接受“替换某个二级标题的内容”或“追加一个新二级标题”；
- * 不接受整文件覆盖。每次写入前先备份到 memory/_archive。
- *
- * @module if/memory/identity
- */
-
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { appendIdentitySection, assertIdentitySection, replaceIdentitySection } from './identity-sections.ts'

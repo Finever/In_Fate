@@ -1,12 +1,3 @@
-/**
- * 模型来源与模型卡：来源是配置，不是代码。
- *
- * 一个来源可以有多个端点（同厂商不同协议），模型卡声明能力与预算。
- * 密钥可以来自配置里的多密钥列表或环境变量；UI 视图只回传脱敏预览。
- *
- * @module if/model/types
- */
-
 export type ApiFamily =
   | 'openai-chat-completions'
   | 'openai-responses'

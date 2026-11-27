@@ -1,9 +1,3 @@
-/**
- * 从被压区间抽事实：先抽骨架，摘要只在这个骨架上做。
- *
- * @module if/compaction/extract
- */
-
 import type { Event } from '../core/events.ts'
 import type { ExtractedFacts } from './types.ts'
 

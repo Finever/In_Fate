@@ -1,12 +1,3 @@
-/**
- * 上游余额查询。
- *
- * 余额是账户/密钥级信息，不是推理凭据的一部分。只对明确提供
- * 余额接口的厂商做适配；没有接口的厂商不猜、不抓控制台。
- *
- * @module if/model/balance
- */
-
 import type { ProviderConfig } from './types.ts'
 
 export interface BalanceAmount {

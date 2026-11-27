@@ -1,9 +1,3 @@
-/**
- * 最小 SSE 读取器：按空行切事件，data 多行合并。
- *
- * @module if/model/sse
- */
-
 export interface SSEMessage {
   readonly event?: string
   readonly data: string

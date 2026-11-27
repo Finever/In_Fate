@@ -1,10 +1,3 @@
-/**
- * 对话循环验证：mock 模型第一轮调 read，第二轮给文本。
- * 检查事件顺序、工具结果回填、usage、turn.completed。
- *
- * @module if/loop/demo
- */
-
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'

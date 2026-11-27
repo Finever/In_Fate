@@ -1,12 +1,3 @@
-/**
- * 工具执行管线：pre → guard → 审批 → around → run → post → result。
- *
- * 任何一段都可以注册监听器，工具本体不感知审计、限流、脱敏。
- * 错误一律归一成 isError 的结果，不把异常漏给上层。
- *
- * @module if/tools/executor
- */
-
 import type { Metrics } from '../core/metrics.ts'
 import type { RiskGuard } from '../core/risk-guard.ts'
 import type {

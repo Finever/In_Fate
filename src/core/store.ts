@@ -1,13 +1,3 @@
-/**
- * 事件存储：只追加的 JSONL，可按大小分段。
- *
- * 当前段是 `file`；写满后重命名为 `file.<n>`，新建 `file`。
- * `read()` 合并所有段；`readSince(eventId)` 跨段找游标。
- * 行号只在不分段时可靠，归档器改用事件 id。
- *
- * @module if/core/store
- */
-
 import {
   appendFileSync,
   closeSync,

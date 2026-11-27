@@ -1,12 +1,3 @@
-/**
- * Google Gemini Generate Content 适配器（流式，alt=sse）。
- *
- * 角色只有 user / model；工具结果用 functionResponse 回填在 user 内容里。
- * functionResponse 需要函数名，所以先扫一遍历史里的 tool_use 建映射。
- *
- * @module if/model/google
- */
-
 import type { HistoryMessage } from '../projections/history.ts'
 import type { ChatRequest } from './chat.ts'
 import { fallbackCallId, systemText, textOf } from './chat.ts'

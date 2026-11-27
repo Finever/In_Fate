@@ -1,9 +1,3 @@
-/**
- * 子 agent 控制面：状态、中断、列表。
- *
- * @module if/tools/builtin/agent-control
- */
-
 import type { AgentManager } from '../../agents/manager.ts'
 import type { ToolDefinition, ToolResult } from '../types.ts'
 

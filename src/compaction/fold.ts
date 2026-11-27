@@ -1,11 +1,3 @@
-/**
- * 执行压缩：先 prune，再 fold；锚点向后扩展，链尾有效。
- *
- * 失败/压缩之间有冷却；压一次没到目标就继续压，最多三段。
- *
- * @module if/compaction/fold
- */
-
 import type { Event, NewEvent } from '../core/events.ts'
 import type { SessionWriter } from '../core/session-writer.ts'
 import type { EventStore } from '../core/store.ts'

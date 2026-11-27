@@ -1,8 +1,3 @@
-/**
- * 用量报告的自然周期：周（ISO，周一起）、月、年。
- * 纯日期算术，不依赖 DOM；tests/usage-period.test.ts 直接测这里。
- */
-
 export type ReportKind = 'week' | 'month' | 'year'
 
 export interface ReportState {

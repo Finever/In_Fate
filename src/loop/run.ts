@@ -1,12 +1,3 @@
-/**
- * 对话循环：模型 → 事件 → 工具 → 回填 → 再请求。
- *
- * 每一轮都从事件流重新投影历史，不在内存里攒上下文。
- * 工具结果先落事件，下一步再被投影回模型；悬空调用由投影补中断结果。
- *
- * @module if/loop/run
- */
-
 import type { Profile } from '../config/profile.ts'
 import { renderContext, type RenderOptions } from '../context/pipeline.ts'
 import type { TokenEstimator } from '../compaction/estimate.ts'

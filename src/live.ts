@@ -1,11 +1,3 @@
-/**
- * 真实网关联调：普通对话 + 工具调用两轮。
- *
- * 用法：node src/live.ts [ex|normal|vision]
- *
- * @module if/live
- */
-
 import { defaultProfile } from './config/profile.ts'
 import { staticSection, timeSection } from './context/sections.ts'
 import { registerCoreEvents } from './core/registry.ts'

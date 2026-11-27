@@ -1,10 +1,3 @@
-/**
- * 模型适配层验证：本地起一个假 SSE 服务，模拟文本 + 工具调用 + usage。
- * 不连外网、不需要密钥。
- *
- * @module if/model/demo
- */
-
 import { createServer } from 'node:http'
 import type { HistoryMessage } from '../projections/history.ts'
 import { chatModel } from './chat-model.ts'

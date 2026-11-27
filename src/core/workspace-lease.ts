@@ -1,18 +1,3 @@
-/**
- * workspace 写租约：路径级写锁 + 整仓独占锁。
- *
- * 规则：
- *   - 不同路径可以同时持有；
- *   - 整仓锁要求没有路径锁，路径锁要求没有整仓锁；
- *   - 读操作不经过这里；
- *   - 租约有过期时间，工具执行期间会续租；
- *   - 排队 FIFO，避免长路径写饿死整仓操作。
- *
- * 这是进程内协调；跨进程写同一 workspace 仍应由单一 App 进程负责。
- *
- * @module if/core/workspace-lease
- */
-
 import { randomUUID } from 'node:crypto'
 import { realpathSync } from 'node:fs'
 import { resolve } from 'node:path'

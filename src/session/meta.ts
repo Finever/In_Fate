@@ -1,12 +1,3 @@
-/**
- * 会话用户元数据：分类、置顶。
- *
- * 写在 workspace 事件流里，和 lifecycle/link 共用同一个真相源；
- * 不塞进会话自己的 JSONL，也不进模型上下文。
- *
- * @module if/session/meta
- */
-
 import type { Event } from '../core/events.ts'
 import type { EventStore } from '../core/store.ts'
 import type { SessionWriter } from '../core/session-writer.ts'

@@ -1,15 +1,3 @@
-/**
- * 生成可独立启动、可安全替换程序的发布包。
- *
- * 目录：release/In_First/
- *   In_Fate/       程序（bin/src/ui/dist/desktop/package）
- *   data/          可变数据根（更新时永远不碰）
- *   runtime/       当前平台 Node（尽量拷贝；失败则回退 node）
- *   config/        可变配置
- *   logs/ backups/ 运行日志与迁移备份
- *   start-*        启动脚本
- */
-
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {

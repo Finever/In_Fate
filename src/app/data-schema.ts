@@ -1,17 +1,3 @@
-/**
- * 数据 schema 版本与迁移骨架。
- *
- * 这里只负责“数据根能不能被当前版本打开”：
- *   - 第一次运行写入版本；
- *   - 旧版本按迁移链升级；
- *   - 新版本拒绝降级打开；
- *   - 迁移前把 schema 状态备份到 .state/backups。
- *
- * 具体迁移函数以后往 DATA_MIGRATIONS 里加；没有注册迁移时不允许硬升。
- *
- * @module if/app/data-schema
- */
-
 import {
   copyFileSync,
   existsSync,

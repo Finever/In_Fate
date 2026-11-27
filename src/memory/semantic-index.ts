@@ -1,11 +1,3 @@
-/**
- * 语义检索索引：把 detail 条目向量化，查询时做余弦召回。
- *
- * 它和 FTS 索引并列，都是 detail 的投影；没有启用本地模型时完全不用。
- *
- * @module if/memory/semantic-index
- */
-
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'

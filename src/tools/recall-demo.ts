@@ -1,9 +1,3 @@
-/**
- * recall 双锚点验证：事件区间 + 记忆库流水地址。
- *
- * @module if/tools/recall-demo
- */
-
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

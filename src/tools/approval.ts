@@ -1,12 +1,3 @@
-/**
- * 审批注册表：驱动无关的中性决策。
- *
- * guard 返回 ask 时挂起，客户端 respond 后 resolve。
- * 取消、会话结束、重复 id 都同步拒绝，不留下永远挂着的请求。
- *
- * @module if/tools/approval
- */
-
 import type {
   ApprovalRegistry,
   DispatchDecision,

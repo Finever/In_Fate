@@ -1,12 +1,3 @@
-/**
- * 文件沙箱：读/写都必须落在允许的根目录内。
- *
- * 先做词法校验，再解析真实路径（realpath），防止符号链接、junction、
- * 以及“父目录是链接”的绕过。根目录不存在时只做词法校验。
- *
- * @module if/core/fs-policy
- */
-
 import { existsSync, realpathSync } from 'node:fs'
 import { dirname, relative, resolve } from 'node:path'
 import { assertWithin, IfPathError } from './safe-path.ts'

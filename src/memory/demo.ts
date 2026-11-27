@@ -1,12 +1,3 @@
-/**
- * memory 三件套的最小验证：
- *   1. 拿真库的一份文件只读校验；
- *   2. 在临时副本上追加一条，验接号、键序、落盘。
- * 真库一个字节都不动。
- *
- * @module if/memory/demo
- */
-
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

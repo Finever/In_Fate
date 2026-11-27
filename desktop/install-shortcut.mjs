@@ -1,12 +1,3 @@
-/**
- * 跨过 PATH 里的 powershell 差异：用绝对路径调 Windows PowerShell，
- * 执行 install-shortcut.ps1。
- *
- * 用法：
- *   node desktop/install-shortcut.mjs
- *   node desktop/install-shortcut.mjs --remove
- */
-
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'

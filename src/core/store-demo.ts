@@ -1,9 +1,3 @@
-/**
- * 分段存储验证：写满后轮转、跨段读取、跨段游标。
- *
- * @module if/core/store-demo
- */
-
 import { mkdtempSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

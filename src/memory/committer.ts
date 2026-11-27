@@ -1,11 +1,3 @@
-/**
- * 记忆提交器：写文件可以并行，git 提交走一个全局队列。
- *
- * 只在 memory root 是 git 仓库时生效；没有 .git 就静默跳过。
- *
- * @module if/memory/committer
- */
-
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'

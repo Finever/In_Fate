@@ -1,12 +1,3 @@
-/**
- * 把旧的 SOUL/USER/FACT 迁到 agent manifest + identity 槽位。
- *
- * 默认 dry-run；只新增新文件，不删除旧文件。目标文件已存在且内容不同时，
- * 默认拒绝，必须显式 force（先备份再覆盖）。
- *
- * @module if/memory/migrate-identity
- */
-
 import {
   copyFileSync,
   existsSync,

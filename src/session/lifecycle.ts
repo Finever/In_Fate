@@ -1,20 +1,3 @@
-/**
- * 会话生命周期：active / archived / deleted。
- *
- * 状态写在 `workspace:default` 事件流，和 link 同一条流：
- *   - 会话自己的日志仍是 append-only，不因为归档/删除被改写；
- *   - 跨会话的状态只有一个真相源，`listSessions` 用投影过滤；
- *   - delete 是软删除：文件还在，便于审计和后续 purge；不在这里删盘。
- *
- * 规则：
- *   - active：正常读写、可唤醒、可收消息；
- *   - archived：从默认列表隐藏，不能唤醒/收消息，但历史仍可读；
- *   - deleted：终态，隐藏、不可再运行/收消息；历史仍保留，UI/审计可按 id
- *     查看。软删除不删盘，链接由 App 负责关闭。
- *
- * @module if/session/lifecycle
- */
-
 import type { Event } from '../core/events.ts'
 import type { EventStore } from '../core/store.ts'
 import type { SessionWriter } from '../core/session-writer.ts'

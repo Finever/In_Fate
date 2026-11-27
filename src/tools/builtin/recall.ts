@@ -1,13 +1,3 @@
-/**
- * recall：按压缩锚点回查原文。
- *
- * 两种锚点：
- *   - 事件区间：fromEventId..toEventId（会话流）
- *   - 流水地址：logAddr（记忆库 log）
- *
- * @module if/tools/builtin/recall
- */
-
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { BlobStore } from '../../core/blobs.ts'

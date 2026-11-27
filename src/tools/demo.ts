@@ -1,10 +1,3 @@
-/**
- * 工具层验证：读、改、写、命令、HTTP、拒绝、参数错误、变更订阅。
- * 全部在临时目录，不碰真项目。
- *
- * @module if/tools/demo
- */
-
 import { createServer } from 'node:http'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'

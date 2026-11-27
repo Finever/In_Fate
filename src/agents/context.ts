@@ -1,12 +1,3 @@
-/**
- * 子 agent 上下文裁剪：只改投影副本，不动事件。
- *
- * 从最旧的工具结果开始换成短标记，保留最近的工具输出；裁完仍超限就交给
- * 调用方失败，不静默把超窗请求发给模型。
- *
- * @module if/agents/context
- */
-
 import type { TokenEstimator } from '../compaction/estimate.ts'
 import type { ToolSpec } from '../model/types.ts'
 import type { HistoryMessage } from '../projections/history.ts'

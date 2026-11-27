@@ -1,9 +1,3 @@
-/**
- * 上下文管线的契约：段是注册项，管线只负责排序、预算、拼接。
- *
- * @module if/context/types
- */
-
 import type { Profile } from '../config/profile.ts'
 import type { HistoryMessage } from '../projections/history.ts'
 

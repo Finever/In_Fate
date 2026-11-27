@@ -1,11 +1,3 @@
-/**
- * 大输出溢出：超过阈值就落文件，只把引用和预览给模型。
- *
- * 阈值与预览长度都可调；存储实现可换（本地文件、对象存储）。
- *
- * @module if/tools/spill
- */
-
 import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'

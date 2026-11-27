@@ -1,14 +1,3 @@
-/**
- * 会话连接图。
- *
- * 连接是独立的 workspace 事件流，不是某个会话的私产：
- *   - 所有会话归用户所有；
- *   - link 只描述“谁可以读/发消息给谁”，不决定调度；
- *   - createdBy 只做溯源，不产生权限或父子关系。
- *
- * @module if/graph/links
- */
-
 import { randomUUID } from 'node:crypto'
 import type { Event, NewEvent } from '../core/events.ts'
 import type { EventStore } from '../core/store.ts'

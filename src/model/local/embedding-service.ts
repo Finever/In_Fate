@@ -1,9 +1,3 @@
-/**
- * 本地 embedding 推理：没装模型就报错，装了才加载 llama.cpp。
- *
- * @module if/model/local/embedding-service
- */
-
 import type { Llama, LlamaEmbeddingContext, LlamaModel } from 'node-llama-cpp'
 import { embeddingModelPreset } from './embedding-models.ts'
 import { LocalEmbeddingStore } from './embedding-store.ts'

@@ -1,9 +1,3 @@
-/**
- * write：覆盖写入。目前只支持 UTF-8（GBK 编码需要额外的转码原语）。
- *
- * @module if/tools/builtin/write
- */
-
 import { writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { ToolDefinition } from '../types.ts'

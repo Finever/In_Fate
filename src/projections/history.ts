@@ -1,13 +1,3 @@
-/**
- * 会话历史投影：事件流 → 模型无关的消息数组。
- *
- * 纯函数。不读当前时间、不裁剪、不摘要。绝对时间只放在消息前，
- * 工具与思考只带耗时（由事件 payload 给），不写进文本。
- * 悬空 tool_use 补一条中断结果——否则模型 API 会拒收。
- *
- * @module if/projections/history
- */
-
 import { buildCompactionIndex } from '../compaction/project.ts'
 import type { CompactionPayload } from '../compaction/types.ts'
 import { markSystem } from '../context/marks.ts'

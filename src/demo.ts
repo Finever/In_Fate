@@ -1,10 +1,3 @@
-/**
- * 最小演示：写几条事件，按轮投影成记忆 log 行。
- * 不写记忆库（profile.memoryLogRoot 没配），只打印。
- *
- * @module if/demo
- */
-
 import { registerCoreEvents } from './core/registry.ts'
 import { EventStore } from './core/store.ts'
 import { sessionStream } from './core/streams.ts'

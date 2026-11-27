@@ -1,9 +1,3 @@
-/**
- * 子 agent 验证：受理、异步执行、事件流、回送、并发池、失败注入。
- *
- * @module if/agents/demo
- */
-
 import { createServer } from 'node:http'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'

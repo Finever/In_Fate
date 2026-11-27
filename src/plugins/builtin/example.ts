@@ -1,13 +1,3 @@
-/**
- * 内置示例插件：只用来验证契约，不是核心工具。
- *
- * 它同时注册一个工具和一个面板：
- *   - 工具默认停用、审批 required，agent 白名单也不会默认放行；
- *   - 面板只在 sandbox iframe 里渲染，通过 postMessage 与宿主握手。
- *
- * @module if/plugins/builtin/example
- */
-
 import type { ToolDefinition } from '../../tools/types.ts'
 import type { PluginDefinition, PluginPanel } from '../types.ts'
 import { definePlugin, defineTool } from '../sdk.ts'

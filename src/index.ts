@@ -1,9 +1,3 @@
-/**
- * IF 核心入口。只导出契约与默认实现；具体场景的 profile 由调用方给。
- *
- * @module if
- */
-
 export * from './core/events.ts'
 export * from './core/registry.ts'
 export * from './core/streams.ts'

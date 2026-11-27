@@ -1,9 +1,3 @@
-/**
- * 配置加载：以配置文件所在目录为路径基准，解析一次就存绝对路径。
- *
- * @module if/app/load
- */
-
 import { readFileSync } from 'node:fs'
 import { dirname, isAbsolute, resolve } from 'node:path'
 import { validateConfig, type AppConfig } from './config.ts'

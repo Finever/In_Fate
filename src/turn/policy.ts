@@ -1,9 +1,3 @@
-/**
- * 轮次策略：什么算一轮的开始和结束，是配置，不是核心假设。
- *
- * @module if/turn/policy
- */
-
 import type { Event } from '../core/events.ts'
 
 export interface TurnPolicy {

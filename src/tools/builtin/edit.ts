@@ -1,9 +1,3 @@
-/**
- * edit：精确替换。默认要求 old_string 唯一，找不到或出现多次都拒绝。
- *
- * @module if/tools/builtin/edit
- */
-
 import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { ToolDefinition } from '../types.ts'

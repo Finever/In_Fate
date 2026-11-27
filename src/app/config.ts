@@ -1,11 +1,3 @@
-/**
- * App 配置：profile、providers、presets、patch；defaultModel 仅为旧配置兼容。
- *
- * patch 只改装配，不改契约；工具默认只读，危险工具要显式启用。
- *
- * @module if/app/config
- */
-
 import type { AgentPoolConfig, AgentPreset } from '../agents/types.ts'
 import type { CompactionConfig } from '../compaction/types.ts'
 import type { Profile } from '../config/profile.ts'

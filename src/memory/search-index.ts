@@ -1,11 +1,3 @@
-/**
- * detail 的本地检索索引：SQLite FTS5 trigram，中文按子串召回。
- *
- * 它只是 detail 的投影，不存第二份记忆；写入后标脏，下次查询重建。
- *
- * @module if/memory/search-index
- */
-
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'

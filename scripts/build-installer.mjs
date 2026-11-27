@@ -1,19 +1,3 @@
-/**
- * 把发布 zip 包进一个单文件 Windows 安装器 exe。
- *
- * 产物结构：
- *   [C# bootstrapper exe][发布 zip][16 字节 magic][8 字节 payload 长度]
- *
- * bootstrapper 用系统自带的 .NET Framework / csc 编译，不引入 NSIS、Inno
- * Setup 或 7-Zip SFX。运行时把自己尾部的 zip 解到 %TEMP%，再调用包内
- * install.cmd；install.cmd 仍然走 tools/install.mjs 的预检、回读和回滚。
- *
- * 用法：
- *   npm run release
- *   npm run installer
- *   node scripts/build-installer.mjs --package release/xxx.zip --out release/In_Fate-Setup.exe
- */
-
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {

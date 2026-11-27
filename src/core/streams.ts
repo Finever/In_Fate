@@ -1,9 +1,3 @@
-/**
- * 流的地址格式。格式只在这里定义，别处不许拼字符串。
- *
- * @module if/core/streams
- */
-
 /** 内置聚合种类；扩展种类直接传自定义字符串。 */
 export type StreamKind = 'session' | 'task' | 'process' | 'agent' | (string & {})
 

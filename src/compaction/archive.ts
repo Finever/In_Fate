@@ -1,16 +1,3 @@
-/**
- * 压缩后的段归档判定。
- *
- * 只归档：
- *   - 完全位于当前有效压缩链尾之前的段
- *   - 不含压缩事件、prune 事件或锚点事件的段
- *   - 不是当前活跃段的段
- *
- * 原文件不删除，只打 `.archived` 标记；read() 默认跳过，readAll() 仍能读。
- *
- * @module if/compaction/archive
- */
-
 import type { EventStore } from '../core/store.ts'
 import { findProjectionStart } from '../projections/history.ts'
 import { buildCompactionIndex } from './project.ts'

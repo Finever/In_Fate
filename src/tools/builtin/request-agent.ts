@@ -1,11 +1,3 @@
-/**
- * request_agent：受理一项子 agent 请求，立即返回 requestId。
- *
- * 它不是同步工具——结果通过 agent 流与一条系统消息回送。
- *
- * @module if/tools/builtin/request-agent
- */
-
 import type { AgentManager } from '../../agents/manager.ts'
 import type { PresetRegistry } from '../../agents/presets.ts'
 import type { ModelRef, SubagentPolicy } from '../../agents/settings.ts'

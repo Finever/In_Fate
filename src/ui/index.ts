@@ -1,12 +1,3 @@
-/**
- * UI 元数据索引（SQLite）。
- *
- * 事件日志仍是唯一真相；这里只存“渲染需要的卡片快照”，
- * 用于按轮分页，避免每次翻页都 read() 全量事件。索引可重建。
- *
- * @module if/ui/index
- */
-
 import { mkdirSync, statSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'

@@ -1,11 +1,3 @@
-/**
- * 记忆空间表：告诉 agent 现在有哪些私域/共有空间可读写。
- *
- * 只给元数据（id、类型、权限、说明），不注入正文；正文由工具按需取。
- *
- * @module if/context/memory-spaces
- */
-
 import type { ContextSection, PipelineContext } from './types.ts'
 import type { MemorySpaceAccess } from '../memory/space-access.ts'
 

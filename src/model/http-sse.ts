@@ -1,9 +1,3 @@
-/**
- * 发 POST 并读 SSE，统一超时、中断与非 2xx。
- *
- * @module if/model/http-sse
- */
-
 import { ModelHttpError, ModelTimeoutError, parseRetryAfter } from './retry.ts'
 import { readSSE, type SSEMessage } from './sse.ts'
 

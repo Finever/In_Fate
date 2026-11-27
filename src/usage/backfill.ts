@@ -1,12 +1,3 @@
-/**
- * 从历史会话事件回填用量账本。
- *
- * 旧会话只有 turn.completed 聚合，按 legacy-aggregate 记一轮；
- * 新会话的 usage.recorded 也会被幂等重放。整段回填只读事件，不碰会话文件。
- *
- * @module if/usage/backfill
- */
-
 import { createReadStream, existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'

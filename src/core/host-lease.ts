@@ -1,21 +1,3 @@
-/**
- * 进程级 host 锁：一个 dataRoot 同时只允许一个 host。
- *
- * 借鉴 DSH 的 session write lease：锁由内核持有，进程退出（包括崩溃）就
- * 自动释放，**不设 TTL**。一个还活着但卡死的 host 不该被后来者抢锁，否则
- * 两边会同时写同一份事件流。
- *
- * Node 没有 flock，这里用 Node 24 自带的 `node:sqlite`：在
- * `dataRoot/locks/host.db` 上开一个长期 `BEGIN IMMEDIATE` 事务。SQLite 的
- * POSIX fcntl / Windows LockFileEx 由内核维护，进程死亡时释放；第二个 host
- * 的 `BEGIN IMMEDIATE` 会立刻拿到 SQLITE_BUSY（errcode 5）。
- *
- * `host.holder.json` 只用于诊断，不参与判锁——它可能是崩溃留下的旧文件，
- * 真正的锁始终是那个打开的事务。
- *
- * @module if/core/host-lease
- */
-
 import {
   closeSync,
   existsSync,

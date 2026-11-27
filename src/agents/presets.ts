@@ -1,9 +1,3 @@
-/**
- * 预设注册表：代码只给结构，具体模型与预设值由外部配置提供。
- *
- * @module if/agents/presets
- */
-
 import { readFileSync } from 'node:fs'
 import type { AgentPreset } from './types.ts'
 

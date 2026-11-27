@@ -1,13 +1,3 @@
-/**
- * 内置模型服务商模板：只给端点，不猜模型。
- *
- * 这些只是「添加服务商」时的参考，不会自动注册；模型列表由用户用
- * 「读取模型列表」或手动添加。同一个模板可以带多种端点格式，
- * 例如 DeepSeek 同时提供 OpenAI Chat、Responses 与 Anthropic Messages。
- *
- * @module if/model/builtin
- */
-
 import type { EndpointConfig, ProviderConfig } from './types.ts'
 
 const endpoint = (

@@ -1,14 +1,3 @@
-/**
- * 跨进程文件锁：创建 `<target>.lock`，失败重试，超时报错。
- *
- * 锁文件里写 pid/host/startedAt：
- *   - 同机且进程已不在 → 视为过期，清掉重试
- *   - 跨机或文件损坏 → 用 mtime 超时兜底
- * 只用于“读-改-写”临界区；单次追加本身不强制加锁。
- *
- * @module if/core/lock
- */
-
 import { closeSync, openSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { hostname } from 'node:os'
 import { setTimeout as delay } from 'node:timers/promises'

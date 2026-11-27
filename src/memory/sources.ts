@@ -1,12 +1,3 @@
-/**
- * 记忆源：文件到角色的映射。
- *
- * 有 agent manifest 时按槽位读；没有时回退 SOUL / USER / FACT。
- * 读不到的文件跳过（一个文件缺失不阻断整轮）。
- *
- * @module if/memory/sources
- */
-
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'

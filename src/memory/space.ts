@@ -1,12 +1,3 @@
-/**
- * 记忆空间注册表：私域、共有空间、成员与继承。
- *
- * 落盘 `<memoryRoot>/spaces.json`；目录仍在 `detail/_<dir>/` 下，注册表只加
- * 归属和 ACL，不搬记忆文件。私域只允许对应 agent 读写；共有空间按成员表授权。
- *
- * @module if/memory/space
- */
-
 import {
   existsSync,
   mkdirSync,

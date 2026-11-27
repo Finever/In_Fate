@@ -1,14 +1,3 @@
-/**
- * UI 时间线投影：事件 → 可渲染的卡片。
- *
- * 这是给人看的投影，不是模型投影：
- *   - 模型看压缩后的尾部；UI 要看完整时间线
- *   - 全文不在这里展开，只给预览 + ref
- *   - 分页按轮（message.user/system → turn.completed），不切断工具配对
- *
- * @module if/ui/timeline
- */
-
 import type { Event } from '../core/events.ts'
 import type { PruneItem, PrunePayload } from '../compaction/types.ts'
 

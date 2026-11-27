@@ -1,15 +1,3 @@
-/**
- * 原话地址与检索。
- *
- * 地址形状：`年-月-日-<会话id>-n`。会话 id 里本身有连字符，所以解析
- * 必须从两端切：左边固定 10 位日期，右边是最后的 n。
- *
- * 检索口径与 find_quote.py 一致：只认有 text 的行，_meta 跳过，
- * 匹配的是“用户说的原话”，所以默认只收 userName 匹配的行。
- *
- * @module if/memory/quote
- */
-
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { assertSafeSegment } from '../core/safe-path.ts'

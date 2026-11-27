@@ -1,12 +1,3 @@
-/**
- * 工具注册表：增、删、改、启停、列表、变更订阅。
- *
- * 客户端可以随时 register / unregister / update / setEnabled，
- * 模型 spec 实时从 enabled 列表生成，不用重启。
- *
- * @module if/tools/registry
- */
-
 import type { ToolSpec } from '../model/types.ts'
 import {
   toModelSpec,

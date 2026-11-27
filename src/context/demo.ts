@@ -1,10 +1,3 @@
-/**
- * 上下文管线的最小验证：stable 两段 + 历史 + ephemeral，
- * 并确认同样的输入产出同样的 prefixHash。
- *
- * @module if/context/demo
- */
-
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

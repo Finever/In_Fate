@@ -1,11 +1,3 @@
-/**
- * session_create：agent 主动创建一个用户所有的会话，并投递第一条任务。
- *
- * 不产生父子所有权；createdBy 只做溯源，用户可删除、归档、撤销连接。
- *
- * @module if/tools/builtin/session-create
- */
-
 import type { ToolDefinition } from '../types.ts'
 
 export interface SpawnedSession {

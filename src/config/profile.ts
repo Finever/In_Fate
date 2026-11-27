@@ -1,11 +1,3 @@
-/**
- * Profile：一个场景的全部可变设定。
- *
- * 路径、时区、参与者都从这里来；核心代码不许写死任何一项。
- *
- * @module if/config/profile
- */
-
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 

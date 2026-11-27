@@ -1,12 +1,3 @@
-/**
- * 记忆库门面：给设置页用的文件树、内容编辑与结构操作。
- *
- * `log/` 永远只读；`.state/`、`.git/`、`indexlist.json`、`meta.json` 是系统件。
- * detail 的结构化校验仍交给 MemoryStore；这里负责路径、树、移动、回收站。
- *
- * @module if/memory/library
- */
-
 import { randomUUID } from 'node:crypto'
 import {
   existsSync,

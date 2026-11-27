@@ -1,10 +1,3 @@
-/**
- * 版本号唯一来源：仓库根目录的 VERSION。
- *
- * 发布脚本、CLI、HTTP 都读这里；不要在代码里再写死版本号。
- * @module if/version
- */
-
 import { readFileSync } from 'node:fs'
 
 function readVersion(): string {

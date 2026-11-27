@@ -1,12 +1,3 @@
-/**
- * 插件私有 KV。
- *
- * 一个插件一个 storage.json；不共享、不越界。
- * 写入是原子替换，大小有上限，坏了就备份后重置，不让宿主崩。
- *
- * @module if/plugins/storage
- */
-
 import { randomUUID } from 'node:crypto'
 import {
   existsSync,

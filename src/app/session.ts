@@ -1,11 +1,3 @@
-/**
- * 会话目录：一个会话一个事件文件。
- *
- * 只认 `sessions/<id>.jsonl`；分段文件 `<id>.jsonl.1` 属于原会话。
- *
- * @module if/app/session
- */
-
 import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import type { Event } from '../core/events.ts'

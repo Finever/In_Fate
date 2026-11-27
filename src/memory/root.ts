@@ -1,9 +1,3 @@
-/**
- * 记忆库根目录与布局：默认落在 `<dataRoot>/memory`，不再要求外部路径。
- *
- * @module if/memory/root
- */
-
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Profile } from '../config/profile.ts'

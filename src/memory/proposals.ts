@@ -1,12 +1,3 @@
-/**
- * 记忆提议：worker 不直写 detail / identity，只提交 proposal。
- *
- * detail proposal 由 MemoryStore 落库；identity proposal 由 MemoryIdentityStore
- * 做受控 section 替换/追加。proposal 本身是普通 JSON 文件。
- *
- * @module if/memory/proposals
- */
-
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'

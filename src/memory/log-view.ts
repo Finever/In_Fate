@@ -1,12 +1,3 @@
-/**
- * 日志（hook 流水）的只读视图：树、分页、全库搜索。
- *
- * 日志根：<memoryRoot>/log/<年>/<月>/<年-月-日>/<会话>.jsonl。
- * 只读；坏行跳过，不让一个坏行挡住整页。
- *
- * @module if/memory/log-view
- */
-
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { assertSafeSegment, assertWithin } from '../core/safe-path.ts'

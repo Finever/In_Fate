@@ -1,12 +1,3 @@
-/**
- * 摘要后台队列：写入/修改后各自排队，不占用对话会话。
- *
- * 同一个 target 只排一次；生成前比对 sourceDigest，内容没变直接 skipped。
- * 模型调用串行，避免一次记忆写入打出几十个并发请求。
- *
- * @module if/memory/summary-worker
- */
-
 import type { MemorySummaryStore } from './summary.ts'
 
 export type SummaryJobStatus = 'queued' | 'running' | 'done' | 'skipped' | 'error' | 'unavailable'

@@ -1,9 +1,3 @@
-/**
- * 真实模型子 agent：读 events.md，写一份报告。
- *
- * @module if/agents/live
- */
-
 import { join } from 'node:path'
 import { defaultProfile } from '../config/profile.ts'
 import { registerCoreEvents } from '../core/registry.ts'

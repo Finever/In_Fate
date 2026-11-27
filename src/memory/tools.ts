@@ -1,11 +1,3 @@
-/**
- * 记忆工具：搜索、读取、直写、更新、提议。
- *
- * 工具本身不判断“主/子”；只检查当前 session 的 MemoryGrant。
- *
- * @module if/memory/tools
- */
-
 import type { MemoryAccess } from './access.ts'
 import type { MemoryPolicyStore } from './policy.ts'
 import type { MemoryProposalStore } from './proposals.ts'

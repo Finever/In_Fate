@@ -1,11 +1,3 @@
-/**
- * session_message：给已连接会话投递一条消息。
- *
- * 目标空闲时按 wake 开花；目标正在跑时消息进收件箱，下一步模型请求可见。
- *
- * @module if/tools/builtin/session-message
- */
-
 import type {
   SendSessionMessageInput,
   SessionMessageDelivery,

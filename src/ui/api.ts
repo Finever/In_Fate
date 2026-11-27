@@ -1,11 +1,3 @@
-/**
- * UI API 的返回形状与小工具。
- *
- * 这里不读文件；读事件/读 spill 由 app 层注入，保持可测试。
- *
- * @module if/ui/api
- */
-
 export interface UiPayloadInput {
   /** spill/blob 引用 */
   readonly ref?: string

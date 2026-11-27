@@ -1,12 +1,3 @@
-/**
- * 内容寻址 blob 库。
- *
- * 事件只存预览 + ref；全文按 SHA-256 存在本地。写入顺序是
- * “先 blob 后事件”，读时 ref 只接受固定形状，拼路径后再断言在根内。
- *
- * @module if/core/blobs
- */
-
 import { createHash, randomUUID } from 'node:crypto'
 import {
   closeSync,

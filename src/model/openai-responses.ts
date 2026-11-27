@@ -1,14 +1,3 @@
-/**
- * OpenAI Responses 适配器（流式）。
- *
- * 与 Chat Completions 的差别：
- *   - 输入是扁平 item 列表，工具结果 / 工具调用都是顶层 item；
- *   - 系统提示放 instructions；
- *   - SSE 是带 type 的事件流，而不是 choices[].delta。
- *
- * @module if/model/openai-responses
- */
-
 import type { HistoryMessage } from '../projections/history.ts'
 import type { ChatRequest } from './chat.ts'
 import { fallbackCallId, systemText, textOf } from './chat.ts'

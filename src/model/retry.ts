@@ -1,12 +1,3 @@
-/**
- * 模型请求的重试、超时与退避策略。
- *
- * 流式请求只有在“还没有向调用方吐过任何事件”时才允许重试；
- * 一旦吐过文本或 tool_call，重试会造成重复内容，宁可失败。
- *
- * @module if/model/retry
- */
-
 export interface ModelRetryPolicy {
   /** 总尝试次数，含第一次；1 表示不重试 */
   readonly maxAttempts?: number

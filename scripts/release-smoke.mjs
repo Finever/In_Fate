@@ -1,11 +1,3 @@
-/**
- * 发布包冒烟测试：独立启动后端，验证 health / version / UI 静态文件。
- *
- * 用法：
- *   node scripts/release-smoke.mjs [release/In_First]
- *   ./runtime/node smoke.mjs
- */
-
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'

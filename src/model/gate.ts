@@ -1,15 +1,3 @@
-/**
- * 模型请求准入：provider 级并发、排队、速率与共享退避。
- *
- * 目的不是限制单会话，而是防止多个会话同时把同一个网关打爆：
- *   - 每个 provider 最多 N 个进行中的请求；
- *   - 可选每分钟请求数；
- *   - 429/5xx 后整个 provider 共享 cooldown；
- *   - 主交互优先于普通任务，后台最后。
- *
- * @module if/model/gate
- */
-
 import { ModelHttpError } from './retry.ts'
 
 export type ModelPriority = 'interactive' | 'normal' | 'background'

@@ -1,12 +1,3 @@
-/**
- * websearch：DeepSeek Search API。
- *
- * 独立工具，不塞进模型请求。按成功请求计费；失败与空结果不收费。
- * 只返回 url/title/snippet，正文交给 fetch。
- *
- * @module if/tools/builtin/websearch
- */
-
 import type { ToolDefinition, ToolResult } from '../types.ts'
 
 const DEFAULT_BASE = 'https://api.deepseek.com/v1/tools'

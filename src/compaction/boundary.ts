@@ -1,9 +1,3 @@
-/**
- * 计算可压区间：闭合轮、保留最近 N 轮、不切断工具配对。
- *
- * @module if/compaction/boundary
- */
-
 import type { Event } from '../core/events.ts'
 import { groupTurns, userTurnPolicy } from '../turn/policy.ts'
 import type { TokenEstimator } from './estimate.ts'

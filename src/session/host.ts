@@ -1,12 +1,3 @@
-/**
- * 每会话执行队列：同一个 session 同时只允许一个 turn。
- *
- * 这不是模型请求锁；跨会话仍然并行。它只保证同一份上下文不会被两个
- * turn 交错写坏。
- *
- * @module if/session/host
- */
-
 interface QueueEntry {
   readonly run: () => Promise<void>
   readonly cancel: (error: Error) => void

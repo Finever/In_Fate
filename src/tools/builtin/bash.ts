@@ -1,10 +1,3 @@
-/**
- * bash：执行 shell 命令，可指定编码、cwd、超时。
- * stdout 与 stderr 分开保留在 structured 里；text 是两者拼接。
- *
- * @module if/tools/builtin/bash
- */
-
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'

@@ -1,9 +1,3 @@
-/**
- * 轻量服务容器：实例级、逆序释放、服务名拼错时列出可用项。
- *
- * @module if/app/container
- */
-
 export class Container {
   private readonly services = new Map<string, unknown>()
   private readonly disposers: { readonly name: string; readonly dispose: () => void | Promise<void> }[] = []

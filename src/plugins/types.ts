@@ -1,15 +1,3 @@
-/**
- * IF 插件契约 v0。
- *
- * 边界：
- *   - v0 只认 builtin / dev 两种插件，都在宿主进程内运行；
- *   - capabilities 是宿主 API 的准入声明，不是进程隔离；
- *   - tool 用现有 ToolDefinition，不另造一套工具接口；
- *   - ui-panel 只给沙箱 iframe 和 postMessage，不给宿主 DOM。
- *
- * @module if/plugins/types
- */
-
 import type { ToolDefinition } from '../tools/types.ts'
 
 /** 宿主接受的插件 API 大版本。不兼容的插件拒绝加载，不静默降级。 */

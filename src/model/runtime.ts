@@ -1,11 +1,3 @@
-/**
- * 适配器共用的重试 / 准入 / key 轮换。
- *
- * 流一旦吐过事件就不再重试；多个 key 时，401/403 会换下一个 key。
- *
- * @module if/model/runtime
- */
-
 import type { ChatRequest } from './chat.ts'
 import { resolveApiKeyEntries } from './registry.ts'
 import {

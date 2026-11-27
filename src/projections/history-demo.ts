@@ -1,9 +1,3 @@
-/**
- * 会话历史投影的最小验证：正常工具往返 + 一个悬空调用。
- *
- * @module if/projections/history-demo
- */
-
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

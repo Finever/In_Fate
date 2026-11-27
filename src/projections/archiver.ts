@@ -1,12 +1,3 @@
-/**
- * 归档器：事件流的消费者。
- *
- * 只读事件、写别处，永远不往事件流里回写。游标用“已消费的行数”，
- * 重启续写不重复；未闭合的轮留到下次。
- *
- * @module if/projections/archiver
- */
-
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { Event } from '../core/events.ts'

@@ -1,9 +1,3 @@
-/**
- * 事件类型注册表：加类型不改核心，只注册一条 spec。
- *
- * @module if/core/registry
- */
-
 import type { CoreEventType, EventType } from './events.ts'
 
 /** 一种事件类型的定义。版本独立于 envelope 版本。 */

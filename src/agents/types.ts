@@ -1,12 +1,3 @@
-/**
- * 子 agent 的请求、预设与结果。
- *
- * 预设绑定模型候选链；请求只选预设，不直接指定模型。
- * 执行是异步的：受理返回 requestId，结果走事件与系统消息。
- *
- * @module if/agents/types
- */
-
 export interface ModelChoice {
   readonly provider: string
   readonly model: string

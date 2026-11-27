@@ -1,12 +1,3 @@
-/**
- * 插件注册表：加载、激活、停用、错误隔离。
- *
- * v0 只允许 builtin 和显式开启的 dev 插件，二者都在宿主进程内。
- * 这里不假装有沙箱；第三方隔离留给后续的插件宿主。
- *
- * @module if/plugins/registry
- */
-
 import { randomUUID } from 'node:crypto'
 import {
   existsSync,

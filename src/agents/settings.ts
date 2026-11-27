@@ -1,11 +1,3 @@
-/**
- * 主 agent 的运行设置：模型、子 agent 可用模型、预设与工具策略。
- *
- * 存在数据目录，不进记忆库 git；人格文件 与 agent.json 仍是身份层。
- *
- * @module if/agents/settings
- */
-
 import {
   existsSync,
   mkdirSync,

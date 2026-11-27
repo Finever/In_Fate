@@ -1,9 +1,3 @@
-/**
- * 压缩失败注入：独立 preview、冷却、摘要输入限长。
- *
- * @module if/compaction/failure-demo
- */
-
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

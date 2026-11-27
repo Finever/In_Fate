@@ -1,11 +1,3 @@
-/**
- * 把旧的 identity:SOUL/USER/FACT 映射到 manifest 槽位。
- *
- * proposal/tool 仍用旧文件 id；实际读写落到 agents/<id>/identity/<slot>.md。
- *
- * @module if/memory/identity-adapter
- */
-
 import type {
   IdentityApplyResult,
   IdentityFile,

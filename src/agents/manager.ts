@@ -1,11 +1,3 @@
-/**
- * 子 agent 调度器：请求队列、并发池、按来源/预设限流、状态与中断。
- *
- * 受理即返回；执行由池异步进行；终态写 agent 流并回送。
- *
- * @module if/agents/manager
- */
-
 import { randomUUID } from 'node:crypto'
 import type { Event, NewEvent } from '../core/events.ts'
 import type { SessionWriter } from '../core/session-writer.ts'

@@ -1,13 +1,3 @@
-/**
- * 用量账本（SQLite）。
- *
- * 事件流仍是真相；账本只是可重建的投影，用来做全局统计和图表。
- * 首次打开会从历史 turn.completed 回填 legacy 聚合；新会话由 run loop
- * 每步模型调用落 usage.recorded，再由账本消费。
- *
- * @module if/usage/ledger
- */
-
 import { mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'

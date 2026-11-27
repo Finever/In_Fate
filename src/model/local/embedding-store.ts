@@ -1,11 +1,3 @@
-/**
- * 本地 embedding 模型安装器：下载、校验、激活、删除。
- *
- * 权重放 `<dataRoot>/models/embeddings/<id>/`，不进仓库，也不进记忆库 git。
- *
- * @module if/model/local/embedding-store
- */
-
 import { createHash } from 'node:crypto'
 import { once } from 'node:events'
 import {

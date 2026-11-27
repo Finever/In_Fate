@@ -1,23 +1,3 @@
-/**
- * 开发/发布辅助：本机 CONNECT 隧道。
- *
- * 症状：GitHub 直连时好时坏——DNS 轮询里混着连不通的 IP，git 的 libcurl
- * 只试解析到的第一个地址，碰上坏的就 21 秒超时（"Could not connect"）。
- *
- * 这个脚本在 127.0.0.1 起一个最小 CONNECT 代理：对每个目标主机，把 DNS
- * 结果和一份已知可用的兜底 IP 池合起来，逐地址重试（两轮）；只做 TCP
- * 转发，不解密、不改内容。
- *
- * 用法：
- *   node tools/gh-tunnel.cjs 17777
- *   git -c http.proxy=http://127.0.0.1:17777 push github main
- *   git -c http.proxy=http://127.0.0.1:17777 push github V0.0.1.x
- *   curl --proxy http://127.0.0.1:17777 https://api.github.com/...
- *   curl --proxy http://127.0.0.1:17777 -X POST --data-binary @file \
- *     https://uploads.github.com/repos/.../releases/<id>/assets?name=<file>
- *
- * 用完 Ctrl-C。不要把它当常驻服务。
- */
 const net = require('node:net')
 const dns = require('node:dns')
 

@@ -1,9 +1,3 @@
-/**
- * read：按编码读文件，结果带 bytes / encoding / mime。
- *
- * @module if/tools/builtin/read
- */
-
 import { readFileSync } from 'node:fs'
 import { extname, resolve } from 'node:path'
 import type { ToolDefinition } from '../types.ts'

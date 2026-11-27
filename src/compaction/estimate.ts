@@ -1,11 +1,3 @@
-/**
- * token 估算：没有 tokenizer 时用字符数 × 校准系数。
- *
- * 每拿到一次真实 usage 就校准一次；中英混排默认 0.45 token/字符。
- *
- * @module if/compaction/estimate
- */
-
 import type { ToolSpec } from '../model/types.ts'
 import type { HistoryMessage } from '../projections/history.ts'
 

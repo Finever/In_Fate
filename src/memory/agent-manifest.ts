@@ -1,13 +1,3 @@
-/**
- * Agent manifest：`<memoryRoot>/agents/<agentId>/agent.json`。
- *
- * 身份槽位 id 稳定；label 是给 UI/模型看的名字，file 是 identity 目录里的
- * 文件名。默认三段是 Principle / Preference / Prompt；旧 SOUL/USER/FACT 只是
- * legacy 来源，不是系统假设。
- *
- * @module if/memory/agent-manifest
- */
-
 import {
   existsSync,
   mkdirSync,

@@ -1,13 +1,3 @@
-/**
- * 上下文管线：stable → dynamic → ephemeral。
- *
- * stable 只拼接、不裁剪；dynamic 按优先级填，超预算丢低的；
- * ephemeral 必进。历史整段放在 stable 之后、dynamic 之前。
- * prefixHash 只对 stable 段做——它是缓存前缀的证据。
- *
- * @module if/context/pipeline
- */
-
 import { createHash } from 'node:crypto'
 import type { Profile } from '../config/profile.ts'
 import type { HistoryMessage } from '../projections/history.ts'

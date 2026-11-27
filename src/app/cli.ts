@@ -1,12 +1,3 @@
-/**
- * CLI：chat / run / tools / agents / compact / config / doctor。
- *
- * chat 是 REPL；退出时先等子 agent 到终态，再关闭调度器与存储。
- * 危险工具执行前由 approvalHandler 询问；非交互环境默认拒绝。
- *
- * @module if/app/cli
- */
-
 import { accessSync, constants, existsSync, mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { createInterface } from 'node:readline/promises'

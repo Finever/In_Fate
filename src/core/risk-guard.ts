@@ -1,12 +1,3 @@
-/**
- * AI 风险操作守卫：在工具审批之前，按工具名 + 参数做一次风险分级。
- *
- * 它不是沙箱，也不替代 FS/Network policy；只负责把“模型准备做的危险动作”
- * 标出来，交给审批/拒绝。默认只对 high 及以上发问，critical 直接拒绝。
- *
- * @module if/core/risk-guard
- */
-
 import { isAbsolute, relative, resolve } from 'node:path'
 
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical'

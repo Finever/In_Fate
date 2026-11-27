@@ -1,12 +1,3 @@
-/**
- * session_join：等待一组已连接会话完成。
- *
- * 调用后当前 turn 结束为 waiting；目标完成或超时后由调度器唤醒。
- * 不阻塞模型，也不占用并发槽位。
- *
- * @module if/tools/builtin/session-join
- */
-
 import type { SessionJoinScheduler } from '../../session/joins.ts'
 import type { ToolDefinition } from '../types.ts'
 

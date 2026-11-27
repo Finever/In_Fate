@@ -1,12 +1,3 @@
-/**
- * 子 agent 执行：预设模型候选链 → 上下文 → 模型 → 工具 → 回填。
- *
- * fresh 模式：不继承父对话，只拿请求里的 prompt/context/acceptance。
- * 工具白名单由调用方在建 Registry 时过滤；这里不注册派活工具。
- *
- * @module if/agents/run
- */
-
 import type { Profile } from '../config/profile.ts'
 import { renderContext } from '../context/pipeline.ts'
 import { staticSection, timeSection } from '../context/sections.ts'

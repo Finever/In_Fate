@@ -1,11 +1,3 @@
-/**
- * 身份文件的分区渲染：只允许替换或追加二级标题，不整文件覆盖。
- *
- * SOUL / USER / FACT 只是旧名字；新槽位也复用这套规则。
- *
- * @module if/memory/identity-sections
- */
-
 export function assertIdentitySection(section: string): void {
   if (section.trim().length === 0 || section.includes('\n') || section.length > 80) {
     throw new Error(`invalid identity section: ${JSON.stringify(section)}`)

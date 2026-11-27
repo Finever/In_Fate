@@ -1,17 +1,3 @@
-/**
- * 会话收件箱的未读边界。
- *
- * `session.message` 是持久化事件，但“是否已经进过某一轮的模型请求”由
- * `turn.completed.lastSeenSeq` 决定。不能用“最后一次 turn.completed 之后”
- * 当边界：消息可能在一轮进行中、模型请求投影之后才落盘，位置会排在那条
- * turn.completed 前面，却从未被看到。
- *
- * 这正是常见 agent loop 的 inbox 语义——消息在 `pre-step` 被
- * claim 之前都算 pending；这里用 `lastSeenSeq` 做同一个判断。
- *
- * @module if/session/inbox
- */
-
 import type { Event } from '../core/events.ts'
 
 export interface PendingSessionMessage {

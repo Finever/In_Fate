@@ -1,12 +1,3 @@
-/**
- * 事件 → 记忆库 log 行。
- *
- * 只抄不判断：不摘要、不打标签。名字从 profile 的 principals 解析，
- * 查不到就写 id，绝不写默认人名。
- *
- * @module if/projections/memory-log
- */
-
 import type { Event } from '../core/events.ts'
 import type { Profile } from '../config/profile.ts'
 import type { Projection, ProjectionContext } from './types.ts'

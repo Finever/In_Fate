@@ -1,12 +1,3 @@
-/**
- * 工具结果的幂等落盘。
- *
- * 同一轮里同一个 toolCallId 只允许一条 tool.result；
- * 重放、模型重复给 id、崩溃后重跑都先查这个集合，避免二次执行副作用。
- *
- * @module if/tools/persist
- */
-
 import type { Event, NewEvent } from '../core/events.ts'
 import { toolResultPayload } from './result-payload.ts'
 import type { ToolResult } from './types.ts'

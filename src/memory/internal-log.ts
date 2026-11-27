@@ -1,12 +1,3 @@
-/**
- * 内部记忆流水：从会话事件流生成 hook 兼容的 log 行。
- *
- * 会话事件是真相，log 是投影；进程崩溃后从最后一个 turn-end 重放，
- * 已写过的行用 `src`（event id）去重。
- *
- * @module if/memory/internal-log
- */
-
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Event } from '../core/events.ts'

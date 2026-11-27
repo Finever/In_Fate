@@ -1,12 +1,3 @@
-/**
- * 网络出口策略：默认不允许访问本机、私网、链路本地与云元数据地址。
- *
- * 先校验 URL 与主机名，再解析 DNS 并逐个地址检查；
- * 重定向由调用方逐跳复验，避免“公网 URL 跳私网”的绕过。
- *
- * @module if/core/network-policy
- */
-
 import { lookup } from 'node:dns/promises'
 import { BlockList, isIP } from 'node:net'
 

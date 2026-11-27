@@ -1,12 +1,3 @@
-/**
- * Anthropic Messages 适配器（流式）。
- *
- * 系统提示走顶层 system；工具结果必须以 user 消息里的 tool_result 回填，
- * 所以相邻同角色消息在这里合并。
- *
- * @module if/model/anthropic
- */
-
 import type { ContentBlock, HistoryMessage } from '../projections/history.ts'
 import type { ChatRequest } from './chat.ts'
 import { fallbackCallId, systemText, textOf } from './chat.ts'

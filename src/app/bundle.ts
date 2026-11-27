@@ -1,15 +1,3 @@
-/**
- * 默认装配：把配置变成一套能跑的服务。
- *
- * 原则：
- *   - 注册表都是实例，不碰模块级单例；
- *   - 默认只给只读工具，写/执行工具必须显式启用；
- *   - 子 agent 与主 agent 共用工具注册表，权限靠预设白名单收窄；
- *   - 关闭顺序由容器逆序保证，先停调度器再关存储。
- *
- * @module if/app/bundle
- */
-
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, renameSync, statSync } from 'node:fs'
 import { join } from 'node:path'

@@ -1,9 +1,3 @@
-/**
- * 压缩验证：触发、prune、fold、投影、滚动链。
- *
- * @module if/compaction/demo
- */
-
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

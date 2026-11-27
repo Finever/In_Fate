@@ -1,12 +1,3 @@
-/**
- * 记忆条目的形状：键序、枚举、编号规则。
- *
- * 这里只放**定义**，不放校验逻辑（在 validate.ts）和写入逻辑（在 write.ts）。
- * 三条枚举是记忆系统的硬规矩，不随场景改；要改，改这里一处。
- *
- * @module if/memory/entry
- */
-
 /** 文件顶层键序。 */
 export const FILE_KEYS = ['project', 'filename', 'introduction', 'entries'] as const
 

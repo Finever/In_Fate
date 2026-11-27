@@ -1,16 +1,3 @@
-/**
- * 内置更新器：安装布局、更新清单、下载暂存、pending 切换。
- *
- * 边界：
- *   - 布局是 In_First/In_Fate（程序） + In_First/data（数据）。
- *   - 运行中的进程不改自己的文件；只下载/解压到 In_First/.updates，
- *     写 pending.json，由启动脚本在下次启动前整体切换 In_Fate。
- *   - dataRoot 永远不动。
- *   - 没有配置更新源时，仍支持手动上传本地更新包。
- *
- * @module if/app/update
- */
-
 import { createHash } from 'node:crypto'
 import { cpSync, createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync, type Dirent } from 'node:fs'
 import { open } from 'node:fs/promises'

@@ -1,9 +1,3 @@
-/**
- * 工具层入口。
- *
- * @module if/tools
- */
-
 export * from './types.ts'
 export * from './schema.ts'
 export * from './registry.ts'

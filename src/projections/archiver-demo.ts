@@ -1,9 +1,3 @@
-/**
- * 归档游标失败注入：在事件文件前部插入一条事件，确认不重复归档。
- *
- * @module if/projections/archiver-demo
- */
-
 import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

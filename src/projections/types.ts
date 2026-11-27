@@ -1,9 +1,3 @@
-/**
- * 投影契约：只读事件，产出别的形状，永远不写回事件流。
- *
- * @module if/projections/types
- */
-
 import type { Event } from '../core/events.ts'
 import type { Profile } from '../config/profile.ts'
 

@@ -1,12 +1,3 @@
-/**
- * 工具契约：执行、结果、策略、审批。
- *
- * 结果永远是 envelope，不是 string；审批是驱动无关的中性决策；
- * 工具来源与启停属于注册表，不属于工具本体。
- *
- * @module if/tools/types
- */
-
 import type { ContentRef } from '../core/blobs.ts'
 import type { ToolSpec } from '../model/types.ts'
 

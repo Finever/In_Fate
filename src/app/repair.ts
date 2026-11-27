@@ -1,15 +1,3 @@
-/**
- * 崩溃后的会话修复。
- *
- * 只处理“最后一个 completed 之后还有用户消息”的尾巴：
- *   - 未配对的 tool.call 写 TOOL_OUTCOME_UNKNOWN，不自动重试
- *   - 补一条 aborted 的 turn.completed
- *
- * 不改已有事件；修完再 flush。重复调用是幂等的。
- *
- * @module if/app/repair
- */
-
 import type { Event, NewEvent } from '../core/events.ts'
 import type { SessionWriter } from '../core/session-writer.ts'
 import type { EventStore } from '../core/store.ts'

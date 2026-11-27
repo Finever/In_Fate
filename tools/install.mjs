@@ -1,22 +1,3 @@
-/**
- * In_Fate 内置安装器 / 卸载器 / 修复器。
- *
- * 从发布包根目录运行：
- *   node tools/install.mjs [--dir <安装目录>] [--data-dir <数据目录>]
- *                          [--portable] [--repair] [--dry-run]
- *                          [--no-shortcuts] [--no-registry]
- *                          [--uninstall] [--purge] [--force] [--quiet]
- *
- * 布局：<安装根>/In_Fate 是程序，<安装根>/data 是数据。
- * 安装版默认根：%USERPROFILE%\In_First。
- * 便携版（--portable）：根就是当前发布包目录，就地注册。
- *
- * Windows 快捷方式和卸载登记由 tools/windows-install.ps1 负责：
- * 先预检、写入后逐项回读验证，失败会回滚程序层并以非零退出。
- * 安装器只做首次部署、手动升级和修复；日常更新走程序内置更新器，
- * 它下载到 app/.updates，由启动脚本应用。
- */
-
 import { spawn, spawnSync } from 'node:child_process'
 import {
   appendFileSync,

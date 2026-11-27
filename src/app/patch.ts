@@ -1,12 +1,3 @@
-/**
- * 配置补丁：只改装配值，不改契约。
- *
- * 规则小而明确：undefined 跳过、null 删除可选字段、其余整字段替换。
- * 数组不深合并——候选链、工具白名单的顺序本身就是语义。
- *
- * @module if/app/patch
- */
-
 import type { AgentPoolConfig, AgentPreset } from '../agents/types.ts'
 import { DEFAULT_AGENT_POOL } from '../agents/types.ts'
 import { DEFAULT_COMPACTION, type CompactionConfig } from '../compaction/types.ts'

@@ -1,14 +1,3 @@
-/**
- * 路径与引用校验：所有外部字符串在拼路径之前先过这里。
- *
- * 规则小，位置固定：
- *   - sessionId / 日志段：只允许 ASCII 字母、数字、点、下划线、连字符
- *   - blob/spill ref：只允许内容寻址的形状
- *   - 拼完路径后再断言仍在根目录内，防符号链接/大小写/相对路径绕过
- *
- * @module if/core/safe-path
- */
-
 import { isAbsolute, relative, resolve } from 'node:path'
 
 export class IfPathError extends Error {

@@ -1,9 +1,3 @@
-/**
- * embedding 下载任务：给 UI 轮询用，进程内状态即可。
- *
- * @module if/model/local/embedding-jobs
- */
-
 import { randomUUID } from 'node:crypto'
 import type { EmbeddingInstallProgress, LocalEmbeddingStore } from './embedding-store.ts'
 
